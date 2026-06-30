@@ -37,6 +37,8 @@ SEARCH_RESULTS_LIMIT = 8
 ASSETS_DIR = Path(__file__).resolve().parent / "assets"
 PURCHASE_CONFIRM_IMAGE_PATH = ASSETS_DIR / "purchase-confirm.png"
 DELIVERY_READY_IMAGE_PATH = ASSETS_DIR / "delivery-ready.png"
+START_MENU_IMAGE_PATH = ASSETS_DIR / "start-menu.png"
+LEGACY_START_MENU_IMAGE_PATH = PURCHASE_CONFIRM_IMAGE_PATH
 DELIVERY_FILES_DIR = Path(__file__).resolve().parent / "data" / "deliveries"
 BUTTON_ICON_RULES: list[tuple[tuple[str, ...], str, str]] = [
     (("vip", "会员"), "💎", "vip"),
@@ -68,7 +70,6 @@ MENU_BUTTON_TEXTS = {
     BUTTON_ORDER_HISTORY,
     BUTTON_SWITCH_LANGUAGE,
 }
-START_MENU_IMAGE_PATH = PURCHASE_CONFIRM_IMAGE_PATH
 
 MENU_KEYBOARD = ReplyKeyboardMarkup(
     [
@@ -557,8 +558,9 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     )
     if update.callback_query is not None:
         await update.callback_query.answer()
-    if START_MENU_IMAGE_PATH.exists():
-        with START_MENU_IMAGE_PATH.open("rb") as photo_fp:
+    start_menu_image_path = START_MENU_IMAGE_PATH if START_MENU_IMAGE_PATH.exists() else LEGACY_START_MENU_IMAGE_PATH
+    if start_menu_image_path.exists():
+        with start_menu_image_path.open("rb") as photo_fp:
             if update.message is not None:
                 await update.message.reply_photo(photo=photo_fp, caption=text, parse_mode="HTML", reply_markup=MENU_KEYBOARD)
             elif update.callback_query is not None and update.callback_query.message is not None:

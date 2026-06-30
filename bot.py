@@ -559,17 +559,28 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if update.callback_query is not None:
         await update.callback_query.answer()
     start_menu_image_path = START_MENU_IMAGE_PATH if START_MENU_IMAGE_PATH.exists() else LEGACY_START_MENU_IMAGE_PATH
+    main_menu_inline = build_main_menu_inline()
     if start_menu_image_path.exists():
         with start_menu_image_path.open("rb") as photo_fp:
             if update.message is not None:
-                await update.message.reply_photo(photo=photo_fp, caption=text, parse_mode="HTML", reply_markup=MENU_KEYBOARD)
+                await update.message.reply_photo(
+                    photo=photo_fp,
+                    caption=text,
+                    parse_mode="HTML",
+                    reply_markup=main_menu_inline,
+                )
             elif update.callback_query is not None and update.callback_query.message is not None:
-                await update.callback_query.message.reply_photo(photo=photo_fp, caption=text, parse_mode="HTML", reply_markup=MENU_KEYBOARD)
+                await update.callback_query.message.reply_photo(
+                    photo=photo_fp,
+                    caption=text,
+                    parse_mode="HTML",
+                    reply_markup=main_menu_inline,
+                )
         return
     if update.message is not None:
-        await update.message.reply_text(text, parse_mode="HTML", reply_markup=MENU_KEYBOARD)
+        await update.message.reply_text(text, parse_mode="HTML", reply_markup=main_menu_inline)
     elif update.callback_query is not None and update.callback_query.message is not None:
-        await update.callback_query.message.reply_text(text, parse_mode="HTML", reply_markup=MENU_KEYBOARD)
+        await update.callback_query.message.reply_text(text, parse_mode="HTML", reply_markup=main_menu_inline)
 
 
 async def show_categories(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

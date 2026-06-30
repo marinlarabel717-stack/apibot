@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
@@ -179,10 +180,7 @@ def products_intro(category_name: str) -> str:
 
 
 def detail_notice() -> str:
-    return (
-        "❗未使用过的本店商品，请先少量购买测试，以免造成不必要的争议。\n"
-        "❗虚拟商品有时效和环境差异，请及时验货。"
-    )
+    return "❗️ 未使用过的本店商品，请先少量购买测试，以免造成不必要的争议。"
 
 
 def purchase_confirm_caption(product_name: str, unit_price: float, quantity: int) -> str:
@@ -225,26 +223,40 @@ def delivery_ready_caption(
     lines = [
         f"🛍 商品：{product_name}",
         f"📦 数量：{quantity}",
-        f"📬 打包完成：库存账号 {quantity_success}",
+        f"📬 打包完成：存活账号 {quantity_success}",
     ]
     if refund_amount > 0:
         lines.append(f"💸 已退款：{format_money(refund_amount)} USDT")
     return "\n".join(lines)
 
 
-def delivery_filename(task_id: str, file_url: str) -> str:
+def delivery_storage_filename(task_id: str, file_url: str) -> str:
     parsed = urlparse(file_url)
     candidate = Path(unquote(parsed.path)).name.strip()
-    if not candidate:
-        candidate = f"{task_id}.zip"
-    if Path(candidate).suffix.lower() != ".zip":
-        candidate = f"{Path(candidate).stem or task_id}.zip"
-    return candidate
+    suffix = Path(candidate).suffix.lower()
+    if not suffix:
+        suffix = ".zip"
+    return f"{task_id}{suffix}"
+
+
+def sanitize_delivery_name(value: str) -> str:
+    cleaned = re.sub(r'[<>:"/\\\\|?*]+', " ", str(value or ""))
+    cleaned = " ".join(cleaned.split()).strip(" .")
+    return cleaned or "商品"
+
+
+def delivery_display_filename(product_name: str, quantity: int, file_url: str) -> str:
+    parsed = urlparse(file_url)
+    candidate = Path(unquote(parsed.path)).name.strip()
+    suffix = Path(candidate).suffix.lower()
+    if not suffix:
+        suffix = ".zip"
+    return f"{sanitize_delivery_name(product_name)}-{max(int(quantity), 0)}{suffix}"
 
 
 def download_delivery_file(supplier: SupplierClient, task_id: str, file_url: str) -> Path:
     DELIVERY_FILES_DIR.mkdir(parents=True, exist_ok=True)
-    target_path = DELIVERY_FILES_DIR / delivery_filename(task_id, file_url)
+    target_path = DELIVERY_FILES_DIR / delivery_storage_filename(task_id, file_url)
     if target_path.exists() and target_path.stat().st_size > 0:
         return target_path
 
@@ -420,11 +432,9 @@ def render_product_detail_view(
     product_name = str(row.get("productName") or f"商品 {product_id}")
     text = (
         f"✅ 您正在购买：{product_name}\n\n"
-        f"📦 商品ID：{product_id}\n"
-        f"💰 价格：{safe_float(row.get('price')):.4f} USDT\n"
+        f"💰 价格：{format_money(safe_float(row.get('price')))} USDT\n\n"
         f"📊 库存：{safe_int(row.get('totalStock'))}\n\n"
-        f"{detail_notice()}\n\n"
-        f"手动购买命令：/buy {product_id} 1"
+        f"{detail_notice()}"
     )
     return text, build_product_detail_keyboard(product_id, category_id, page)
 
@@ -497,11 +507,9 @@ def render_product_detail_view_configured(
     sell_price = resolve_sell_price(settings, row)
     text = (
         f"✅ 您正在购买：{product_name}\n\n"
-        f"📦 商品ID：{product_id}\n"
-        f"💰 价格：{sell_price:.4f} USDT\n"
+        f"💰 价格：{format_money(sell_price)} USDT\n\n"
         f"📊 库存：{safe_int(row.get('totalStock'))}\n\n"
-        f"{detail_notice()}\n\n"
-        f"手动购买命令：/buy {product_id} 1"
+        f"{detail_notice()}"
     )
     return text, build_product_detail_keyboard(product_id, category_id, page)
 
@@ -787,7 +795,6 @@ async def execute_purchase(
     )
     balance = await call_blocking(store.get_balance, user_id)
     return (
-        "下单成功，已进入处理中。\n"
         f"订单号: {task_id}\n"
         f"商品: {product_name}\n"
         f"数量: {quantity}\n"
@@ -887,7 +894,6 @@ async def finalize_remote_order(
         )
         if changed and notify_user and final_row:
             lines = [
-                "订单已完成。",
                 f"订单号: {task_id}",
                 f"成功数量: {quantity_success}/{quantity}",
             ]
@@ -917,7 +923,11 @@ async def finalize_remote_order(
                         await context.bot.send_document(
                             chat_id=int(final_row["user_id"]),
                             document=document_fp,
-                            filename=zip_path.name,
+                            filename=delivery_display_filename(
+                                str(final_row.get("product_name") or f"商品 {final_row.get('product_id')}"),
+                                quantity,
+                                file_url,
+                            ),
                             reply_markup=MENU_KEYBOARD,
                         )
                 except Exception:

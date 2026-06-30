@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from pathlib import Path
 from typing import Any
+from urllib.parse import unquote, urlparse
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, Update
 from telegram.error import BadRequest
@@ -30,6 +32,10 @@ logger = logging.getLogger("apibot")
 
 PRODUCTS_PER_PAGE = 8
 SEARCH_RESULTS_LIMIT = 8
+ASSETS_DIR = Path(__file__).resolve().parent / "assets"
+PURCHASE_CONFIRM_IMAGE_PATH = ASSETS_DIR / "purchase-confirm.png"
+DELIVERY_READY_IMAGE_PATH = ASSETS_DIR / "delivery-ready.png"
+DELIVERY_FILES_DIR = Path(__file__).resolve().parent / "data" / "deliveries"
 BUTTON_PRODUCTS = "商品列表"
 BUTTON_MAIN_MENU = "主菜单"
 BUTTON_PROFILE = "个人中心"
@@ -110,6 +116,80 @@ def detail_notice() -> str:
         "❗未使用过的本店商品，请先少量购买测试，以免造成不必要的争议。\n"
         "❗虚拟商品有时效和环境差异，请及时验货。"
     )
+
+
+def purchase_confirm_caption(product_name: str, unit_price: float, quantity: int) -> str:
+    total_price = unit_price * quantity
+    return (
+        f"🛍 商品：{product_name}\n"
+        f"🪙 单价：{format_money(unit_price)} USDT\n"
+        f"📦 数量：{quantity}\n\n"
+        f"🧾 应付金额：{format_money(total_price)} USDT"
+    )
+
+
+def build_purchase_confirm_keyboard(
+    product_id: int,
+    quantity: int,
+    category_id: int,
+    page: int,
+) -> InlineKeyboardMarkup:
+    buttons: list[list[InlineKeyboardButton]] = [
+        [InlineKeyboardButton("✅ 确认购买", callback_data=f"cbuy:{product_id}:{quantity}")],
+    ]
+    if category_id > 0:
+        buttons.append(
+            [
+                InlineKeyboardButton("🏠 主菜单", callback_data="nav:menu"),
+                InlineKeyboardButton("🔙 返回商品", callback_data=f"prd:{product_id}:{category_id}:{page}"),
+            ]
+        )
+    else:
+        buttons.append([InlineKeyboardButton("🏠 主菜单", callback_data="nav:menu")])
+    return InlineKeyboardMarkup(buttons)
+
+
+def delivery_ready_caption(
+    product_name: str,
+    quantity: int,
+    quantity_success: int,
+    refund_amount: float,
+) -> str:
+    lines = [
+        f"🛍 商品：{product_name}",
+        f"📦 数量：{quantity}",
+        f"📬 打包完成：库存账号 {quantity_success}",
+    ]
+    if refund_amount > 0:
+        lines.append(f"💸 已退款：{format_money(refund_amount)} USDT")
+    return "\n".join(lines)
+
+
+def delivery_filename(task_id: str, file_url: str) -> str:
+    parsed = urlparse(file_url)
+    candidate = Path(unquote(parsed.path)).name.strip()
+    if not candidate:
+        candidate = f"{task_id}.zip"
+    if Path(candidate).suffix.lower() != ".zip":
+        candidate = f"{Path(candidate).stem or task_id}.zip"
+    return candidate
+
+
+def download_delivery_file(supplier: SupplierClient, task_id: str, file_url: str) -> Path:
+    DELIVERY_FILES_DIR.mkdir(parents=True, exist_ok=True)
+    target_path = DELIVERY_FILES_DIR / delivery_filename(task_id, file_url)
+    if target_path.exists() and target_path.stat().st_size > 0:
+        return target_path
+
+    temp_path = target_path.with_suffix(target_path.suffix + ".part")
+    with supplier.session.get(file_url, timeout=supplier.settings.api_timeout_seconds, stream=True) as response:
+        response.raise_for_status()
+        with temp_path.open("wb") as handle:
+            for chunk in response.iter_content(chunk_size=65536):
+                if chunk:
+                    handle.write(chunk)
+    temp_path.replace(target_path)
+    return target_path
 
 
 async def reply_inline(update: Update, text: str, reply_markup: InlineKeyboardMarkup | None = None) -> None:
@@ -251,7 +331,7 @@ def render_products_view(
 
 
 def build_product_detail_keyboard(product_id: int, category_id: int, page: int) -> InlineKeyboardMarkup:
-    buttons: list[list[InlineKeyboardButton]] = [[InlineKeyboardButton("✅ 购买", callback_data=f"qbuy:{product_id}:1")]]
+    buttons: list[list[InlineKeyboardButton]] = [[InlineKeyboardButton("✅ 购买", callback_data=f"qbuy:{product_id}:1:{category_id}:{page}")]]
     if category_id > 0:
         buttons.append(
             [
@@ -669,13 +749,40 @@ async def finalize_remote_order(
             ]
             if refund_amount > 0:
                 lines.append(f"已退款: {format_money(refund_amount)} USDT")
-            if file_url:
-                lines.append(f"下载地址: {file_url}")
             await context.bot.send_message(
                 chat_id=int(final_row["user_id"]),
                 text="\n".join(lines),
                 reply_markup=MENU_KEYBOARD,
             )
+            if file_url:
+                try:
+                    zip_path = await call_blocking(download_delivery_file, supplier, task_id, file_url)
+                    if DELIVERY_READY_IMAGE_PATH.exists():
+                        with DELIVERY_READY_IMAGE_PATH.open("rb") as photo_fp:
+                            await context.bot.send_photo(
+                                chat_id=int(final_row["user_id"]),
+                                photo=photo_fp,
+                                caption=delivery_ready_caption(
+                                    str(final_row.get("product_name") or f"商品 {final_row.get('product_id')}"),
+                                    quantity,
+                                    quantity_success,
+                                    refund_amount,
+                                ),
+                            )
+                    with zip_path.open("rb") as document_fp:
+                        await context.bot.send_document(
+                            chat_id=int(final_row["user_id"]),
+                            document=document_fp,
+                            filename=zip_path.name,
+                            reply_markup=MENU_KEYBOARD,
+                        )
+                except Exception:
+                    logger.exception("发送订单 zip 文件失败: %s", task_id)
+                    await context.bot.send_message(
+                        chat_id=int(final_row["user_id"]),
+                        text=f"zip 文件发送失败，请稍后用 /order {task_id} 重试。",
+                        reply_markup=MENU_KEYBOARD,
+                    )
         summary = f"订单完成，成功数量 {quantity_success}/{quantity}"
         if refund_amount > 0:
             summary += f"，已退款 {format_money(refund_amount)} USDT"
@@ -708,7 +815,7 @@ async def order(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         f"结果: {summary}",
     ]
     if local_order.get("file_url"):
-        lines.append(f"下载地址: {local_order['file_url']}")
+        lines.append("发货文件: 机器人会直接发送 zip 文件")
     await update.message.reply_text("\n".join(lines), reply_markup=MENU_KEYBOARD)
 
 
@@ -932,19 +1039,62 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await reply_inline(update, text, keyboard)
         return
 
-    if action == "qbuy" and len(parts) == 3:
+    if action == "qbuy" and len(parts) == 5:
+        product_id = safe_int(parts[1], -1)
+        quantity = safe_int(parts[2], 0)
+        category_id = safe_int(parts[3], 0)
+        page = safe_int(parts[4], 0)
+        if product_id <= 0 or quantity <= 0:
+            await reply_inline(update, "快捷购买参数不合法。")
+            return
+        try:
+            payload = await call_blocking(supplier.get_product_detail, product_id)
+        except SupplierApiError as exc:
+            await reply_inline(update, f"获取商品详情失败: {exc}")
+            return
+        row = payload.get("data") or {}
+        product_name = str(row.get("productName") or f"商品 {product_id}")
+        unit_price = safe_float(row.get("price"))
+        caption = purchase_confirm_caption(product_name, unit_price, quantity)
+        keyboard = build_purchase_confirm_keyboard(product_id, quantity, category_id, page)
+        await query.answer()
+        if query.message is not None and PURCHASE_CONFIRM_IMAGE_PATH.exists():
+            with PURCHASE_CONFIRM_IMAGE_PATH.open("rb") as photo_fp:
+                await query.message.reply_photo(
+                    photo=photo_fp,
+                    caption=caption,
+                    reply_markup=keyboard,
+                )
+        elif query.message is not None:
+            await query.message.reply_text(caption, reply_markup=keyboard)
+        else:
+            await reply_inline(update, caption, keyboard)
+        return
+
+    if action == "cbuy" and len(parts) == 3:
         user = update.effective_user
         product_id = safe_int(parts[1], -1)
         quantity = safe_int(parts[2], 0)
         if user is None or product_id <= 0 or quantity <= 0:
             await reply_inline(update, "快捷购买参数不合法。")
             return
+        await query.answer("正在创建订单...")
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except BadRequest:
+            pass
         try:
             result = await execute_purchase(context, user.id, user.username or "", product_id, quantity)
         except SupplierApiError as exc:
-            await reply_inline(update, f"获取商品详情失败: {exc}")
+            if query.message is not None:
+                await query.message.reply_text(f"获取商品详情失败: {exc}", reply_markup=MENU_KEYBOARD)
+            else:
+                await reply_inline(update, f"获取商品详情失败: {exc}")
             return
-        await reply_inline(update, result)
+        if query.message is not None:
+            await query.message.reply_text(result, reply_markup=MENU_KEYBOARD)
+        else:
+            await reply_inline(update, result)
         return
 
     await query.answer("暂不支持这个按钮", show_alert=False)

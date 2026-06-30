@@ -102,10 +102,18 @@ BOT_TOKEN=
 ADMIN_USER_IDS=
 SHOP_TITLE=TG-Matrix 账号商城
 RECHARGE_TEXT=请联系管理员充值，或者让管理员使用 /add 给你调整余额。
+SELL_PRICE_ADD=0.2
 API_AUTH_HEADER_NAME=Authorization
 API_AUTH_HEADER_VALUE=
 API_AUTH_TRY_BEARER_VARIANTS=true
 ```
+
+仓库已经附带一份可直接改的 `.env.example` 成品模板，复制后主要替换：
+
+- `BOT_TOKEN`
+- `ADMIN_USER_IDS`
+- `API_AUTH_HEADER_VALUE`
+- 如果要微调利润，再改 `SELL_PRICE_ADD` 和 `SELL_PRICE_RULES_JSON`
 
 ### 3. 启动
 
@@ -143,6 +151,17 @@ API_EXTRA_QUERY_JSON={"uid":"10001"}
   - 商城标题，显示在主菜单、个人中心、充值页
 - `RECHARGE_TEXT`
   - “我要充值”页面展示的充值说明
+- `SELL_PRICE_ADD`
+  - 全局固定差价，最终售价 = 上游价格 + 这里的金额
+  - 例如 `SELL_PRICE_ADD=0.2`，上游 `1.3` 会卖 `1.5`
+- `SELL_PRICE_RULES_JSON`
+  - 按关键字单独覆盖固定差价
+  - 示例：`{"VIP":{"add":0.5},"Spam":{"add":0.1},"7年":{"add":0.8}}`
+- `INLINE_BUTTON_CUSTOM_EMOJI_ENABLED`
+  - 是否启用 Telegram custom emoji 按钮图标
+- `BUTTON_CUSTOM_EMOJI_IDS_JSON`
+  - 按语义 key 配置按钮 custom emoji
+  - 已支持：`vip`、`spam`、`liang`、`asia`、`west`、`africa`、`age_2_5`、`age_6_12`、`age_1_2y`、`age_3_4y`、`age_5y`、`age_7y`
 
 ## 管理员余额调整
 
@@ -156,4 +175,5 @@ API_EXTRA_QUERY_JSON={"uid":"10001"}
 - 用户购买走的是机器人本地余额，不是直接透传消耗你的上游额度。
 - 供应商订单失败或部分成功时，会自动退回本地余额。
 - 按钮购买现在会先弹“确认购买”图片卡片，订单完成后不再发下载链接，而是直接给用户发 zip 文件。
+- 亚洲 / 欧美 / 非洲 / 年龄段这类分类按钮已经内置固定图标规则；如果打开 custom emoji，会优先显示你在 `.env` 里配置的会员图标。
 - 这是一个独立起点，后续还可以继续加真充值、支付回调、自动上分等功能。

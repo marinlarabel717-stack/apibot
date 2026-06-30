@@ -43,8 +43,8 @@ def _parse_price_rules(raw: str, field_name: str) -> list[dict[str, Any]]:
     for keyword, rule_value in value.items():
         entry: dict[str, Any] = {
             "keyword": str(keyword).strip(),
-            "multiplier": None,
             "add": None,
+            "multiplier": None,
         }
         if not entry["keyword"]:
             continue
@@ -67,7 +67,6 @@ class Settings:
     admin_user_ids: set[int]
     shop_title: str
     recharge_text: str
-    sell_price_multiplier: float
     sell_price_add: float
     sell_price_rules: list[dict[str, Any]]
     inline_button_custom_emoji_enabled: bool
@@ -109,7 +108,6 @@ def load_settings() -> Settings:
             "RECHARGE_TEXT",
             "请联系管理员充值，或者让管理员使用 /add 给你调整余额。",
         ).strip(),
-        sell_price_multiplier=_parse_float(os.getenv("SELL_PRICE_MULTIPLIER", "1.0"), "SELL_PRICE_MULTIPLIER", 1.0),
         sell_price_add=_parse_float(os.getenv("SELL_PRICE_ADD", "0"), "SELL_PRICE_ADD", 0.0),
         sell_price_rules=_parse_price_rules(os.getenv("SELL_PRICE_RULES_JSON", "{}"), "SELL_PRICE_RULES_JSON"),
         inline_button_custom_emoji_enabled=os.getenv("INLINE_BUTTON_CUSTOM_EMOJI_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"},

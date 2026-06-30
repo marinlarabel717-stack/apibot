@@ -40,15 +40,15 @@ BUTTON_ICON_RULES: list[tuple[tuple[str, ...], str, str]] = [
     (("vip", "会员"), "💎", "vip"),
     (("spam",), "⚠️", "spam"),
     (("靓号",), "✨", "liang"),
-    (("亚洲",), "🌏", "asia"),
-    (("欧美", "欧洲", "美洲"), "🌍", "west"),
-    (("非洲",), "🌍", "africa"),
-    (("2-5", "2~5"), "🌱", "age_2_5"),
-    (("6-12",), "⭐", "age_6_12"),
-    (("1-2年", "1-2 年"), "💠", "age_1_2y"),
-    (("3-4年", "3-4 年"), "🔮", "age_3_4y"),
-    (("5年以上", "5年"), "👑", "age_5y"),
-    (("7年以上", "7年"), "🏆", "age_7y"),
+    (("亚洲", "东南亚", "亚区", "日本", "韩国", "香港", "台湾", "菲律宾", "印尼", "越南", "泰国", "马来西亚", "新加坡", "印度"), "🌏", "asia"),
+    (("欧美", "欧洲", "美洲", "美国", "英国", "德国", "法国", "加拿大", "澳洲"), "🌎", "west"),
+    (("非洲", "南非", "尼日利亚", "埃及", "摩洛哥", "肯尼亚"), "🦁", "africa"),
+    (("2-5", "2~5", "2-5天", "2~5天", "2至5天"), "🌱", "age_2_5"),
+    (("6-12", "6~12", "6-12天", "6~12天", "6至12天"), "⭐", "age_6_12"),
+    (("1-2年", "1-2 年", "1~2年", "1~2 年", "13-24月", "12-24月"), "💠", "age_1_2y"),
+    (("3-4年", "3-4 年", "3~4年", "3~4 年", "36-48月"), "🔮", "age_3_4y"),
+    (("5年以上", "5年", "5+年", "60月"), "👑", "age_5y"),
+    (("7年以上", "7年", "7+年", "84月"), "🏆", "age_7y"),
 ]
 BUTTON_PRODUCTS = "商品列表"
 BUTTON_MAIN_MENU = "主菜单"
@@ -107,8 +107,8 @@ def build_price_match_text(row: dict[str, Any]) -> str:
 
 def resolve_sell_price(settings: Settings, row: dict[str, Any]) -> float:
     base_price = safe_float(row.get("price"))
-    multiplier = settings.sell_price_multiplier
     add = settings.sell_price_add
+    multiplier = 1.0
     match_text = build_price_match_text(row)
     for rule in settings.sell_price_rules:
         keyword = str(rule.get("keyword") or "").strip().lower()

@@ -27,6 +27,7 @@ class Settings:
     api_timeout_seconds: int
     api_auth_header_name: str
     api_auth_header_value: str
+    api_auth_try_bearer_variants: bool
     api_auth_query_name: str
     api_auth_query_value: str
     api_extra_headers: dict[str, str]
@@ -58,6 +59,7 @@ def load_settings() -> Settings:
         api_timeout_seconds=int(os.getenv("API_TIMEOUT_SECONDS", "20")),
         api_auth_header_name=os.getenv("API_AUTH_HEADER_NAME", "").strip(),
         api_auth_header_value=os.getenv("API_AUTH_HEADER_VALUE", "").strip(),
+        api_auth_try_bearer_variants=os.getenv("API_AUTH_TRY_BEARER_VARIANTS", "true").strip().lower() not in {"0", "false", "no", "off"},
         api_auth_query_name=os.getenv("API_AUTH_QUERY_NAME", "").strip(),
         api_auth_query_value=os.getenv("API_AUTH_QUERY_VALUE", "").strip(),
         api_extra_headers=_parse_json_map(os.getenv("API_EXTRA_HEADERS_JSON", "{}"), "API_EXTRA_HEADERS_JSON"),
@@ -65,4 +67,3 @@ def load_settings() -> Settings:
         database_path=database_path,
         order_poll_seconds=max(10, int(os.getenv("ORDER_POLL_SECONDS", "20"))),
     )
-

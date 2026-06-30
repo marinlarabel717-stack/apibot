@@ -92,6 +92,7 @@ BOT_TOKEN=
 ADMIN_USER_IDS=
 API_AUTH_HEADER_NAME=
 API_AUTH_HEADER_VALUE=
+API_AUTH_TRY_BEARER_VARIANTS=true
 API_AUTH_QUERY_NAME=
 API_AUTH_QUERY_VALUE=
 ```
@@ -108,7 +109,8 @@ python bot.py
 
 ```text
 API_AUTH_HEADER_NAME=Authorization
-API_AUTH_HEADER_VALUE=Bearer xxxxx
+API_AUTH_HEADER_VALUE=xxxxx
+API_AUTH_TRY_BEARER_VARIANTS=true
 ```
 
 ### 示例 2：对方给的是 Query Token
@@ -130,4 +132,4 @@ API_EXTRA_QUERY_JSON={"uid":"10001"}
 - 用户购买走的是 **机器人本地余额**，不是直接透传让任何人消耗你的上游额度。
 - 供应商订单失败或部分成功时，会自动退回本地余额。
 - 这个仓库现在是一个可跑的独立起点，等你拿到上游认证细节后，就可以继续补真正的通道。
-
+- 如果认证 header 用的是 `Authorization`，程序默认会自动尝试 `Authorization: key` 和 `Authorization: Bearer key` 两种格式。

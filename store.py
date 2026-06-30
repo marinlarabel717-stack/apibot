@@ -198,6 +198,23 @@ class Store:
             ).fetchall()
             return [dict(row) for row in rows]
 
+    def get_user_summary(self, user_id: int) -> dict[str, float]:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT
+                    COALESCE(SUM(CASE WHEN state != 'failed' THEN total_price - refund_amount ELSE 0 END), 0) AS total_spent,
+                    COALESCE(SUM(CASE WHEN state != 'failed' THEN quantity ELSE 0 END), 0) AS total_quantity
+                FROM orders
+                WHERE user_id = ?
+                """,
+                (int(user_id),),
+            ).fetchone()
+            return {
+                "total_spent": float(row["total_spent"]) if row else 0.0,
+                "total_quantity": float(row["total_quantity"]) if row else 0.0,
+            }
+
     def list_processing_orders(self, limit: int = 100) -> list[dict[str, Any]]:
         with self._connect() as conn:
             rows = conn.execute(
@@ -255,4 +272,3 @@ class Store:
             conn.commit()
             fresh = conn.execute("SELECT * FROM orders WHERE task_id = ?", (str(task_id),)).fetchone()
             return dict(fresh) if fresh else None, True
-

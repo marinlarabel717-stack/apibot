@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import html
 import logging
 import re
 from pathlib import Path
@@ -55,11 +56,25 @@ BUTTON_PRODUCTS = "商品列表"
 BUTTON_MAIN_MENU = "主菜单"
 BUTTON_PROFILE = "个人中心"
 BUTTON_RECHARGE = "我要充值"
+BUTTON_ACCOUNT_LIST = "🗂 账号列表"
+BUTTON_RECHARGE_BALANCE = "💰 充值余额"
+BUTTON_PURCHASE_NOTICE = "📖 购买须知"
+BUTTON_ORDER_HISTORY = "📦 购买记录"
+BUTTON_SWITCH_LANGUAGE = "🌐 切换语言"
+MENU_BUTTON_TEXTS = {
+    BUTTON_ACCOUNT_LIST,
+    BUTTON_RECHARGE_BALANCE,
+    BUTTON_PURCHASE_NOTICE,
+    BUTTON_ORDER_HISTORY,
+    BUTTON_SWITCH_LANGUAGE,
+}
+START_MENU_IMAGE_PATH = PURCHASE_CONFIRM_IMAGE_PATH
 
 MENU_KEYBOARD = ReplyKeyboardMarkup(
     [
-        [KeyboardButton(BUTTON_PRODUCTS), KeyboardButton(BUTTON_MAIN_MENU)],
-        [KeyboardButton(BUTTON_PROFILE), KeyboardButton(BUTTON_RECHARGE)],
+        [KeyboardButton(BUTTON_ACCOUNT_LIST), KeyboardButton(BUTTON_RECHARGE_BALANCE)],
+        [KeyboardButton(BUTTON_PURCHASE_NOTICE), KeyboardButton(BUTTON_ORDER_HISTORY)],
+        [KeyboardButton(BUTTON_SWITCH_LANGUAGE)],
     ],
     resize_keyboard=True,
     is_persistent=True,
@@ -152,14 +167,20 @@ def plain_catalog_button(label: str, callback_data: str) -> InlineKeyboardButton
     return InlineKeyboardButton(text=label, callback_data=callback_data)
 
 
-def main_menu_text(settings: Settings) -> str:
+def build_start_menu_text(settings: Settings, user: Any, balance: float, total_spent: float, total_quantity: int) -> str:
+    display_name = html.escape((getattr(user, "full_name", "") or getattr(user, "first_name", "") or "朋友").strip())
+    if getattr(user, "username", ""):
+        greeting_name = f'<a href="https://t.me/{user.username}">{display_name}</a>'
+    else:
+        greeting_name = f'<a href="tg://user?id={user.id}">{display_name}</a>'
     return (
-        f"🏠 {settings.shop_title}\n\n"
-        "请选择你要使用的功能：\n"
-        "1. 商品列表\n"
-        "2. 个人中心\n"
-        "3. 我要充值\n\n"
-        "也可以直接发送关键字搜索商品。"
+        f"🌙 晚上好，{greeting_name}\n"
+        f"🆔 ID: <code>{user.id}</code>\n\n"
+        f"💰 USDT：<code>{format_money(balance)}</code>\n"
+        f"📊 消费金额：<code>{format_money(total_spent)}</code>\n"
+        f"📦 购买数量：<code>{total_quantity}</code>\n"
+        "-------------------------------\n"
+        f"📣 补货频道：{html.escape(settings.restock_channel)}"
     )
 
 
@@ -306,7 +327,7 @@ async def reply_help(update: Update, context: ContextTypes.DEFAULT_TYPE | None =
         "/supplier_balance - 管理员查看上游余额\n"
         "/add <user_id> <+金额/-金额> - 管理员调整余额\n"
         "/credit <user_id> <金额> - 兼容旧命令\n\n"
-        "底部也有常驻按钮：商品列表 / 主菜单 / 个人中心 / 我要充值。"
+        "底部也有常驻按钮：账号列表 / 充值余额 / 购买须知 / 购买记录 / 切换语言。"
     )
     await send_menu_message(update, text)
 
@@ -527,13 +548,31 @@ async def fetch_category_products(supplier: SupplierClient, category_id: int) ->
 async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     settings, store, _ = get_services(context)
     user = update.effective_user
-    if user is not None:
-        await call_blocking(store.ensure_user, user.id, user.username or "")
+    if user is None:
+        return
+    await call_blocking(store.ensure_user, user.id, user.username or "")
+    balance = await call_blocking(store.get_balance, user.id)
+    summary = await call_blocking(store.get_user_summary, user.id)
+    text = build_start_menu_text(
+        settings,
+        user,
+        balance,
+        safe_float(summary.get("total_spent")),
+        safe_int(summary.get("total_quantity")),
+    )
+    if update.callback_query is not None:
+        await update.callback_query.answer()
+    if START_MENU_IMAGE_PATH.exists():
+        with START_MENU_IMAGE_PATH.open("rb") as photo_fp:
+            if update.message is not None:
+                await update.message.reply_photo(photo=photo_fp, caption=text, parse_mode="HTML", reply_markup=MENU_KEYBOARD)
+            elif update.callback_query is not None and update.callback_query.message is not None:
+                await update.callback_query.message.reply_photo(photo=photo_fp, caption=text, parse_mode="HTML", reply_markup=MENU_KEYBOARD)
+        return
     if update.message is not None:
-        await send_menu_message(update, main_menu_text(settings))
-        await update.message.reply_text("点击下面按钮开始使用。", reply_markup=build_main_menu_inline())
-    elif update.callback_query is not None:
-        await reply_inline(update, "点击下面按钮开始使用。", build_main_menu_inline())
+        await update.message.reply_text(text, parse_mode="HTML", reply_markup=MENU_KEYBOARD)
+    elif update.callback_query is not None and update.callback_query.message is not None:
+        await update.callback_query.message.reply_text(text, parse_mode="HTML", reply_markup=MENU_KEYBOARD)
 
 
 async def show_categories(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -627,6 +666,22 @@ async def show_recharge(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         ]
     )
     await reply_inline(update, text, keyboard)
+
+
+async def show_notice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    text = (
+        "📖 购买须知\n\n"
+        "1. 首次购买建议先少量测试。\n"
+        "2. 虚拟商品请及时验货。\n"
+        "3. 已发货商品默认不支持无理由退换。\n"
+        "4. 如遇问题请尽快联系管理员处理。"
+    )
+    keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🏠 返回菜单", callback_data="nav:menu")]])
+    await reply_inline(update, text, keyboard)
+
+
+async def show_language(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await send_menu_message(update, "🌐 切换语言功能稍后补上，当前默认中文。")
 
 
 async def show_orders(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1074,17 +1129,23 @@ async def route_menu_text(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if update.message is None or not update.message.text:
         return
     text = update.message.text.strip()
-    if text == BUTTON_PRODUCTS:
+    if text == BUTTON_PRODUCTS or text == BUTTON_ACCOUNT_LIST:
         await show_categories(update, context)
         return
     if text == BUTTON_MAIN_MENU:
         await show_main_menu(update, context)
         return
-    if text == BUTTON_PROFILE:
-        await show_profile(update, context)
-        return
-    if text == BUTTON_RECHARGE:
+    if text == BUTTON_PROFILE or text == BUTTON_RECHARGE_BALANCE:
         await show_recharge(update, context)
+        return
+    if text == BUTTON_PURCHASE_NOTICE:
+        await show_notice(update, context)
+        return
+    if text == BUTTON_ORDER_HISTORY:
+        await show_orders(update, context)
+        return
+    if text == BUTTON_SWITCH_LANGUAGE:
+        await show_language(update, context)
 
 
 async def search_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1092,7 +1153,7 @@ async def search_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if update.message is None or not update.message.text:
         return
     keyword = update.message.text.strip()
-    if not keyword or keyword in {BUTTON_PRODUCTS, BUTTON_MAIN_MENU, BUTTON_PROFILE, BUTTON_RECHARGE}:
+    if not keyword or keyword in MENU_BUTTON_TEXTS | {BUTTON_PRODUCTS, BUTTON_MAIN_MENU, BUTTON_PROFILE, BUTTON_RECHARGE}:
         return
     try:
         payload = await call_blocking(supplier.search_products, keyword)
@@ -1135,7 +1196,7 @@ async def search_text_rich(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if update.message is None or not update.message.text:
         return
     keyword = update.message.text.strip()
-    if not keyword or keyword in {BUTTON_PRODUCTS, BUTTON_MAIN_MENU, BUTTON_PROFILE, BUTTON_RECHARGE}:
+    if not keyword or keyword in MENU_BUTTON_TEXTS | {BUTTON_PRODUCTS, BUTTON_MAIN_MENU, BUTTON_PROFILE, BUTTON_RECHARGE}:
         return
     try:
         payload = await call_blocking(supplier.search_products, keyword)
@@ -1318,7 +1379,8 @@ def build_application(settings: Settings) -> Application:
     application.add_handler(CommandHandler("add", credit))
     application.add_handler(CommandHandler("credit", credit))
     application.add_handler(CallbackQueryHandler(on_callback))
-    application.add_handler(MessageHandler(filters.Regex(f"^({BUTTON_PRODUCTS}|{BUTTON_MAIN_MENU}|{BUTTON_PROFILE}|{BUTTON_RECHARGE})$"), route_menu_text))
+    button_pattern = "^(" + "|".join(re.escape(text) for text in sorted(MENU_BUTTON_TEXTS | {BUTTON_PRODUCTS, BUTTON_MAIN_MENU, BUTTON_PROFILE, BUTTON_RECHARGE})) + ")$"
+    application.add_handler(MessageHandler(filters.Regex(button_pattern), route_menu_text))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, search_text_rich))
 
     if application.job_queue is not None:

@@ -712,7 +712,7 @@ async def execute_purchase(
     username: str,
     product_id: int,
     quantity: int,
-) -> str:
+) -> str | None:
     settings, store, supplier = get_services(context)
     await call_blocking(store.ensure_user, user_id, username)
 
@@ -793,15 +793,7 @@ async def execute_purchase(
         total_price,
         buy_payload,
     )
-    balance = await call_blocking(store.get_balance, user_id)
-    return (
-        f"订单号: {task_id}\n"
-        f"商品: {product_name}\n"
-        f"数量: {quantity}\n"
-        f"扣款: {format_money(total_price)} USDT\n"
-        f"剩余余额: {format_money(balance)} USDT\n\n"
-        f"可随时用 /order {task_id} 查状态"
-    )
+    return None
 
 
 async def buy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -826,7 +818,8 @@ async def buy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     except SupplierApiError as exc:
         await update.message.reply_text(f"获取商品详情失败: {exc}")
         return
-    await update.message.reply_text(result, reply_markup=MENU_KEYBOARD)
+    if result:
+        await update.message.reply_text(result, reply_markup=MENU_KEYBOARD)
 
 
 async def finalize_remote_order(
@@ -1282,9 +1275,9 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             else:
                 await reply_inline(update, f"获取商品详情失败: {exc}")
             return
-        if query.message is not None:
+        if result and query.message is not None:
             await query.message.reply_text(result, reply_markup=MENU_KEYBOARD)
-        else:
+        elif result:
             await reply_inline(update, result)
         return
 

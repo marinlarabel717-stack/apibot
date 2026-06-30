@@ -23,6 +23,8 @@ def _parse_json_map(raw: str, field_name: str) -> dict[str, str]:
 class Settings:
     bot_token: str
     admin_user_ids: set[int]
+    shop_title: str
+    recharge_text: str
     api_base_url: str
     api_timeout_seconds: int
     api_auth_header_name: str
@@ -55,6 +57,11 @@ def load_settings() -> Settings:
     return Settings(
         bot_token=bot_token,
         admin_user_ids=admin_user_ids,
+        shop_title=os.getenv("SHOP_TITLE", "TG-Matrix 账号商城").strip() or "TG-Matrix 账号商城",
+        recharge_text=os.getenv(
+            "RECHARGE_TEXT",
+            "请联系管理员充值，或者让管理员使用 /credit 给你上余额。",
+        ).strip(),
         api_base_url=os.getenv("API_BASE_URL", "https://onlinestore-fx-api.add4533.com").rstrip("/"),
         api_timeout_seconds=int(os.getenv("API_TIMEOUT_SECONDS", "20")),
         api_auth_header_name=os.getenv("API_AUTH_HEADER_NAME", "").strip(),

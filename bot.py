@@ -4,7 +4,7 @@ import asyncio
 import logging
 from typing import Any
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, Update
 from telegram.error import BadRequest
 from telegram.ext import (
     Application,
@@ -28,9 +28,21 @@ logging.basicConfig(
 logger = logging.getLogger("apibot")
 
 
-CATEGORY_BUTTONS_PER_ROW = 2
 PRODUCTS_PER_PAGE = 8
 SEARCH_RESULTS_LIMIT = 8
+BUTTON_PRODUCTS = "商品列表"
+BUTTON_MAIN_MENU = "主菜单"
+BUTTON_PROFILE = "个人中心"
+BUTTON_RECHARGE = "我要充值"
+
+MENU_KEYBOARD = ReplyKeyboardMarkup(
+    [
+        [KeyboardButton(BUTTON_PRODUCTS), KeyboardButton(BUTTON_MAIN_MENU)],
+        [KeyboardButton(BUTTON_PROFILE), KeyboardButton(BUTTON_RECHARGE)],
+    ],
+    resize_keyboard=True,
+    is_persistent=True,
+)
 
 
 def format_money(value: float) -> str:
@@ -66,11 +78,41 @@ async def call_blocking(func, *args, **kwargs):
     return await asyncio.to_thread(func, *args, **kwargs)
 
 
-async def reply_text(
-    update: Update,
-    text: str,
-    reply_markup: InlineKeyboardMarkup | None = None,
-) -> None:
+def main_menu_text(settings: Settings) -> str:
+    return (
+        f"🏠 {settings.shop_title}\n\n"
+        "请选择你要使用的功能：\n"
+        "1. 商品列表\n"
+        "2. 个人中心\n"
+        "3. 我要充值\n\n"
+        "也可以直接发送关键字搜索商品。"
+    )
+
+
+def categories_intro() -> str:
+    return (
+        "🛒 这是商品分类列表，请选择你需要的分类：\n\n"
+        "❗首次购买建议先少量测试，确认符合需求再放量。\n"
+        "❗虚拟商品一经发货通常不支持无理由处理，请先看清分类与说明。"
+    )
+
+
+def products_intro(category_name: str) -> str:
+    return (
+        f"🛍 这是商品列表，当前分类：{category_name}\n\n"
+        "❗没用过的本店商品，请先少量购买测试，以免造成不必要的争议。\n"
+        "❗账号放久难免会死，有差异请联系客服处理。"
+    )
+
+
+def detail_notice() -> str:
+    return (
+        "❗未使用过的本店商品，请先少量购买测试，以免造成不必要的争议。\n"
+        "❗虚拟商品有时效和环境差异，请及时验货。"
+    )
+
+
+async def reply_inline(update: Update, text: str, reply_markup: InlineKeyboardMarkup | None = None) -> None:
     if update.callback_query is not None:
         query = update.callback_query
         await query.answer()
@@ -83,12 +125,20 @@ async def reply_text(
         await update.message.reply_text(text, reply_markup=reply_markup)
 
 
+async def send_menu_message(update: Update, text: str) -> None:
+    if update.message is not None:
+        await update.message.reply_text(text, reply_markup=MENU_KEYBOARD)
+    elif update.callback_query is not None:
+        await update.callback_query.message.reply_text(text, reply_markup=MENU_KEYBOARD)
+
+
 async def reply_help(update: Update, context: ContextTypes.DEFAULT_TYPE | None = None) -> None:
     text = (
         "可用命令:\n"
         "/start - 启动说明\n"
+        "/menu - 主菜单\n"
         "/me - 查看我的余额\n"
-        "/categories - 按按钮浏览分类\n"
+        "/categories - 浏览商品分类\n"
         "/products <category_id> - 查看某分类商品\n"
         "/product <product_id> - 查看商品详情\n"
         "/buy <product_id> <数量> - 购买商品\n"
@@ -96,10 +146,9 @@ async def reply_help(update: Update, context: ContextTypes.DEFAULT_TYPE | None =
         "/order <task_id> - 查询订单状态\n"
         "/supplier_balance - 管理员查看上游余额\n"
         "/credit <user_id> <金额> - 管理员加余额\n\n"
-        "直接发送文字也可以搜索商品。"
+        "底部也有常驻按钮：商品列表 / 主菜单 / 个人中心 / 我要充值。"
     )
-    if update.message:
-        await update.message.reply_text(text)
+    await send_menu_message(update, text)
 
 
 def get_services(context: ContextTypes.DEFAULT_TYPE) -> tuple[Settings, Store, SupplierClient]:
@@ -109,35 +158,43 @@ def get_services(context: ContextTypes.DEFAULT_TYPE) -> tuple[Settings, Store, S
     return settings, store, supplier
 
 
+def build_main_menu_inline() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("🛒 商品列表", callback_data="nav:cats")],
+            [
+                InlineKeyboardButton("👤 个人中心", callback_data="nav:profile"),
+                InlineKeyboardButton("💰 我要充值", callback_data="nav:recharge"),
+            ],
+            [InlineKeyboardButton("📦 我的订单", callback_data="nav:orders")],
+        ]
+    )
+
+
 def build_category_keyboard(rows: list[dict[str, Any]]) -> InlineKeyboardMarkup:
     buttons: list[list[InlineKeyboardButton]] = []
-    current_row: list[InlineKeyboardButton] = []
     for row in rows:
         category_id = safe_int(row.get("categoryId"))
         stock = safe_int(row.get("totalStock"))
-        name = shorten(str(row.get("categoryName") or f"分类 {category_id}"), 14)
-        current_row.append(
-            InlineKeyboardButton(
-                text=f"ID {category_id} | {name} | 库{stock}",
-                callback_data=f"cat:{category_id}:0",
-            )
+        name = shorten(str(row.get("categoryName") or f"分类 {category_id}"), 26)
+        buttons.append(
+            [
+                InlineKeyboardButton(
+                    text=f"📂 {name} [{stock}]",
+                    callback_data=f"cat:{category_id}:0",
+                )
+            ]
         )
-        if len(current_row) == CATEGORY_BUTTONS_PER_ROW:
-            buttons.append(current_row)
-            current_row = []
-    if current_row:
-        buttons.append(current_row)
+    buttons.append([InlineKeyboardButton("🏠 主菜单", callback_data="nav:menu")])
+    buttons.append([InlineKeyboardButton("❌ 关闭", callback_data="nav:close")])
     return InlineKeyboardMarkup(buttons)
 
 
-def render_categories_view(rows: list[dict[str, Any]]) -> tuple[str, InlineKeyboardMarkup]:
-    text_lines = ["分类列表", "点下面按钮直接进入商品列表。"]
+def category_name_from_rows(rows: list[dict[str, Any]], category_id: int) -> str:
     for row in rows:
-        text_lines.append(
-            f"ID {safe_int(row.get('categoryId'))} | "
-            f"{row.get('categoryName')} | 库存 {safe_int(row.get('totalStock'))}"
-        )
-    return "\n".join(text_lines), build_category_keyboard(rows)
+        if safe_int(row.get("categoryId")) == category_id:
+            return str(row.get("categoryName") or f"分类 {category_id}")
+    return f"分类 {category_id}"
 
 
 def build_product_keyboard(
@@ -153,12 +210,13 @@ def build_product_keyboard(
     buttons: list[list[InlineKeyboardButton]] = []
     for row in page_rows:
         product_id = safe_int(row.get("productId"))
-        name = shorten(str(row.get("productName") or f"商品 {product_id}"), 24)
+        product_name = shorten(str(row.get("productName") or f"商品 {product_id}"), 28)
+        price = safe_float(row.get("price"))
         stock = safe_int(row.get("totalStock"))
         buttons.append(
             [
                 InlineKeyboardButton(
-                    text=f"ID {product_id} | {name} | 库{stock}",
+                    text=f"{product_name} ({stock}) - ${price:.2f}",
                     callback_data=f"prd:{product_id}:{category_id}:{page}",
                 )
             ]
@@ -166,72 +224,43 @@ def build_product_keyboard(
 
     nav_row: list[InlineKeyboardButton] = []
     if page > 0:
-        nav_row.append(
-            InlineKeyboardButton(
-                text="上一页",
-                callback_data=f"cat:{category_id}:{page - 1}",
-            )
-        )
-    nav_row.append(
-        InlineKeyboardButton(
-            text=f"{page + 1}/{total_pages}",
-            callback_data=f"cat:{category_id}:{page}",
-        )
-    )
+        nav_row.append(InlineKeyboardButton("⬅️ 上一页", callback_data=f"cat:{category_id}:{page - 1}"))
+    nav_row.append(InlineKeyboardButton(f"{page + 1}/{total_pages}", callback_data=f"cat:{category_id}:{page}"))
     if page < total_pages - 1:
-        nav_row.append(
-            InlineKeyboardButton(
-                text="下一页",
-                callback_data=f"cat:{category_id}:{page + 1}",
-            )
-        )
+        nav_row.append(InlineKeyboardButton("下一页 ➡️", callback_data=f"cat:{category_id}:{page + 1}"))
     buttons.append(nav_row)
-    buttons.append([InlineKeyboardButton(text="返回分类", callback_data="nav:cats")])
+    buttons.append(
+        [
+            InlineKeyboardButton("🏠 主菜单", callback_data="nav:menu"),
+            InlineKeyboardButton("🔙 返回分类", callback_data="nav:cats"),
+        ]
+    )
     return InlineKeyboardMarkup(buttons)
 
 
 def render_products_view(
+    category_name: str,
     category_id: int,
     rows: list[dict[str, Any]],
     page: int,
 ) -> tuple[str, InlineKeyboardMarkup]:
-    total_pages = max(1, (len(rows) + PRODUCTS_PER_PAGE - 1) // PRODUCTS_PER_PAGE)
-    page = max(0, min(page, total_pages - 1))
-    start = page * PRODUCTS_PER_PAGE
-    page_rows = rows[start : start + PRODUCTS_PER_PAGE]
-
-    text_lines = [
-        f"分类 {category_id} 商品列表",
-        f"第 {page + 1}/{total_pages} 页，点按钮看详情。",
-        "",
-    ]
-    for row in page_rows:
-        text_lines.append(
-            f"ID {safe_int(row.get('productId'))} | "
-            f"{row.get('productName')} | "
-            f"价格 {safe_float(row.get('price')):.4f} | "
-            f"库存 {safe_int(row.get('totalStock'))}"
-        )
-    return "\n".join(text_lines), build_product_keyboard(rows, category_id, page)
+    text = products_intro(category_name)
+    keyboard = build_product_keyboard(rows, category_id, page)
+    return text, keyboard
 
 
 def build_product_detail_keyboard(product_id: int, category_id: int, page: int) -> InlineKeyboardMarkup:
-    rows: list[list[InlineKeyboardButton]] = [
-        [
-            InlineKeyboardButton(
-                text="购买 1 个",
-                callback_data=f"qbuy:{product_id}:1",
-            ),
-            InlineKeyboardButton(
-                text="购买 5 个",
-                callback_data=f"qbuy:{product_id}:5",
-            ),
-        ]
-    ]
+    buttons: list[list[InlineKeyboardButton]] = [[InlineKeyboardButton("✅ 购买", callback_data=f"qbuy:{product_id}:1")]]
     if category_id > 0:
-        rows.append([InlineKeyboardButton(text="返回商品列表", callback_data=f"cat:{category_id}:{page}")])
-    rows.append([InlineKeyboardButton(text="返回分类", callback_data="nav:cats")])
-    return InlineKeyboardMarkup(rows)
+        buttons.append(
+            [
+                InlineKeyboardButton("🏠 主菜单", callback_data="nav:menu"),
+                InlineKeyboardButton("🔙 返回", callback_data=f"cat:{category_id}:{page}"),
+            ]
+        )
+    else:
+        buttons.append([InlineKeyboardButton("🏠 主菜单", callback_data="nav:menu")])
+    return InlineKeyboardMarkup(buttons)
 
 
 def render_product_detail_view(
@@ -240,13 +269,14 @@ def render_product_detail_view(
     page: int,
 ) -> tuple[str, InlineKeyboardMarkup]:
     product_id = safe_int(row.get("productId"))
+    product_name = str(row.get("productName") or f"商品 {product_id}")
     text = (
-        "商品详情\n"
-        f"ID: {product_id}\n"
-        f"名称: {row.get('productName')}\n"
-        f"价格: {safe_float(row.get('price')):.4f} USDT\n"
-        f"库存: {safe_int(row.get('totalStock'))}\n\n"
-        f"也可以手动输入: /buy {product_id} 1"
+        f"✅ 您正在购买：{product_name}\n\n"
+        f"📦 商品ID：{product_id}\n"
+        f"💰 价格：{safe_float(row.get('price')):.4f} USDT\n"
+        f"📊 库存：{safe_int(row.get('totalStock'))}\n\n"
+        f"{detail_notice()}\n\n"
+        f"手动购买命令：/buy {product_id} 1"
     )
     return text, build_product_detail_keyboard(product_id, category_id, page)
 
@@ -261,18 +291,29 @@ async def fetch_category_products(supplier: SupplierClient, category_id: int) ->
     return payload.get("data") or []
 
 
+async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    settings, store, _ = get_services(context)
+    user = update.effective_user
+    if user is not None:
+        await call_blocking(store.ensure_user, user.id, user.username or "")
+    if update.message is not None:
+        await send_menu_message(update, main_menu_text(settings))
+        await update.message.reply_text("点击下面按钮开始使用。", reply_markup=build_main_menu_inline())
+    elif update.callback_query is not None:
+        await reply_inline(update, "点击下面按钮开始使用。", build_main_menu_inline())
+
+
 async def show_categories(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     _, _, supplier = get_services(context)
     try:
         rows = await fetch_categories(supplier)
     except SupplierApiError as exc:
-        await reply_text(update, f"获取分类失败: {exc}")
+        await reply_inline(update, f"获取分类失败: {exc}")
         return
     if not rows:
-        await reply_text(update, "当前没有分类。")
+        await reply_inline(update, "当前没有分类。")
         return
-    text, keyboard = render_categories_view(rows)
-    await reply_text(update, text, keyboard)
+    await reply_inline(update, categories_intro(), build_category_keyboard(rows))
 
 
 async def show_products(
@@ -283,39 +324,113 @@ async def show_products(
 ) -> None:
     _, _, supplier = get_services(context)
     try:
+        categories = await fetch_categories(supplier)
         rows = await fetch_category_products(supplier, category_id)
     except SupplierApiError as exc:
-        await reply_text(update, f"获取商品列表失败: {exc}")
+        await reply_inline(update, f"获取商品列表失败: {exc}")
         return
     if not rows:
-        await reply_text(update, "这个分类下没有商品。")
+        await reply_inline(update, "这个分类下没有商品。")
         return
-    text, keyboard = render_products_view(category_id, rows, page)
-    await reply_text(update, text, keyboard)
+    category_name = category_name_from_rows(categories, category_id)
+    text, keyboard = render_products_view(category_name, category_id, rows, page)
+    await reply_inline(update, text, keyboard)
 
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    _, store, _ = get_services(context)
+async def show_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    settings, store, _ = get_services(context)
     user = update.effective_user
-    if user is None or update.message is None:
-        return
-    await call_blocking(store.ensure_user, user.id, user.username or "")
-    await update.message.reply_text(
-        "apibot 已启动。\n"
-        "这是一个独立仓库，不跟现有号铺共用代码或数据。\n\n"
-        "先用 /categories 点按钮浏览分类，或者直接发关键字搜索商品。"
-    )
-    await reply_help(update)
-
-
-async def me(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    _, store, _ = get_services(context)
-    user = update.effective_user
-    if user is None or update.message is None:
+    if user is None:
         return
     await call_blocking(store.ensure_user, user.id, user.username or "")
     balance = await call_blocking(store.get_balance, user.id)
-    await update.message.reply_text(f"你的余额: {format_money(balance)} USDT")
+    rows = await call_blocking(store.list_user_orders, user.id, 5)
+    lines = [
+        f"👤 {settings.shop_title} - 个人中心",
+        "",
+        f"🆔 用户ID：{user.id}",
+        f"👤 用户名：@{user.username}" if user.username else "👤 用户名：未设置",
+        f"💰 当前余额：{format_money(balance)} USDT",
+        "",
+        "📦 最近订单：",
+    ]
+    if rows:
+        for row in rows:
+            lines.append(
+                f"- {row['product_name']} | {row['state']} | "
+                f"{row['quantity_success']}/{row['quantity']}"
+            )
+    else:
+        lines.append("- 暂无订单")
+    keyboard = InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("💰 我要充值", callback_data="nav:recharge")],
+            [
+                InlineKeyboardButton("🛒 商品列表", callback_data="nav:cats"),
+                InlineKeyboardButton("📦 我的订单", callback_data="nav:orders"),
+            ],
+            [InlineKeyboardButton("🏠 主菜单", callback_data="nav:menu")],
+        ]
+    )
+    await reply_inline(update, "\n".join(lines), keyboard)
+
+
+async def show_recharge(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    settings, store, _ = get_services(context)
+    user = update.effective_user
+    balance = 0.0
+    if user is not None:
+        await call_blocking(store.ensure_user, user.id, user.username or "")
+        balance = await call_blocking(store.get_balance, user.id)
+    text = (
+        f"💰 {settings.shop_title} - 充值中心\n\n"
+        f"当前余额：{format_money(balance)} USDT\n\n"
+        f"{settings.recharge_text}"
+    )
+    keyboard = InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("👤 个人中心", callback_data="nav:profile")],
+            [InlineKeyboardButton("🏠 主菜单", callback_data="nav:menu")],
+        ]
+    )
+    await reply_inline(update, text, keyboard)
+
+
+async def show_orders(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    _, store, _ = get_services(context)
+    user = update.effective_user
+    if user is None:
+        return
+    rows = await call_blocking(store.list_user_orders, user.id, 10)
+    if not rows:
+        text = "📦 最近订单\n\n你还没有订单记录。"
+    else:
+        text_lines = ["📦 最近订单", ""]
+        for row in rows:
+            text_lines.append(
+                f"- {row['task_id']} | {row['product_name']} | "
+                f"{row['state']} | {row['quantity_success']}/{row['quantity']}"
+            )
+        text = "\n".join(text_lines)
+    keyboard = InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("👤 个人中心", callback_data="nav:profile")],
+            [InlineKeyboardButton("🏠 主菜单", callback_data="nav:menu")],
+        ]
+    )
+    await reply_inline(update, text, keyboard)
+
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await show_main_menu(update, context)
+
+
+async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await show_main_menu(update, context)
+
+
+async def me(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await show_profile(update, context)
 
 
 async def categories(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -354,15 +469,8 @@ async def product(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(f"获取商品详情失败: {exc}")
         return
     row = payload.get("data") or {}
-    text = (
-        "商品详情\n"
-        f"ID: {safe_int(row.get('productId'))}\n"
-        f"名称: {row.get('productName')}\n"
-        f"价格: {safe_float(row.get('price')):.4f} USDT\n"
-        f"库存: {safe_int(row.get('totalStock'))}\n\n"
-        f"购买命令: /buy {safe_int(row.get('productId'))} 1"
-    )
-    await update.message.reply_text(text)
+    text, keyboard = render_product_detail_view(row, category_id=0, page=0)
+    await update.message.reply_text(text, reply_markup=keyboard)
 
 
 async def execute_purchase(
@@ -486,7 +594,7 @@ async def buy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     except SupplierApiError as exc:
         await update.message.reply_text(f"获取商品详情失败: {exc}")
         return
-    await update.message.reply_text(result)
+    await update.message.reply_text(result, reply_markup=MENU_KEYBOARD)
 
 
 async def finalize_remote_order(
@@ -533,6 +641,7 @@ async def finalize_remote_order(
                     f"订单号: {task_id}\n"
                     f"退款: {format_money(total_price)} USDT"
                 ),
+                reply_markup=MENU_KEYBOARD,
             )
         return "failed", "订单失败，已退款"
 
@@ -561,7 +670,11 @@ async def finalize_remote_order(
                 lines.append(f"已退款: {format_money(refund_amount)} USDT")
             if file_url:
                 lines.append(f"下载地址: {file_url}")
-            await context.bot.send_message(chat_id=int(final_row["user_id"]), text="\n".join(lines))
+            await context.bot.send_message(
+                chat_id=int(final_row["user_id"]),
+                text="\n".join(lines),
+                reply_markup=MENU_KEYBOARD,
+            )
         summary = f"订单完成，成功数量 {quantity_success}/{quantity}"
         if refund_amount > 0:
             summary += f"，已退款 {format_money(refund_amount)} USDT"
@@ -595,25 +708,11 @@ async def order(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     ]
     if local_order.get("file_url"):
         lines.append(f"下载地址: {local_order['file_url']}")
-    await update.message.reply_text("\n".join(lines))
+    await update.message.reply_text("\n".join(lines), reply_markup=MENU_KEYBOARD)
 
 
 async def orders(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    _, store, _ = get_services(context)
-    user = update.effective_user
-    if user is None or update.message is None:
-        return
-    rows = await call_blocking(store.list_user_orders, user.id, 10)
-    if not rows:
-        await update.message.reply_text("你还没有订单。")
-        return
-    text = ["最近订单:"]
-    for row in rows:
-        text.append(
-            f"- {row['task_id']} | {row['product_name']} | {row['state']} | "
-            f"{row['quantity_success']}/{row['quantity']}"
-        )
-    await update.message.reply_text("\n".join(text))
+    await show_orders(update, context)
 
 
 async def supplier_balance(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -634,7 +733,8 @@ async def supplier_balance(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         "上游余额:\n"
         f"userId: {data.get('userId')}\n"
         f"userName: {data.get('userName')}\n"
-        f"accountBalance: {data.get('accountBalance')}"
+        f"accountBalance: {data.get('accountBalance')}",
+        reply_markup=MENU_KEYBOARD,
     )
 
 
@@ -661,8 +761,26 @@ async def credit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     balance = await call_blocking(store.add_balance, target_user_id, amount, "admin_credit", "", f"by {user.id}")
     await update.message.reply_text(
         f"已给用户 {target_user_id} 加 {format_money(amount)} USDT\n"
-        f"当前余额: {format_money(balance)} USDT"
+        f"当前余额: {format_money(balance)} USDT",
+        reply_markup=MENU_KEYBOARD,
     )
+
+
+async def route_menu_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.message is None or not update.message.text:
+        return
+    text = update.message.text.strip()
+    if text == BUTTON_PRODUCTS:
+        await show_categories(update, context)
+        return
+    if text == BUTTON_MAIN_MENU:
+        await show_main_menu(update, context)
+        return
+    if text == BUTTON_PROFILE:
+        await show_profile(update, context)
+        return
+    if text == BUTTON_RECHARGE:
+        await show_recharge(update, context)
 
 
 async def search_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -670,7 +788,7 @@ async def search_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if update.message is None or not update.message.text:
         return
     keyword = update.message.text.strip()
-    if not keyword:
+    if not keyword or keyword in {BUTTON_PRODUCTS, BUTTON_MAIN_MENU, BUTTON_PROFILE, BUTTON_RECHARGE}:
         return
     try:
         payload = await call_blocking(supplier.search_products, keyword)
@@ -679,31 +797,33 @@ async def search_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
     rows = payload.get("data") or []
     if not rows:
-        await update.message.reply_text("没有搜到商品。")
+        await update.message.reply_text("没有搜到商品。", reply_markup=MENU_KEYBOARD)
         return
 
-    text_lines = [f"搜索结果: {keyword}", "先给你前几个匹配商品：", ""]
+    text_lines = [
+        f"🔎 搜索结果：{keyword}",
+        "点击下面商品按钮查看详情：",
+        "",
+    ]
     buttons: list[list[InlineKeyboardButton]] = []
     for row in rows[:SEARCH_RESULTS_LIMIT]:
         product_id = safe_int(row.get("productId"))
         category_id = safe_int(row.get("categoryId"))
         text_lines.append(
-            f"ID {product_id} | {row.get('productName')} | "
-            f"价格 {safe_float(row.get('price')):.4f} | 库存 {safe_int(row.get('totalStock'))}"
+            f"- {row.get('productName')} | "
+            f"库存 {safe_int(row.get('totalStock'))} | "
+            f"${safe_float(row.get('price')):.2f}"
         )
         buttons.append(
             [
                 InlineKeyboardButton(
-                    text=f"查看 ID {product_id}",
+                    text=f"查看 {shorten(str(row.get('productName')), 22)}",
                     callback_data=f"prd:{product_id}:{category_id}:0",
                 )
             ]
         )
-    buttons.append([InlineKeyboardButton(text="浏览全部分类", callback_data="nav:cats")])
-    await update.message.reply_text(
-        "\n".join(text_lines),
-        reply_markup=InlineKeyboardMarkup(buttons),
-    )
+    buttons.append([InlineKeyboardButton("🛒 浏览全部分类", callback_data="nav:cats")])
+    await update.message.reply_text("\n".join(text_lines), reply_markup=InlineKeyboardMarkup(buttons))
 
 
 async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -715,15 +835,32 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     parts = query.data.split(":")
     action = parts[0]
 
-    if action == "nav" and len(parts) == 2 and parts[1] == "cats":
-        await show_categories(update, context)
-        return
+    if action == "nav":
+        target = parts[1] if len(parts) > 1 else ""
+        if target == "cats":
+            await show_categories(update, context)
+            return
+        if target == "menu":
+            await show_main_menu(update, context)
+            return
+        if target == "profile":
+            await show_profile(update, context)
+            return
+        if target == "recharge":
+            await show_recharge(update, context)
+            return
+        if target == "orders":
+            await show_orders(update, context)
+            return
+        if target == "close":
+            await reply_inline(update, "已关闭。")
+            return
 
     if action == "cat" and len(parts) == 3:
         category_id = safe_int(parts[1], -1)
         page = safe_int(parts[2], 0)
         if category_id <= 0:
-            await reply_text(update, "分类参数不合法。")
+            await reply_inline(update, "分类参数不合法。")
             return
         await show_products(update, context, category_id, page)
         return
@@ -733,16 +870,16 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         category_id = safe_int(parts[2], 0)
         page = safe_int(parts[3], 0)
         if product_id <= 0:
-            await reply_text(update, "商品参数不合法。")
+            await reply_inline(update, "商品参数不合法。")
             return
         try:
             payload = await call_blocking(supplier.get_product_detail, product_id)
         except SupplierApiError as exc:
-            await reply_text(update, f"获取商品详情失败: {exc}")
+            await reply_inline(update, f"获取商品详情失败: {exc}")
             return
         row = payload.get("data") or {}
         text, keyboard = render_product_detail_view(row, category_id, page)
-        await reply_text(update, text, keyboard)
+        await reply_inline(update, text, keyboard)
         return
 
     if action == "qbuy" and len(parts) == 3:
@@ -750,14 +887,14 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         product_id = safe_int(parts[1], -1)
         quantity = safe_int(parts[2], 0)
         if user is None or product_id <= 0 or quantity <= 0:
-            await reply_text(update, "快捷购买参数不合法。")
+            await reply_inline(update, "快捷购买参数不合法。")
             return
         try:
             result = await execute_purchase(context, user.id, user.username or "", product_id, quantity)
         except SupplierApiError as exc:
-            await reply_text(update, f"获取商品详情失败: {exc}")
+            await reply_inline(update, f"获取商品详情失败: {exc}")
             return
-        await reply_text(update, result)
+        await reply_inline(update, result)
         return
 
     await query.answer("暂不支持这个按钮", show_alert=False)
@@ -784,6 +921,7 @@ def build_application(settings: Settings) -> Application:
     application.bot_data["supplier"] = supplier
 
     application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("menu", menu))
     application.add_handler(CommandHandler("help", reply_help))
     application.add_handler(CommandHandler("me", me))
     application.add_handler(CommandHandler("categories", categories))
@@ -795,6 +933,7 @@ def build_application(settings: Settings) -> Application:
     application.add_handler(CommandHandler("supplier_balance", supplier_balance))
     application.add_handler(CommandHandler("credit", credit))
     application.add_handler(CallbackQueryHandler(on_callback))
+    application.add_handler(MessageHandler(filters.Regex(f"^({BUTTON_PRODUCTS}|{BUTTON_MAIN_MENU}|{BUTTON_PROFILE}|{BUTTON_RECHARGE})$"), route_menu_text))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, search_text))
 
     if application.job_queue is not None:

@@ -2,9 +2,9 @@
 
 一个独立的 Telegram 号铺机器人仓库，用来对接 `https://onlinestore-fx-api.add4533.com` 这套供应商 API。
 
-这个项目和现有 `botshop` 没关系，不复用它的代码、不依赖它的数据库。
+这个项目和现有 `botshop` 没关系，不复用它的代码，也不依赖它的数据库。
 
-## 当前已接好的能力
+## 当前能力
 
 - 供应商 API 封装
   - 获取分类
@@ -14,25 +14,44 @@
   - 购买商品
   - 查询订单状态
   - 查询供应商余额
-- Telegram Bot 基础命令
+- Telegram Bot 功能
   - `/start`
+  - `/menu`
   - `/me`
-  - `/categories`（按钮式分类浏览）
+  - `/categories`
   - `/products <category_id>`
   - `/product <product_id>`
   - `/buy <product_id> <数量>`
   - `/orders`
   - `/order <task_id>`
-  - `/credit <user_id> <金额>` 管理员加余额
-  - `/supplier_balance` 管理员查看上游余额
+  - `/credit <user_id> <金额>`
+  - `/supplier_balance`
+- 底部常驻菜单按钮
+  - `商品列表`
+  - `主菜单`
+  - `个人中心`
+  - `我要充值`
 - 本地 SQLite
   - 用户余额
   - 钱包流水
   - 订单记录
-- 后台轮询处理中订单
+- 后台轮询处理中的订单
   - 完成后自动通知用户
   - 失败自动退款
   - 部分成功自动按差额退款
+
+## 交互风格
+
+现在已经按“商城按钮面板”方式重做：
+
+- 底部常驻菜单
+- 分类按钮列表
+- 商品按钮列表
+- 商品详情页按钮
+- 个人中心页
+- 充值说明页
+
+用户既可以用命令，也可以直接点按钮操作。
 
 ## API 文档结论
 
@@ -52,22 +71,11 @@ https://onlinestore-fx-api.add4533.com/v3/api-docs/default
 - `GET /tgapi/queryOrderState`
 - `GET /tgapi/queryBalance`
 
-但是这份文档 **没有写认证方式**。直接匿名请求会返回：
+认证方式已经实测确认：
 
-```json
-{"code":500,"msg":"认证错误","data":null,"success":false}
-```
-
-所以现在项目里把认证做成了可配置模式：
-
-- 单个认证 Header
-- 单个认证 Query 参数
-- 多个额外 Header
-- 多个额外 Query 参数
-
-如果对方给你的是固定 token / apiKey 这一类，改 `.env` 就能直接接。
-
-如果对方给你的是签名算法，比如 `md5(secret + timestamp)` 这种，再补一小段签名逻辑就行。
+- 使用 `Authorization: 你的key` 可用
+- `Authorization: Bearer 你的key` 上游会失败
+- 程序里已做兼容回退，`Authorization` 配成裸 key 或 Bearer key 都会自动尝试
 
 ## 快速开始
 
@@ -90,11 +98,11 @@ copy .env.example .env
 ```text
 BOT_TOKEN=
 ADMIN_USER_IDS=
-API_AUTH_HEADER_NAME=
+SHOP_TITLE=TG-Matrix 账号商城
+RECHARGE_TEXT=请联系管理员充值，或者让管理员使用 /credit 给你上余额。
+API_AUTH_HEADER_NAME=Authorization
 API_AUTH_HEADER_VALUE=
 API_AUTH_TRY_BEARER_VARIANTS=true
-API_AUTH_QUERY_NAME=
-API_AUTH_QUERY_VALUE=
 ```
 
 ### 3. 启动
@@ -105,7 +113,7 @@ python bot.py
 
 ## 认证配置示例
 
-### 示例 1：对方给的是 Header Token
+### 示例 1：Header Token
 
 ```text
 API_AUTH_HEADER_NAME=Authorization
@@ -113,24 +121,29 @@ API_AUTH_HEADER_VALUE=xxxxx
 API_AUTH_TRY_BEARER_VARIANTS=true
 ```
 
-### 示例 2：对方给的是 Query Token
+### 示例 2：Query Token
 
 ```text
 API_AUTH_QUERY_NAME=token
 API_AUTH_QUERY_VALUE=xxxxx
 ```
 
-### 示例 3：对方要求多个固定参数
+### 示例 3：额外固定参数
 
 ```text
 API_EXTRA_HEADERS_JSON={"X-Api-Key":"xxxxx"}
 API_EXTRA_QUERY_JSON={"uid":"10001"}
 ```
 
+## 可配置项
+
+- `SHOP_TITLE`
+  - 商城标题，显示在主菜单、个人中心、充值页
+- `RECHARGE_TEXT`
+  - “我要充值”页面展示的充值说明
+
 ## 说明
 
-- 用户购买走的是 **机器人本地余额**，不是直接透传让任何人消耗你的上游额度。
+- 用户购买走的是机器人本地余额，不是直接透传消耗你的上游额度。
 - 供应商订单失败或部分成功时，会自动退回本地余额。
-- 这个仓库现在是一个可跑的独立起点，等你拿到上游认证细节后，就可以继续补真正的通道。
-- 如果认证 header 用的是 `Authorization`，程序默认会自动尝试 `Authorization: key` 和 `Authorization: Bearer key` 两种格式。
-- `/categories` 和分类商品页现在支持 Telegram inline keyboard，可直接点按钮查看分类、翻页、看商品详情和快捷购买。
+- 这是一个独立起点，后续还可以继续加真充值、支付回调、自动上分等功能。

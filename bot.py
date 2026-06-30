@@ -293,7 +293,16 @@ async def reply_inline(update: Update, text: str, reply_markup: InlineKeyboardMa
         query = update.callback_query
         await query.answer()
         try:
-            await query.edit_message_text(text=text, reply_markup=reply_markup)
+            message = query.message
+            if message is not None and (
+                message.photo
+                or message.video
+                or message.animation
+                or message.document
+            ):
+                await query.edit_message_caption(caption=text, reply_markup=reply_markup)
+            else:
+                await query.edit_message_text(text=text, reply_markup=reply_markup)
         except BadRequest as exc:
             if "message is not modified" not in str(exc).lower():
                 raise

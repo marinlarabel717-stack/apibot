@@ -147,6 +147,10 @@ def catalog_button(settings: Settings, label: str, callback_data: str) -> Inline
     return InlineKeyboardButton(**kwargs)
 
 
+def plain_catalog_button(label: str, callback_data: str) -> InlineKeyboardButton:
+    return InlineKeyboardButton(text=label, callback_data=callback_data)
+
+
 def main_menu_text(settings: Settings) -> str:
     return (
         f"🏠 {settings.shop_title}\n\n"
@@ -454,7 +458,7 @@ def build_product_keyboard_configured(
         product_name = shorten(str(row.get("productName") or f"商品 {product_id}"), 28)
         stock = safe_int(row.get("totalStock"))
         price = resolve_sell_price(settings, row)
-        buttons.append([catalog_button(settings, f"{product_name} 库存 [{stock}] - ${price:.2f}", f"prd:{product_id}:{category_id}:{page}")])
+        buttons.append([plain_catalog_button(f"{product_name} 库存 [{stock}] - ${price:.2f}", f"prd:{product_id}:{category_id}:{page}")])
 
     nav_row: list[InlineKeyboardButton] = []
     if page > 0:
@@ -1155,7 +1159,7 @@ async def search_text_rich(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             f"库存 {safe_int(row.get('totalStock'))} | "
             f"${sell_price:.2f}"
         )
-        buttons.append([catalog_button(settings, f"{shorten(str(row.get('productName')), 22)} | ${sell_price:.2f}", f"prd:{product_id}:{category_id}:0")])
+        buttons.append([plain_catalog_button(f"{shorten(str(row.get('productName')), 22)} | ${sell_price:.2f}", f"prd:{product_id}:{category_id}:0")])
     buttons.append([InlineKeyboardButton("🛒 浏览全部分类", callback_data="nav:cats")])
     await update.message.reply_text("\n".join(text_lines), reply_markup=InlineKeyboardMarkup(buttons))
 

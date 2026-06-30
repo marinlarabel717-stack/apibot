@@ -145,7 +145,8 @@ async def reply_help(update: Update, context: ContextTypes.DEFAULT_TYPE | None =
         "/orders - 查看最近订单\n"
         "/order <task_id> - 查询订单状态\n"
         "/supplier_balance - 管理员查看上游余额\n"
-        "/credit <user_id> <金额> - 管理员调整余额（支持正负数）\n\n"
+        "/add <user_id> <+金额/-金额> - 管理员调整余额\n"
+        "/credit <user_id> <金额> - 兼容旧命令\n\n"
         "底部也有常驻按钮：商品列表 / 主菜单 / 个人中心 / 我要充值。"
     )
     await send_menu_message(update, text)
@@ -747,7 +748,7 @@ async def credit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text("只有管理员可以调整余额。")
         return
     if len(context.args) < 2:
-        await update.message.reply_text("用法: /credit <user_id> <金额>\n示例: /credit 123456 10 或 /credit 123456 -10")
+        await update.message.reply_text("用法: /add <user_id> <+金额/-金额>\n示例: /add 123456 +20 或 /add 123456 -20")
         return
     try:
         target_user_id = int(context.args[0])
@@ -769,6 +770,11 @@ async def credit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
         text = (
             f"已给用户 {target_user_id} 增加 {format_money(amount)} USDT\n"
+            f"当前余额: {format_money(balance)} USDT"
+        )
+        user_notice = (
+            "余额变动提醒\n"
+            f"已增加: {format_money(amount)} USDT\n"
             f"当前余额: {format_money(balance)} USDT"
         )
     else:
@@ -793,6 +799,20 @@ async def credit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             f"已给用户 {target_user_id} 扣减 {format_money(debit_amount)} USDT\n"
             f"当前余额: {format_money(balance)} USDT"
         )
+        user_notice = (
+            "余额变动提醒\n"
+            f"已扣减: {format_money(debit_amount)} USDT\n"
+            f"当前余额: {format_money(balance)} USDT"
+        )
+    if target_user_id != user.id:
+        try:
+            await context.bot.send_message(
+                chat_id=target_user_id,
+                text=user_notice,
+                reply_markup=MENU_KEYBOARD,
+            )
+        except Exception:
+            logger.exception("发送余额变动提醒失败: %s", target_user_id)
     await update.message.reply_text(text, reply_markup=MENU_KEYBOARD)
 
 
@@ -961,6 +981,7 @@ def build_application(settings: Settings) -> Application:
     application.add_handler(CommandHandler("orders", orders))
     application.add_handler(CommandHandler("order", order))
     application.add_handler(CommandHandler("supplier_balance", supplier_balance))
+    application.add_handler(CommandHandler("add", credit))
     application.add_handler(CommandHandler("credit", credit))
     application.add_handler(CallbackQueryHandler(on_callback))
     application.add_handler(MessageHandler(filters.Regex(f"^({BUTTON_PRODUCTS}|{BUTTON_MAIN_MENU}|{BUTTON_PROFILE}|{BUTTON_RECHARGE})$"), route_menu_text))

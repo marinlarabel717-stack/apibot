@@ -168,19 +168,14 @@ def plain_catalog_button(label: str, callback_data: str) -> InlineKeyboardButton
 
 
 def build_start_menu_text(settings: Settings, user: Any, balance: float, total_spent: float, total_quantity: int) -> str:
-    display_name = html.escape((getattr(user, "full_name", "") or getattr(user, "first_name", "") or "朋友").strip())
-    if getattr(user, "username", ""):
-        greeting_name = f'<a href="https://t.me/{user.username}">{display_name}</a>'
-    else:
-        greeting_name = f'<a href="tg://user?id={user.id}">{display_name}</a>'
+    display_name = html.escape((getattr(user, "first_name", "") or getattr(user, "full_name", "") or "朋友").strip())
     return (
-        f"🌙 晚上好，{greeting_name}\n"
-        f"🆔 ID: <code>{user.id}</code>\n\n"
-        f"💰 USDT：<code>{format_money(balance)}</code>\n"
-        f"📊 消费金额：<code>{format_money(total_spent)}</code>\n"
-        f"📦 购买数量：<code>{total_quantity}</code>\n"
-        "-------------------------------\n"
-        f"📣 补货频道：{html.escape(settings.restock_channel)}"
+        f"晚上好，{display_name}\n"
+        f"ID: {user.id}\n\n"
+        f"💰 USDT : {format_money(balance)}\n"
+        f"📊 消费金额 : {format_money(total_spent)}\n"
+        f"📦 购买数量 : {total_quantity}\n\n"
+        f"补货频道：{html.escape(settings.restock_channel)}"
     )
 
 

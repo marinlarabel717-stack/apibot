@@ -17,7 +17,7 @@
 - Telegram Bot 基础命令
   - `/start`
   - `/me`
-  - `/categories`
+  - `/categories`（按钮式分类浏览）
   - `/products <category_id>`
   - `/product <product_id>`
   - `/buy <product_id> <数量>`
@@ -133,3 +133,4 @@ API_EXTRA_QUERY_JSON={"uid":"10001"}
 - 供应商订单失败或部分成功时，会自动退回本地余额。
 - 这个仓库现在是一个可跑的独立起点，等你拿到上游认证细节后，就可以继续补真正的通道。
 - 如果认证 header 用的是 `Authorization`，程序默认会自动尝试 `Authorization: key` 和 `Authorization: Bearer key` 两种格式。
+- `/categories` 和分类商品页现在支持 Telegram inline keyboard，可直接点按钮查看分类、翻页、看商品详情和快捷购买。

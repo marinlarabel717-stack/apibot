@@ -348,6 +348,22 @@ def build_main_menu_inline() -> InlineKeyboardMarkup:
     )
 
 
+def build_main_menu_inline() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(BUTTON_ACCOUNT_LIST, callback_data="nav:cats"),
+                InlineKeyboardButton(BUTTON_RECHARGE_BALANCE, callback_data="nav:recharge"),
+            ],
+            [
+                InlineKeyboardButton(BUTTON_PURCHASE_NOTICE, callback_data="nav:notice"),
+                InlineKeyboardButton(BUTTON_ORDER_HISTORY, callback_data="nav:orders"),
+            ],
+            [InlineKeyboardButton(BUTTON_SWITCH_LANGUAGE, callback_data="nav:language")],
+        ]
+    )
+
+
 def build_category_keyboard(rows: list[dict[str, Any]]) -> InlineKeyboardMarkup:
     buttons: list[list[InlineKeyboardButton]] = []
     for row in rows:
@@ -1386,6 +1402,8 @@ def build_application(settings: Settings) -> Application:
     application.add_handler(CommandHandler("supplier_balance", supplier_balance))
     application.add_handler(CommandHandler("add", credit))
     application.add_handler(CommandHandler("credit", credit))
+    application.add_handler(CallbackQueryHandler(show_notice, pattern=r"^nav:notice$"))
+    application.add_handler(CallbackQueryHandler(show_language, pattern=r"^nav:language$"))
     application.add_handler(CallbackQueryHandler(on_callback))
     button_pattern = "^(" + "|".join(re.escape(text) for text in sorted(MENU_BUTTON_TEXTS | {BUTTON_PRODUCTS, BUTTON_MAIN_MENU, BUTTON_PROFILE, BUTTON_RECHARGE})) + ")$"
     application.add_handler(MessageHandler(filters.Regex(button_pattern), route_menu_text))

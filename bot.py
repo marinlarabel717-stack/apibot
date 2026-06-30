@@ -145,7 +145,7 @@ async def reply_help(update: Update, context: ContextTypes.DEFAULT_TYPE | None =
         "/orders - 查看最近订单\n"
         "/order <task_id> - 查询订单状态\n"
         "/supplier_balance - 管理员查看上游余额\n"
-        "/credit <user_id> <金额> - 管理员加余额\n\n"
+        "/credit <user_id> <金额> - 管理员调整余额（支持正负数）\n\n"
         "底部也有常驻按钮：商品列表 / 主菜单 / 个人中心 / 我要充值。"
     )
     await send_menu_message(update, text)
@@ -744,10 +744,10 @@ async def credit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if user is None or update.message is None:
         return
     if not is_admin(settings, user.id):
-        await update.message.reply_text("只有管理员可以加余额。")
+        await update.message.reply_text("只有管理员可以调整余额。")
         return
     if len(context.args) < 2:
-        await update.message.reply_text("用法: /credit <user_id> <金额>")
+        await update.message.reply_text("用法: /credit <user_id> <金额>\n示例: /credit 123456 10 或 /credit 123456 -10")
         return
     try:
         target_user_id = int(context.args[0])
@@ -755,15 +755,45 @@ async def credit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     except ValueError:
         await update.message.reply_text("user_id 或 金额 格式不对")
         return
-    if amount <= 0:
-        await update.message.reply_text("金额必须大于 0")
+    if amount == 0:
+        await update.message.reply_text("金额不能为 0")
         return
-    balance = await call_blocking(store.add_balance, target_user_id, amount, "admin_credit", "", f"by {user.id}")
-    await update.message.reply_text(
-        f"已给用户 {target_user_id} 加 {format_money(amount)} USDT\n"
-        f"当前余额: {format_money(balance)} USDT",
-        reply_markup=MENU_KEYBOARD,
-    )
+    if amount > 0:
+        balance = await call_blocking(
+            store.add_balance,
+            target_user_id,
+            amount,
+            "admin_credit",
+            "",
+            f"by {user.id}",
+        )
+        text = (
+            f"已给用户 {target_user_id} 增加 {format_money(amount)} USDT\n"
+            f"当前余额: {format_money(balance)} USDT"
+        )
+    else:
+        debit_amount = abs(amount)
+        ok, balance = await call_blocking(
+            store.debit_balance,
+            target_user_id,
+            debit_amount,
+            "admin_debit",
+            "",
+            f"by {user.id}",
+        )
+        if not ok:
+            await update.message.reply_text(
+                f"扣减失败，用户 {target_user_id} 余额不足。\n"
+                f"当前余额: {format_money(balance)} USDT\n"
+                f"尝试扣减: {format_money(debit_amount)} USDT",
+                reply_markup=MENU_KEYBOARD,
+            )
+            return
+        text = (
+            f"已给用户 {target_user_id} 扣减 {format_money(debit_amount)} USDT\n"
+            f"当前余额: {format_money(balance)} USDT"
+        )
+    await update.message.reply_text(text, reply_markup=MENU_KEYBOARD)
 
 
 async def route_menu_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

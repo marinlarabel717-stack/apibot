@@ -60,7 +60,7 @@ def load_settings() -> Settings:
         shop_title=os.getenv("SHOP_TITLE", "TG-Matrix 账号商城").strip() or "TG-Matrix 账号商城",
         recharge_text=os.getenv(
             "RECHARGE_TEXT",
-            "请联系管理员充值，或者让管理员使用 /credit 给你上余额。",
+            "请联系管理员充值，或者让管理员使用 /credit 给你调整余额。",
         ).strip(),
         api_base_url=os.getenv("API_BASE_URL", "https://onlinestore-fx-api.add4533.com").rstrip("/"),
         api_timeout_seconds=int(os.getenv("API_TIMEOUT_SECONDS", "20")),

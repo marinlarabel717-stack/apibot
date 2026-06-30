@@ -24,7 +24,7 @@
   - `/buy <product_id> <数量>`
   - `/orders`
   - `/order <task_id>`
-  - `/credit <user_id> <金额>`
+  - `/credit <user_id> <金额>`（支持正数加余额、负数扣余额）
   - `/supplier_balance`
 - 底部常驻菜单按钮
   - `商品列表`
@@ -99,7 +99,7 @@ copy .env.example .env
 BOT_TOKEN=
 ADMIN_USER_IDS=
 SHOP_TITLE=TG-Matrix 账号商城
-RECHARGE_TEXT=请联系管理员充值，或者让管理员使用 /credit 给你上余额。
+RECHARGE_TEXT=请联系管理员充值，或者让管理员使用 /credit 给你调整余额。
 API_AUTH_HEADER_NAME=Authorization
 API_AUTH_HEADER_VALUE=
 API_AUTH_TRY_BEARER_VARIANTS=true
@@ -141,6 +141,12 @@ API_EXTRA_QUERY_JSON={"uid":"10001"}
   - 商城标题，显示在主菜单、个人中心、充值页
 - `RECHARGE_TEXT`
   - “我要充值”页面展示的充值说明
+
+## 管理员余额调整
+
+- 增加余额：`/credit 123456 10`
+- 扣减余额：`/credit 123456 -10`
+- 如果用户余额不足，扣减会被拦截，不会扣成负数
 
 ## 说明
 

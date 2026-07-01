@@ -829,7 +829,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     clear_pending_purchase(context)
-    await show_main_menu(update, context)
+    await show_start_menu(update, context)
 
 
 async def me(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1251,7 +1251,7 @@ async def route_menu_text(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
     if text == BUTTON_MAIN_MENU:
         clear_pending_purchase(context)
-        await show_main_menu(update, context)
+        await show_start_menu(update, context)
         return
     if text == BUTTON_PROFILE or text == BUTTON_RECHARGE_BALANCE:
         clear_pending_purchase(context)
@@ -1397,7 +1397,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             await show_categories(update, context)
             return
         if target == "menu":
-            await show_main_menu(update, context)
+            await show_start_menu(update, context)
             return
         if target == "profile":
             await show_profile(update, context)

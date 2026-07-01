@@ -193,6 +193,12 @@ ADMIN_ADD_BALANCE_TITLE_EMOJI_ID = "6321041414067068140"
 ADMIN_ADD_BALANCE_USER_EMOJI_ID = "6273676592036191055"
 ADMIN_ADD_BALANCE_INCREASE_EMOJI_ID = "6320823470246600333"
 SYSTEM_ERROR_EMOJI_ID = "6321241559543062538"
+ADMIN_NEW_ORDER_USER_EMOJI_ID = "5994502837327892086"
+ADMIN_NEW_ORDER_USER_ID_EMOJI_ID = "5771887475421090729"
+ADMIN_NEW_ORDER_PRODUCT_EMOJI_ID = "5985472565508838112"
+ADMIN_NEW_ORDER_QUANTITY_EMOJI_ID = "5877485980901971030"
+ADMIN_NEW_ORDER_AMOUNT_EMOJI_ID = "5931546553868095844"
+ADMIN_NEW_ORDER_BALANCE_EMOJI_ID = "5992430854909989581"
 CATEGORY_BUTTON_EMOJI_IDS: dict[str, str] = {
     "asia": "6334321852378252986",
     "west": "6334717028024190508",
@@ -541,6 +547,83 @@ def build_purchase_refund_error_text(refund_amount: float, balance: float) -> tu
             (f"当前余额: {format_money(balance)} USDT", None),
         ]
     )
+
+
+def build_admin_new_order_text(
+    buyer_user_id: int,
+    buyer_username: str,
+    buyer_display_name: str,
+    product_label: str,
+    quantity: int,
+    total_price: float,
+    remain_balance: float,
+) -> tuple[str, tuple[MessageEntity, ...]]:
+    parts: list[tuple[str, str | None]] = []
+    code_spans: list[tuple[int, int]] = []
+    offset = 0
+
+    def add_text(value: str, custom_emoji_id: str | None = None, code: bool = False) -> None:
+        nonlocal offset
+        parts.append((value, custom_emoji_id))
+        length = len(value)
+        if code:
+            code_spans.append((offset, length))
+        offset += length
+
+    user_line = buyer_display_name.strip() or f"用户 {buyer_user_id}"
+    username = buyer_username.strip().lstrip("@")
+    if username:
+        user_line = f"{user_line} @{username}"
+
+    add_text("🎉 您有新的购买订单\n\n")
+    add_text("👤", ADMIN_NEW_ORDER_USER_EMOJI_ID)
+    add_text(f" 用户: {user_line}\n")
+    add_text("👤", ADMIN_NEW_ORDER_USER_ID_EMOJI_ID)
+    add_text(" 用户ID: ")
+    add_text(str(buyer_user_id), code=True)
+    add_text("\n")
+    add_text("🎁", ADMIN_NEW_ORDER_PRODUCT_EMOJI_ID)
+    add_text(f" 购买商品: {product_label}\n")
+    add_text("📊", ADMIN_NEW_ORDER_QUANTITY_EMOJI_ID)
+    add_text(f" 购买数量：{quantity}\n")
+    add_text("🔨", ADMIN_NEW_ORDER_AMOUNT_EMOJI_ID)
+    add_text(f" 扣除金额：{format_money(total_price)}\n")
+    add_text("🪙", ADMIN_NEW_ORDER_BALANCE_EMOJI_ID)
+    add_text(f" 剩余余额：{format_money(remain_balance)}")
+    return build_text_with_custom_emoji(parts, code_spans)
+
+
+async def notify_admin_new_purchase(
+    context: ContextTypes.DEFAULT_TYPE,
+    admin_user_ids: set[int],
+    buyer_user_id: int,
+    buyer_username: str,
+    buyer_display_name: str,
+    product_label: str,
+    quantity: int,
+    total_price: float,
+    remain_balance: float,
+) -> None:
+    if not admin_user_ids:
+        return
+    text, entities = build_admin_new_order_text(
+        buyer_user_id,
+        buyer_username,
+        buyer_display_name,
+        product_label,
+        quantity,
+        total_price,
+        remain_balance,
+    )
+    for admin_user_id in admin_user_ids:
+        try:
+            await context.bot.send_message(
+                chat_id=admin_user_id,
+                text=text,
+                entities=entities,
+            )
+        except Exception:
+            logger.exception("发送管理员新订单提醒失败: admin=%s buyer=%s", admin_user_id, buyer_user_id)
 
 
 def build_start_menu_text(
@@ -1848,17 +1931,20 @@ async def execute_purchase(
     context: ContextTypes.DEFAULT_TYPE,
     user_id: int,
     username: str,
+    display_name: str,
     product_id: int,
     quantity: int,
 ) -> tuple[str, tuple[MessageEntity, ...] | None] | None:
     settings, store, supplier = get_services(context)
-    await call_blocking(store.ensure_user, user_id, username)
+    await call_blocking(store.ensure_user, user_id, username, display_name)
 
     detail_payload = await call_blocking(supplier.get_product_detail, product_id)
     row = detail_payload.get("data") or {}
     unit_price = resolve_sell_price(settings, row)
     total_stock = safe_int(row.get("totalStock"))
     product_name = str(row.get("productName") or f"商品 {product_id}")
+    category_name = str(row.get("categoryName") or "").strip()
+    product_label = f"{category_name} {product_name}".strip() if category_name else product_name
     total_price = unit_price * quantity
 
     if total_stock < quantity:
@@ -1925,6 +2011,17 @@ async def execute_purchase(
         total_price,
         buy_payload,
     )
+    await notify_admin_new_purchase(
+        context,
+        settings.admin_user_ids,
+        user_id,
+        username,
+        display_name,
+        product_label,
+        quantity,
+        total_price,
+        remain,
+    )
     return None
 
 
@@ -1946,7 +2043,7 @@ async def buy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     try:
-        result = await execute_purchase(context, user.id, user.username or "", product_id, quantity)
+        result = await execute_purchase(context, user.id, user.username or "", user.full_name or "", product_id, quantity)
     except SupplierApiError as exc:
         await update.message.reply_text(f"获取商品详情失败: {exc}")
         return
@@ -2414,7 +2511,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         except BadRequest:
             pass
         try:
-            result = await execute_purchase(context, user.id, user.username or "", product_id, quantity)
+            result = await execute_purchase(context, user.id, user.username or "", user.full_name or "", product_id, quantity)
         except SupplierApiError as exc:
             if query.message is not None:
                 await query.message.reply_text(f"获取商品详情失败: {exc}", reply_markup=MENU_KEYBOARD)

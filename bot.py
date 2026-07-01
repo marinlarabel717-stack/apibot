@@ -1261,12 +1261,12 @@ async def show_admin_users(update: Update, context: ContextTypes.DEFAULT_TYPE, p
     rows = await call_blocking(store.list_users, ADMIN_USERS_PAGE_SIZE, page * ADMIN_USERS_PAGE_SIZE, True)
     lines = [f"用户列表 {page + 1}/{total_pages}", ""]
     buttons: list[list[InlineKeyboardButton]] = []
-    for row in rows:
+    start_index = page * ADMIN_USERS_PAGE_SIZE
+    for index, row in enumerate(rows, start=1):
         username_text = f"@{row.get('username')}" if row.get("username") else "未设置用户名"
-        lines.append(f"{format_user_created_at(row.get('created_at'))} | {user_label(row)} | {username_text}")
+        lines.append(f"{start_index + index}. {format_user_created_at(row.get('created_at'))} | {user_label(row)} | {username_text}")
         lines.append(f"ID: {row.get('user_id')} | 余额: {format_money(safe_float(row.get('balance')))} USDT")
         lines.append("")
-        buttons.append([InlineKeyboardButton(user_label(row), callback_data=f"adm:user:{int(row['user_id'])}:{page}")])
     if not rows:
         lines.append("暂无活跃用户。")
     nav_row: list[InlineKeyboardButton] = []

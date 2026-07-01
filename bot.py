@@ -104,6 +104,23 @@ UNIT_PRICE_EMOJI_ID = "6334793031765460638"
 ITEM_COUNT_EMOJI_ID = "5278330174729907327"
 TOTAL_DUE_EMOJI_ID = "5204242830687494041"
 PACKED_DONE_EMOJI_ID = "6323524880121726602"
+PRODUCT_LIST_EMOJI_ID = "6334767047213319650"
+PRODUCT_LIST_ALERT_EMOJI_ID = "6323546926188857158"
+CLOSE_EMOJI_ID = "6323186419518932861"
+CATEGORY_BUTTON_EMOJI_IDS: dict[str, str] = {
+    "asia": "6334321852378252986",
+    "west": "6334717028024190508",
+    "africa": "6334806079876106286",
+    "age_2_5": "6323503680163153903",
+    "age_6_12": "6323427942709856876",
+    "age_1_2y": "6321332501180581681",
+    "age_3_4y": "6323443194138723748",
+    "age_5y": "6323526692597925524",
+    "age_7y": "6334710044407368265",
+    "vip": "6334875048460944921",
+    "liang": "6334508275433735767",
+    "spam": "6323249027257206448",
+}
 
 
 def format_money(value: float) -> str:
@@ -196,8 +213,8 @@ def resolve_button_icon(settings: Settings, name: str) -> tuple[str, str | None]
     match_text = str(name or "").lower()
     for keywords, fallback_icon, icon_key in BUTTON_ICON_RULES:
         if any(keyword.lower() in match_text for keyword in keywords):
-            custom_id = None
-            if settings.inline_button_custom_emoji_enabled:
+            custom_id = CATEGORY_BUTTON_EMOJI_IDS.get(icon_key)
+            if custom_id is None and settings.inline_button_custom_emoji_enabled:
                 custom_id = (
                     settings.button_custom_emoji_ids.get(icon_key)
                     or next((settings.button_custom_emoji_ids.get(keyword) for keyword in keywords if settings.button_custom_emoji_ids.get(keyword)), None)
@@ -257,9 +274,9 @@ def categories_intro() -> str:
 def products_intro(category_name: str) -> str:
     safe_category_name = html.escape(category_name)
     return (
-        f"🛍 这是商品列表，当前分类：{safe_category_name}\n\n"
-        "❗没用过的本店商品，请先少量购买测试，以免造成不必要的争议。\n"
-        "❗账号放久难免会死，有差异请联系客服处理。"
+        f"{premium_text_prefix(PRODUCT_LIST_EMOJI_ID, '🛍', '这是商品列表，当前分类：')}{safe_category_name}\n\n"
+        f"{premium_text_prefix(PRODUCT_LIST_ALERT_EMOJI_ID, '❗️', '没用过的本店商品，请先少量购买测试，以免造成不必要的争议。')}\n"
+        f"{premium_text_prefix(PRODUCT_LIST_ALERT_EMOJI_ID, '❗️', '账号放久难免会死，有差异请联系客服处理。')}"
     )
 
 
@@ -464,7 +481,7 @@ def build_category_keyboard(rows: list[dict[str, Any]]) -> InlineKeyboardMarkup:
             ]
         )
     buttons.append([premium_inline_button(BUTTON_MAIN_MENU, "nav:menu", HOME_EMOJI_ID)])
-    buttons.append([InlineKeyboardButton("❌ 关闭", callback_data="nav:close")])
+    buttons.append([premium_inline_button("关闭", "nav:close", CLOSE_EMOJI_ID)])
     return InlineKeyboardMarkup(buttons)
 
 
@@ -510,7 +527,7 @@ def build_product_keyboard(
     buttons.append(
         [
             premium_inline_button(BUTTON_MAIN_MENU, "nav:menu", HOME_EMOJI_ID),
-            InlineKeyboardButton("🔙 返回分类", callback_data="nav:cats"),
+            premium_inline_button("返回分类", "nav:cats", BACK_EMOJI_ID),
         ]
     )
     return InlineKeyboardMarkup(buttons)
@@ -565,7 +582,7 @@ def build_category_keyboard_configured(settings: Settings, rows: list[dict[str, 
         name = shorten(str(row.get("categoryName") or f"分类 {category_id}"), 26)
         buttons.append([catalog_button(settings, f"{name} 库存 [{stock}]", f"cat:{category_id}:0")])
     buttons.append([premium_inline_button(BUTTON_MAIN_MENU, "nav:menu", HOME_EMOJI_ID)])
-    buttons.append([InlineKeyboardButton("❌ 关闭", callback_data="nav:close")])
+    buttons.append([premium_inline_button("关闭", "nav:close", CLOSE_EMOJI_ID)])
     return InlineKeyboardMarkup(buttons)
 
 
@@ -586,7 +603,7 @@ def build_product_keyboard_configured(
     buttons.append(
         [
             premium_inline_button(BUTTON_MAIN_MENU, "nav:menu", HOME_EMOJI_ID),
-            InlineKeyboardButton("🔙 返回分类", callback_data="nav:cats"),
+            premium_inline_button("返回分类", "nav:cats", BACK_EMOJI_ID),
         ]
     )
     return InlineKeyboardMarkup(buttons)

@@ -348,8 +348,9 @@ class Store:
             ).fetchall()
             return [dict(row) for row in rows]
 
-    def list_pending_delivery_orders(self, limit: int = 100) -> list[dict[str, Any]]:
+    def list_pending_delivery_orders(self, limit: int = 100, retry_cooldown_seconds: int = 60) -> list[dict[str, Any]]:
         with self._connect() as conn:
+            cutoff = datetime.now(timezone.utc).timestamp() - max(0, int(retry_cooldown_seconds))
             rows = conn.execute(
                 """
                 SELECT *
@@ -357,10 +358,14 @@ class Store:
                 WHERE state IN ('completed', 'partial')
                   AND file_url != ''
                   AND delivery_sent_at = ''
+                  AND (
+                        delivery_error = ''
+                        OR strftime('%s', updated_at) <= ?
+                  )
                 ORDER BY updated_at ASC
                 LIMIT ?
                 """,
-                (int(limit),),
+                (int(cutoff), int(limit)),
             ).fetchall()
             return [dict(row) for row in rows]
 

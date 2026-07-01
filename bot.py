@@ -2724,7 +2724,11 @@ async def poll_processing_orders(context: ContextTypes.DEFAULT_TYPE) -> None:
     async with poll_lock:
         settings, store, supplier = get_services(context)
         processing_rows = await call_blocking(store.list_processing_orders, settings.order_poll_limit)
-        pending_delivery_rows = await call_blocking(store.list_pending_delivery_orders, settings.order_poll_limit)
+        pending_delivery_rows = await call_blocking(
+            store.list_pending_delivery_orders,
+            settings.order_poll_limit,
+            settings.delivery_retry_cooldown_seconds,
+        )
         if not processing_rows and not pending_delivery_rows:
             return
 

@@ -91,6 +91,19 @@ MAIN_MENU_EMOJI_RECHARGE_BALANCE_ID = "5987880246865565644"
 MAIN_MENU_EMOJI_PURCHASE_NOTICE_ID = "5258328383183396223"
 MAIN_MENU_EMOJI_ORDER_HISTORY_ID = "5258134813302332906"
 MAIN_MENU_EMOJI_SWITCH_LANGUAGE_ID = "5879585266426973039"
+CATEGORY_LIST_EMOJI_ID = "6334677956706698772"
+ALERT_EMOJI_ID = "5775887550262546277"
+HOME_EMOJI_ID = "5967822972931542886"
+BUYING_EMOJI_ID = "5776375003280838798"
+PRICE_EMOJI_ID = "5897958754267174109"
+STOCK_EMOJI_ID = "5875291072225087249"
+BUY_BUTTON_EMOJI_ID = "5985596818912712352"
+BACK_EMOJI_ID = "5875082500023258804"
+PRODUCT_EMOJI_ID = "6334767047213319650"
+UNIT_PRICE_EMOJI_ID = "6334793031765460638"
+ITEM_COUNT_EMOJI_ID = "5278330174729907327"
+TOTAL_DUE_EMOJI_ID = "5204242830687494041"
+PACKED_DONE_EMOJI_ID = "6323524880121726602"
 
 
 def format_money(value: float) -> str:
@@ -128,6 +141,10 @@ async def call_blocking(func, *args, **kwargs):
 
 def tg_custom_emoji(emoji_id: str, fallback: str) -> str:
     return f'<tg-emoji emoji-id="{emoji_id}">{html.escape(fallback)}</tg-emoji>'
+
+
+def premium_text_prefix(emoji_id: str, fallback: str, label: str) -> str:
+    return f"{tg_custom_emoji(emoji_id, fallback)} {html.escape(label)}"
 
 
 def get_pending_purchase(context: ContextTypes.DEFAULT_TYPE) -> dict[str, int] | None:
@@ -231,31 +248,32 @@ def build_start_menu_text(settings: Settings, user: Any, balance: float, total_s
 
 def categories_intro() -> str:
     return (
-        "🛒 这是商品分类列表，请选择你需要的分类：\n\n"
-        "❗首次购买建议先少量测试，确认符合需求再放量。\n"
-        "❗虚拟商品一经发货通常不支持无理由处理，请先看清分类与说明。"
+        f"{premium_text_prefix(CATEGORY_LIST_EMOJI_ID, '🛒', '这是商品分类列表，请选择你需要的分类：')}\n\n"
+        f"{premium_text_prefix(ALERT_EMOJI_ID, '❗️', '首次购买建议先少量测试，确认符合需求再放量。')}\n"
+        f"{premium_text_prefix(ALERT_EMOJI_ID, '❗️', '虚拟商品一经发货通常不支持无理由处理，请先看清分类与说明。')}"
     )
 
 
 def products_intro(category_name: str) -> str:
+    safe_category_name = html.escape(category_name)
     return (
-        f"🛍 这是商品列表，当前分类：{category_name}\n\n"
+        f"🛍 这是商品列表，当前分类：{safe_category_name}\n\n"
         "❗没用过的本店商品，请先少量购买测试，以免造成不必要的争议。\n"
         "❗账号放久难免会死，有差异请联系客服处理。"
     )
 
 
 def detail_notice() -> str:
-    return "❗️ 未使用过的本店商品，请先少量购买测试，以免造成不必要的争议。"
+    return premium_text_prefix(ALERT_EMOJI_ID, "❗️", "未使用过的本店商品，请先少量购买测试，以免造成不必要的争议。")
 
 
 def purchase_confirm_caption(product_name: str, unit_price: float, quantity: int) -> str:
     total_price = unit_price * quantity
     return (
-        f"🛍 商品：{product_name}\n"
-        f"🪙 单价：{format_money(unit_price)} USDT\n"
-        f"📦 数量：{quantity}\n\n"
-        f"🧾 应付金额：{format_money(total_price)} USDT"
+        f"{premium_text_prefix(PRODUCT_EMOJI_ID, '🛍', '商品：')}{html.escape(product_name)}\n"
+        f"{premium_text_prefix(UNIT_PRICE_EMOJI_ID, '🪙', '单价：')}{format_money(unit_price)} USDT\n"
+        f"{premium_text_prefix(ITEM_COUNT_EMOJI_ID, '📦', '数量：')}{quantity}\n\n"
+        f"{premium_text_prefix(TOTAL_DUE_EMOJI_ID, '🧾', '应付金额：')}{format_money(total_price)} USDT"
     )
 
 
@@ -266,17 +284,17 @@ def build_purchase_confirm_keyboard(
     page: int,
 ) -> InlineKeyboardMarkup:
     buttons: list[list[InlineKeyboardButton]] = [
-        [InlineKeyboardButton("✅ 确认购买", callback_data=f"cbuy:{product_id}:{quantity}")],
+        [premium_inline_button("确认购买", f"cbuy:{product_id}:{quantity}", BUY_BUTTON_EMOJI_ID)],
     ]
     if category_id > 0:
         buttons.append(
             [
-                InlineKeyboardButton("🏠 主菜单", callback_data="nav:menu"),
-                InlineKeyboardButton("🔙 返回商品", callback_data=f"prd:{product_id}:{category_id}:{page}"),
+                premium_inline_button(BUTTON_MAIN_MENU, "nav:menu", HOME_EMOJI_ID),
+                premium_inline_button("返回商品", f"prd:{product_id}:{category_id}:{page}", BACK_EMOJI_ID),
             ]
         )
     else:
-        buttons.append([InlineKeyboardButton("🏠 主菜单", callback_data="nav:menu")])
+        buttons.append([premium_inline_button(BUTTON_MAIN_MENU, "nav:menu", HOME_EMOJI_ID)])
     return InlineKeyboardMarkup(buttons)
 
 
@@ -287,9 +305,9 @@ def delivery_ready_caption(
     refund_amount: float,
 ) -> str:
     lines = [
-        f"🛍 商品：{product_name}",
-        f"📦 数量：{quantity}",
-        f"📬 打包完成：存活账号 {quantity_success}",
+        f"{premium_text_prefix(PRODUCT_EMOJI_ID, '🛍', '商品：')}{html.escape(product_name)}",
+        f"{premium_text_prefix(ITEM_COUNT_EMOJI_ID, '📦', '数量：')}{quantity}",
+        f"{premium_text_prefix(PACKED_DONE_EMOJI_ID, '✅', '打包完成：存活账号 ')}{quantity_success}",
     ]
     if refund_amount > 0:
         lines.append(f"💸 已退款：{format_money(refund_amount)} USDT")
@@ -445,7 +463,7 @@ def build_category_keyboard(rows: list[dict[str, Any]]) -> InlineKeyboardMarkup:
                 )
             ]
         )
-    buttons.append([InlineKeyboardButton("🏠 主菜单", callback_data="nav:menu")])
+    buttons.append([premium_inline_button(BUTTON_MAIN_MENU, "nav:menu", HOME_EMOJI_ID)])
     buttons.append([InlineKeyboardButton("❌ 关闭", callback_data="nav:close")])
     return InlineKeyboardMarkup(buttons)
 
@@ -491,7 +509,7 @@ def build_product_keyboard(
     buttons.append(nav_row)
     buttons.append(
         [
-            InlineKeyboardButton("🏠 主菜单", callback_data="nav:menu"),
+            premium_inline_button(BUTTON_MAIN_MENU, "nav:menu", HOME_EMOJI_ID),
             InlineKeyboardButton("🔙 返回分类", callback_data="nav:cats"),
         ]
     )
@@ -510,16 +528,16 @@ def render_products_view(
 
 
 def build_product_detail_keyboard(product_id: int, category_id: int, page: int) -> InlineKeyboardMarkup:
-    buttons: list[list[InlineKeyboardButton]] = [[InlineKeyboardButton("✅ 购买", callback_data=f"qbuy:{product_id}:1:{category_id}:{page}")]]
+    buttons: list[list[InlineKeyboardButton]] = [[premium_inline_button("购买", f"qbuy:{product_id}:1:{category_id}:{page}", BUY_BUTTON_EMOJI_ID)]]
     if category_id > 0:
         buttons.append(
             [
-                InlineKeyboardButton("🏠 主菜单", callback_data="nav:menu"),
-                InlineKeyboardButton("🔙 返回", callback_data=f"cat:{category_id}:{page}"),
+                premium_inline_button(BUTTON_MAIN_MENU, "nav:menu", HOME_EMOJI_ID),
+                premium_inline_button("返回", f"cat:{category_id}:{page}", BACK_EMOJI_ID),
             ]
         )
     else:
-        buttons.append([InlineKeyboardButton("🏠 主菜单", callback_data="nav:menu")])
+        buttons.append([premium_inline_button(BUTTON_MAIN_MENU, "nav:menu", HOME_EMOJI_ID)])
     return InlineKeyboardMarkup(buttons)
 
 
@@ -531,9 +549,9 @@ def render_product_detail_view(
     product_id = safe_int(row.get("productId"))
     product_name = str(row.get("productName") or f"商品 {product_id}")
     text = (
-        f"✅ 您正在购买：{product_name}\n\n"
-        f"💰 价格：{format_money(safe_float(row.get('price')))} USDT\n\n"
-        f"📊 库存：{safe_int(row.get('totalStock'))}\n\n"
+        f"{premium_text_prefix(BUYING_EMOJI_ID, '✅', '您正在购买：')}{html.escape(product_name)}\n\n"
+        f"{premium_text_prefix(PRICE_EMOJI_ID, '💰', '价格：')}{format_money(safe_float(row.get('price')))} USDT\n\n"
+        f"{premium_text_prefix(STOCK_EMOJI_ID, '📊', '库存：')}{safe_int(row.get('totalStock'))}\n\n"
         f"{detail_notice()}"
     )
     return text, build_product_detail_keyboard(product_id, category_id, page)
@@ -546,7 +564,7 @@ def build_category_keyboard_configured(settings: Settings, rows: list[dict[str, 
         stock = safe_int(row.get("totalStock"))
         name = shorten(str(row.get("categoryName") or f"分类 {category_id}"), 26)
         buttons.append([catalog_button(settings, f"{name} 库存 [{stock}]", f"cat:{category_id}:0")])
-    buttons.append([InlineKeyboardButton("🏠 主菜单", callback_data="nav:menu")])
+    buttons.append([premium_inline_button(BUTTON_MAIN_MENU, "nav:menu", HOME_EMOJI_ID)])
     buttons.append([InlineKeyboardButton("❌ 关闭", callback_data="nav:close")])
     return InlineKeyboardMarkup(buttons)
 
@@ -579,7 +597,7 @@ def build_product_keyboard_configured(
     buttons.append(nav_row)
     buttons.append(
         [
-            InlineKeyboardButton("🏠 主菜单", callback_data="nav:menu"),
+            premium_inline_button(BUTTON_MAIN_MENU, "nav:menu", HOME_EMOJI_ID),
             InlineKeyboardButton("🔙 返回分类", callback_data="nav:cats"),
         ]
     )
@@ -606,9 +624,9 @@ def render_product_detail_view_configured(
     product_name = str(row.get("productName") or f"商品 {product_id}")
     sell_price = resolve_sell_price(settings, row)
     text = (
-        f"✅ 您正在购买：{product_name}\n\n"
-        f"💰 价格：{format_money(sell_price)} USDT\n\n"
-        f"📊 库存：{safe_int(row.get('totalStock'))}\n\n"
+        f"{premium_text_prefix(BUYING_EMOJI_ID, '✅', '您正在购买：')}{html.escape(product_name)}\n\n"
+        f"{premium_text_prefix(PRICE_EMOJI_ID, '💰', '价格：')}{format_money(sell_price)} USDT\n\n"
+        f"{premium_text_prefix(STOCK_EMOJI_ID, '📊', '库存：')}{safe_int(row.get('totalStock'))}\n\n"
         f"{detail_notice()}"
     )
     return text, build_product_detail_keyboard(product_id, category_id, page)
@@ -692,7 +710,7 @@ async def show_categories(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if not rows:
         await reply_inline(update, "当前没有分类。")
         return
-    await reply_inline(update, categories_intro(), build_category_keyboard_configured(settings, rows))
+    await reply_inline(update, categories_intro(), build_category_keyboard_configured(settings, rows), parse_mode="HTML")
 
 
 async def show_products(
@@ -713,7 +731,7 @@ async def show_products(
         return
     category_name = category_name_from_rows(categories, category_id)
     text, keyboard = render_products_view_configured(settings, category_name, category_id, rows, page)
-    await reply_inline(update, text, keyboard)
+    await reply_inline(update, text, keyboard, parse_mode="HTML")
 
 
 async def show_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -748,7 +766,7 @@ async def show_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 InlineKeyboardButton("🛒 商品列表", callback_data="nav:cats"),
                 InlineKeyboardButton("📦 我的订单", callback_data="nav:orders"),
             ],
-            [InlineKeyboardButton("🏠 主菜单", callback_data="nav:menu")],
+            [premium_inline_button(BUTTON_MAIN_MENU, "nav:menu", HOME_EMOJI_ID)],
         ]
     )
     await reply_inline(update, "\n".join(lines), keyboard)
@@ -769,7 +787,7 @@ async def show_recharge(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     keyboard = InlineKeyboardMarkup(
         [
             [InlineKeyboardButton("👤 个人中心", callback_data="nav:profile")],
-            [InlineKeyboardButton("🏠 主菜单", callback_data="nav:menu")],
+            [premium_inline_button(BUTTON_MAIN_MENU, "nav:menu", HOME_EMOJI_ID)],
         ]
     )
     await reply_inline(update, text, keyboard)
@@ -783,7 +801,7 @@ async def show_notice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         "3. 已发货商品默认不支持无理由退换。\n"
         "4. 如遇问题请尽快联系管理员处理。"
     )
-    keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🏠 返回菜单", callback_data="nav:menu")]])
+    keyboard = InlineKeyboardMarkup([[premium_inline_button(BUTTON_MAIN_MENU, "nav:menu", HOME_EMOJI_ID)]])
     await reply_inline(update, text, keyboard)
 
 
@@ -810,7 +828,7 @@ async def show_orders(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     keyboard = InlineKeyboardMarkup(
         [
             [InlineKeyboardButton("👤 个人中心", callback_data="nav:profile")],
-            [InlineKeyboardButton("🏠 主菜单", callback_data="nav:menu")],
+            [premium_inline_button(BUTTON_MAIN_MENU, "nav:menu", HOME_EMOJI_ID)],
         ]
     )
     await reply_inline(update, text, keyboard)
@@ -867,7 +885,7 @@ async def product(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     row = payload.get("data") or {}
     text, keyboard = render_product_detail_view_configured(settings, row, category_id=0, page=0)
-    await update.message.reply_text(text, reply_markup=keyboard)
+    await update.message.reply_text(text, reply_markup=keyboard, parse_mode="HTML")
 
 
 async def execute_purchase(
@@ -1075,6 +1093,7 @@ async def finalize_remote_order(
                                     quantity_success,
                                     refund_amount,
                                 ),
+                                parse_mode="HTML",
                             )
                     with zip_path.open("rb") as document_fp:
                         await context.bot.send_document(
@@ -1337,9 +1356,10 @@ async def search_text_rich(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                     photo=photo_fp,
                     caption=caption,
                     reply_markup=keyboard,
+                    parse_mode="HTML",
                 )
         else:
-            await update.message.reply_text(caption, reply_markup=keyboard)
+            await update.message.reply_text(caption, reply_markup=keyboard, parse_mode="HTML")
         return
     if not keyword or keyword in MENU_BUTTON_TEXTS | {BUTTON_PRODUCTS, BUTTON_MAIN_MENU, BUTTON_PROFILE, BUTTON_RECHARGE}:
         return
@@ -1429,7 +1449,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             return
         row = payload.get("data") or {}
         text, keyboard = render_product_detail_view_configured(settings, row, category_id, page)
-        await reply_inline(update, text, keyboard)
+        await reply_inline(update, text, keyboard, parse_mode="HTML")
         return
 
     if action == "qbuy" and len(parts) == 5:

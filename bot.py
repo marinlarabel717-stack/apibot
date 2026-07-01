@@ -722,6 +722,11 @@ async def build_main_menu_message(
     return text, main_menu_inline
 
 
+async def refresh_bottom_menu_keyboard(update: Update) -> None:
+    if update.message is not None:
+        await update.message.reply_text("底部菜单已刷新。", reply_markup=MENU_KEYBOARD)
+
+
 async def show_start_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
     if user is None:
@@ -729,6 +734,7 @@ async def show_start_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     text, main_menu_inline = await build_main_menu_message(context, user)
     if update.callback_query is not None:
         await update.callback_query.answer()
+    await refresh_bottom_menu_keyboard(update)
     start_menu_image_path = START_MENU_IMAGE_PATH if START_MENU_IMAGE_PATH.exists() else LEGACY_START_MENU_IMAGE_PATH
     if start_menu_image_path.exists():
         with start_menu_image_path.open("rb") as photo_fp:

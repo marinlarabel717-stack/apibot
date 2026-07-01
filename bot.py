@@ -193,7 +193,8 @@ ADMIN_ADD_BALANCE_TITLE_EMOJI_ID = "6321041414067068140"
 ADMIN_ADD_BALANCE_USER_EMOJI_ID = "6273676592036191055"
 ADMIN_ADD_BALANCE_INCREASE_EMOJI_ID = "6320823470246600333"
 SYSTEM_ERROR_EMOJI_ID = "6321241559543062538"
-ADMIN_NEW_ORDER_USER_EMOJI_ID = "5994502837327892086"
+ADMIN_NEW_ORDER_TITLE_EMOJI_ID = "5994502837327892086"
+ADMIN_NEW_ORDER_USER_EMOJI_ID = "5886412370347036129"
 ADMIN_NEW_ORDER_USER_ID_EMOJI_ID = "5771887475421090729"
 ADMIN_NEW_ORDER_PRODUCT_EMOJI_ID = "5985472565508838112"
 ADMIN_NEW_ORDER_QUANTITY_EMOJI_ID = "5877485980901971030"
@@ -575,7 +576,8 @@ def build_admin_new_order_text(
     if username:
         user_line = f"{user_line} @{username}"
 
-    add_text("🎉 您有新的购买订单\n\n")
+    add_text("🎉", ADMIN_NEW_ORDER_TITLE_EMOJI_ID)
+    add_text(" 您有新的购买订单\n\n")
     add_text("👤", ADMIN_NEW_ORDER_USER_EMOJI_ID)
     add_text(f" 用户: {user_line}\n")
     add_text("👤", ADMIN_NEW_ORDER_USER_ID_EMOJI_ID)
@@ -834,7 +836,7 @@ def build_delivery_ready_text(
 
 
 def order_created_caption() -> str:
-    return premium_text_prefix(ORDER_CREATED_EMOJI_ID, "⏳", "订单已创建，正在检查账号存活并打包，请稍后...")
+    return premium_text_prefix(PACKED_DONE_EMOJI_ID, "✅", "订单已创建，正在检查账号存活并打包，请稍后...")
 
 
 def delivery_storage_filename(task_id: str, file_url: str) -> str:

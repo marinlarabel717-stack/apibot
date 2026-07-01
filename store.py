@@ -31,7 +31,9 @@ class Store:
                 CREATE TABLE IF NOT EXISTS users (
                     user_id INTEGER PRIMARY KEY,
                     username TEXT NOT NULL DEFAULT '',
+                    display_name TEXT NOT NULL DEFAULT '',
                     balance REAL NOT NULL DEFAULT 0,
+                    is_active INTEGER NOT NULL DEFAULT 1,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
@@ -64,21 +66,45 @@ class Store:
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS app_settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL DEFAULT '',
+                    updated_at TEXT NOT NULL,
+                    updated_by INTEGER NOT NULL DEFAULT 0
+                );
+
+                CREATE TABLE IF NOT EXISTS admin_actions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    admin_user_id INTEGER NOT NULL,
+                    action TEXT NOT NULL,
+                    target TEXT NOT NULL DEFAULT '',
+                    detail TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL
+                );
                 """
             )
+            user_columns = {row["name"] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
+            if "display_name" not in user_columns:
+                conn.execute("ALTER TABLE users ADD COLUMN display_name TEXT NOT NULL DEFAULT ''")
+            if "is_active" not in user_columns:
+                conn.execute("ALTER TABLE users ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1")
+            conn.commit()
 
-    def ensure_user(self, user_id: int, username: str = "") -> None:
+    def ensure_user(self, user_id: int, username: str = "", display_name: str = "") -> None:
         with self._lock, self._connect() as conn:
             ts = now_iso()
             conn.execute(
                 """
-                INSERT INTO users (user_id, username, balance, created_at, updated_at)
-                VALUES (?, ?, 0, ?, ?)
+                INSERT INTO users (user_id, username, display_name, balance, is_active, created_at, updated_at)
+                VALUES (?, ?, ?, 0, 1, ?, ?)
                 ON CONFLICT(user_id) DO UPDATE SET
                     username = excluded.username,
+                    display_name = excluded.display_name,
+                    is_active = 1,
                     updated_at = excluded.updated_at
                 """,
-                (int(user_id), username or "", ts, ts),
+                (int(user_id), username or "", display_name or "", ts, ts),
             )
             conn.commit()
 
@@ -92,8 +118,8 @@ class Store:
             ts = now_iso()
             conn.execute(
                 """
-                INSERT INTO users (user_id, username, balance, created_at, updated_at)
-                VALUES (?, '', 0, ?, ?)
+                INSERT INTO users (user_id, username, display_name, balance, is_active, created_at, updated_at)
+                VALUES (?, '', '', 0, 1, ?, ?)
                 ON CONFLICT(user_id) DO NOTHING
                 """,
                 (int(user_id), ts, ts),
@@ -118,8 +144,8 @@ class Store:
             ts = now_iso()
             conn.execute(
                 """
-                INSERT INTO users (user_id, username, balance, created_at, updated_at)
-                VALUES (?, '', 0, ?, ?)
+                INSERT INTO users (user_id, username, display_name, balance, is_active, created_at, updated_at)
+                VALUES (?, '', '', 0, 1, ?, ?)
                 ON CONFLICT(user_id) DO NOTHING
                 """,
                 (int(user_id), ts, ts),
@@ -189,6 +215,95 @@ class Store:
         with self._connect() as conn:
             row = conn.execute("SELECT * FROM orders WHERE task_id = ?", (str(task_id),)).fetchone()
             return dict(row) if row else None
+
+    def get_user(self, user_id: int) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM users WHERE user_id = ?", (int(user_id),)).fetchone()
+            return dict(row) if row else None
+
+    def get_user_by_username(self, username: str) -> dict[str, Any] | None:
+        username = str(username or "").strip().lstrip("@")
+        if not username:
+            return None
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM users WHERE lower(username) = lower(?) ORDER BY updated_at DESC LIMIT 1",
+                (username,),
+            ).fetchone()
+            return dict(row) if row else None
+
+    def count_users(self, active_only: bool = True) -> int:
+        with self._connect() as conn:
+            if active_only:
+                row = conn.execute("SELECT COUNT(*) AS total FROM users WHERE is_active = 1").fetchone()
+            else:
+                row = conn.execute("SELECT COUNT(*) AS total FROM users").fetchone()
+            return int(row["total"]) if row else 0
+
+    def list_users(self, limit: int = 20, offset: int = 0, active_only: bool = True) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            if active_only:
+                rows = conn.execute(
+                    """
+                    SELECT *
+                    FROM users
+                    WHERE is_active = 1
+                    ORDER BY created_at DESC
+                    LIMIT ? OFFSET ?
+                    """,
+                    (int(limit), int(offset)),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT *
+                    FROM users
+                    ORDER BY created_at DESC
+                    LIMIT ? OFFSET ?
+                    """,
+                    (int(limit), int(offset)),
+                ).fetchall()
+            return [dict(row) for row in rows]
+
+    def mark_user_inactive(self, user_id: int) -> None:
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                "UPDATE users SET is_active = 0, updated_at = ? WHERE user_id = ?",
+                (now_iso(), int(user_id)),
+            )
+            conn.commit()
+
+    def get_runtime_settings(self) -> dict[str, str]:
+        with self._connect() as conn:
+            rows = conn.execute("SELECT key, value FROM app_settings").fetchall()
+            return {str(row["key"]): str(row["value"]) for row in rows}
+
+    def set_runtime_setting(self, key: str, value: str, updated_by: int = 0) -> None:
+        with self._lock, self._connect() as conn:
+            ts = now_iso()
+            conn.execute(
+                """
+                INSERT INTO app_settings (key, value, updated_at, updated_by)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(key) DO UPDATE SET
+                    value = excluded.value,
+                    updated_at = excluded.updated_at,
+                    updated_by = excluded.updated_by
+                """,
+                (str(key), str(value), ts, int(updated_by)),
+            )
+            conn.commit()
+
+    def log_admin_action(self, admin_user_id: int, action: str, target: str = "", detail: str = "") -> None:
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO admin_actions (admin_user_id, action, target, detail, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (int(admin_user_id), str(action), str(target), str(detail), now_iso()),
+            )
+            conn.commit()
 
     def list_user_orders(self, user_id: int, limit: int = 10) -> list[dict[str, Any]]:
         with self._connect() as conn:

@@ -18,7 +18,7 @@ from telegram import (
     Update,
 )
 from telegram.constants import KeyboardButtonStyle
-from telegram.error import BadRequest
+from telegram.error import BadRequest, Forbidden
 from telegram.ext import (
     Application,
     ApplicationBuilder,
@@ -147,6 +147,14 @@ MENU_KEYBOARD = ReplyKeyboardMarkup(
 )
 
 PENDING_PURCHASE_KEY = "pending_purchase_quantity"
+PENDING_ADMIN_KEY = "pending_admin_action"
+ADMIN_USERS_PAGE_SIZE = 8
+ADMIN_SEND_SCOPE_SINGLE = "single"
+ADMIN_SEND_SCOPE_ALL = "all"
+RUNTIME_KEY_RECHARGE_ADDRESS = "recharge_address"
+RUNTIME_KEY_OKPAY_CONFIG = "okpay_config"
+RUNTIME_KEY_CUSTOMER_SERVICE = "customer_service_contact"
+RUNTIME_KEY_RESTOCK_CHANNEL = "restock_channel"
 START_MENU_EMOJI_USDT_ID = "6334575946938451719"
 START_MENU_EMOJI_SPENT_ID = "6334456344984159861"
 START_MENU_EMOJI_QUANTITY_ID = "6334602442591700514"
@@ -236,6 +244,79 @@ def should_trigger_product_search(keyword: str) -> bool:
         return True
 
     return any(compact.startswith(country) for country in SEARCH_COUNTRY_KEYWORDS)
+
+
+def get_pending_admin_action(context: ContextTypes.DEFAULT_TYPE) -> dict[str, Any] | None:
+    pending = context.user_data.get(PENDING_ADMIN_KEY)
+    return pending if isinstance(pending, dict) else None
+
+
+def set_pending_admin_action(context: ContextTypes.DEFAULT_TYPE, pending: dict[str, Any]) -> None:
+    context.user_data[PENDING_ADMIN_KEY] = pending
+
+
+def clear_pending_admin_action(context: ContextTypes.DEFAULT_TYPE) -> None:
+    context.user_data.pop(PENDING_ADMIN_KEY, None)
+
+
+def get_runtime_config(context: ContextTypes.DEFAULT_TYPE) -> dict[str, str]:
+    return context.application.bot_data.setdefault("runtime_config", {})
+
+
+def runtime_value(context: ContextTypes.DEFAULT_TYPE, key: str, default: str = "") -> str:
+    return str(get_runtime_config(context).get(key) or default or "")
+
+
+def effective_customer_service_contact(context: ContextTypes.DEFAULT_TYPE, settings: Settings) -> str:
+    return runtime_value(context, RUNTIME_KEY_CUSTOMER_SERVICE, settings.customer_service_contact)
+
+
+def effective_restock_channel(context: ContextTypes.DEFAULT_TYPE, settings: Settings) -> str:
+    return runtime_value(context, RUNTIME_KEY_RESTOCK_CHANNEL, settings.restock_channel)
+
+
+def effective_recharge_address(context: ContextTypes.DEFAULT_TYPE) -> str:
+    return runtime_value(context, RUNTIME_KEY_RECHARGE_ADDRESS, "")
+
+
+def effective_okpay_config(context: ContextTypes.DEFAULT_TYPE) -> str:
+    return runtime_value(context, RUNTIME_KEY_OKPAY_CONFIG, "")
+
+
+def user_label(row: dict[str, Any]) -> str:
+    display_name = " ".join(str(row.get("display_name") or "").split()).strip()
+    username = str(row.get("username") or "").strip()
+    if display_name:
+        return display_name
+    if username:
+        return f"@{username}"
+    return str(row.get("user_id") or "unknown")
+
+
+def format_user_created_at(value: Any) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return "-"
+    try:
+        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        return dt.strftime("%Y-%m-%d %H:%M")
+    except ValueError:
+        return raw
+
+
+def admin_send_button_markup(payload: dict[str, Any]) -> InlineKeyboardMarkup | None:
+    button_text = str(payload.get("button_text") or "").strip()
+    button_url = str(payload.get("button_url") or "").strip()
+    if not button_text or not button_url:
+        return None
+    return InlineKeyboardMarkup([[InlineKeyboardButton(button_text, url=button_url)]])
+
+
+def is_delivery_failure(exc: Exception) -> bool:
+    if isinstance(exc, Forbidden):
+        return True
+    text = str(exc).lower()
+    return any(token in text for token in ("chat not found", "bot was blocked", "user is deactivated", "forbidden"))
 
 
 async def call_blocking(func, *args, **kwargs):
@@ -395,7 +476,15 @@ def build_text_with_custom_emoji(parts: list[tuple[str, str | None]], code_spans
     return text, tuple(utf16_entities)
 
 
-def build_start_menu_text(settings: Settings, user: Any, balance: float, total_spent: float, total_quantity: int) -> tuple[str, tuple[MessageEntity, ...]]:
+def build_start_menu_text(
+    settings: Settings,
+    user: Any,
+    balance: float,
+    total_spent: float,
+    total_quantity: int,
+    restock_channel: str,
+    customer_service_contact: str,
+) -> tuple[str, tuple[MessageEntity, ...]]:
     parts: list[tuple[str, str | None]] = []
     code_spans: list[tuple[int, int]] = []
     offset = 0
@@ -428,10 +517,10 @@ def build_start_menu_text(settings: Settings, user: Any, balance: float, total_s
     add_text("\n\n")
 
     add_text("🟢", custom_emoji_id=START_MENU_EMOJI_RESTOCK_ID)
-    add_text(f" 补货频道：{settings.restock_channel}\n")
+    add_text(f" 补货频道：{restock_channel}\n")
 
     add_text("☎️", custom_emoji_id=START_MENU_EMOJI_SUPPORT_ID)
-    add_text(f" 联系客服：{settings.customer_service_contact}")
+    add_text(f" 联系客服：{customer_service_contact}")
 
     return build_text_with_custom_emoji(parts, code_spans)
 
@@ -918,7 +1007,7 @@ async def build_main_menu_message(
     user: Any,
 ) -> tuple[str, tuple[MessageEntity, ...], InlineKeyboardMarkup]:
     settings, store, _ = get_services(context)
-    await call_blocking(store.ensure_user, user.id, user.username or "")
+    await call_blocking(store.ensure_user, user.id, user.username or "", user.full_name or "")
     balance = await call_blocking(store.get_balance, user.id)
     summary = await call_blocking(store.get_user_summary, user.id)
     text, entities = build_start_menu_text(
@@ -927,6 +1016,8 @@ async def build_main_menu_message(
         balance,
         safe_float(summary.get("total_spent")),
         safe_int(summary.get("total_quantity")),
+        effective_restock_channel(context, settings),
+        effective_customer_service_contact(context, settings),
     )
     main_menu_inline = build_main_menu_inline(settings)
     return text, entities, main_menu_inline
@@ -973,8 +1064,8 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     user = update.effective_user
     if user is None:
         return
-    text, main_menu_inline = await build_main_menu_message(context, user)
-    await reply_inline(update, text, main_menu_inline, parse_mode="HTML")
+    text, entities, main_menu_inline = await build_main_menu_message(context, user)
+    await reply_inline(update, text, main_menu_inline, entities=entities)
 
 
 async def show_categories(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1017,7 +1108,7 @@ async def show_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     user = update.effective_user
     if user is None:
         return
-    await call_blocking(store.ensure_user, user.id, user.username or "")
+    await call_blocking(store.ensure_user, user.id, user.username or "", user.full_name or "")
     balance = await call_blocking(store.get_balance, user.id)
     rows = await call_blocking(store.list_user_orders, user.id, 5)
     lines = [
@@ -1055,12 +1146,20 @@ async def show_recharge(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     user = update.effective_user
     balance = 0.0
     if user is not None:
-        await call_blocking(store.ensure_user, user.id, user.username or "")
+        await call_blocking(store.ensure_user, user.id, user.username or "", user.full_name or "")
         balance = await call_blocking(store.get_balance, user.id)
+    recharge_address = effective_recharge_address(context)
+    okpay_config = effective_okpay_config(context)
+    extra_lines: list[str] = []
+    if recharge_address:
+        extra_lines.extend(["", f"充值地址：{recharge_address}"])
+    if okpay_config:
+        extra_lines.extend(["", f"OKPAY 配置：{okpay_config}"])
     text = (
         f"💰 {settings.shop_title} - 充值中心\n\n"
         f"当前余额：{format_money(balance)} USDT\n\n"
         f"{settings.recharge_text}"
+        + "\n".join(extra_lines)
     )
     keyboard = InlineKeyboardMarkup(
         [
@@ -1075,7 +1174,7 @@ async def show_customer_service(update: Update, context: ContextTypes.DEFAULT_TY
     text = premium_text_prefix(
         CUSTOMER_SERVICE_EMOJI_ID,
         "☎️",
-        f"联系客服：{settings.customer_service_contact}",
+        f"联系客服：{effective_customer_service_contact(context, settings)}",
     )
     await reply_inline(update, text, parse_mode="HTML")
 
@@ -1094,6 +1193,460 @@ async def show_notice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 async def show_language(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await send_menu_message(update, "🌐 切换语言功能稍后补上，当前默认中文。")
+
+
+def build_admin_home_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("用户列表", callback_data="adm:users:0"),
+                InlineKeyboardButton("私信用户", callback_data="adm:send:single"),
+            ],
+            [
+                InlineKeyboardButton("群发通知", callback_data="adm:send:all"),
+                InlineKeyboardButton("充值地址", callback_data="adm:cfg:recharge"),
+            ],
+            [
+                InlineKeyboardButton("OKPAY配置", callback_data="adm:cfg:okpay"),
+                InlineKeyboardButton("客服/补货", callback_data="adm:cfg:contact"),
+            ],
+            [InlineKeyboardButton("取消当前操作", callback_data="adm:cancel")],
+        ]
+    )
+
+
+def admin_control_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("确认发送", callback_data="adm:sendgo"),
+                InlineKeyboardButton("取消", callback_data="adm:cancel"),
+            ]
+        ]
+    )
+
+
+async def show_admin_home(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    settings, store, _ = get_services(context)
+    user = update.effective_user
+    if user is None:
+        return
+    if not is_admin(settings, user.id):
+        await send_menu_message(update, "只有管理员可以使用 /admin。")
+        return
+    clear_pending_admin_action(context)
+    total_users = await call_blocking(store.count_users, True)
+    all_users = await call_blocking(store.count_users, False)
+    inactive_users = max(0, all_users - total_users)
+    text = (
+        "管理员后台\n\n"
+        f"活跃用户：{total_users}\n"
+        f"失效用户：{inactive_users}\n"
+        f"充值地址：{effective_recharge_address(context) or '未配置'}\n"
+        f"客服：{effective_customer_service_contact(context, settings)}\n"
+        f"补货频道：{effective_restock_channel(context, settings)}"
+    )
+    await reply_inline(update, text, build_admin_home_keyboard())
+
+
+async def show_admin_users(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 0) -> None:
+    settings, store, _ = get_services(context)
+    user = update.effective_user
+    if user is None or not is_admin(settings, user.id):
+        await send_menu_message(update, "只有管理员可以查看用户列表。")
+        return
+    total = await call_blocking(store.count_users, True)
+    total_pages = max(1, (total + ADMIN_USERS_PAGE_SIZE - 1) // ADMIN_USERS_PAGE_SIZE)
+    page = max(0, min(page, total_pages - 1))
+    rows = await call_blocking(store.list_users, ADMIN_USERS_PAGE_SIZE, page * ADMIN_USERS_PAGE_SIZE, True)
+    lines = [f"用户列表 {page + 1}/{total_pages}", ""]
+    buttons: list[list[InlineKeyboardButton]] = []
+    for row in rows:
+        username_text = f"@{row.get('username')}" if row.get("username") else "未设置用户名"
+        lines.append(f"{format_user_created_at(row.get('created_at'))} | {user_label(row)} | {username_text}")
+        lines.append(f"ID: {row.get('user_id')} | 余额: {format_money(safe_float(row.get('balance')))} USDT")
+        lines.append("")
+        buttons.append([InlineKeyboardButton(user_label(row), callback_data=f"adm:user:{int(row['user_id'])}:{page}")])
+    if not rows:
+        lines.append("暂无活跃用户。")
+    nav_row: list[InlineKeyboardButton] = []
+    if page > 0:
+        nav_row.append(InlineKeyboardButton("上一页", callback_data=f"adm:users:{page - 1}"))
+    nav_row.append(InlineKeyboardButton(f"{page + 1}/{total_pages}", callback_data=f"adm:users:{page}"))
+    if page < total_pages - 1:
+        nav_row.append(InlineKeyboardButton("下一页", callback_data=f"adm:users:{page + 1}"))
+    buttons.append(nav_row)
+    buttons.append([InlineKeyboardButton("返回后台", callback_data="adm:home")])
+    await reply_inline(update, "\n".join(lines).strip(), InlineKeyboardMarkup(buttons))
+
+
+async def show_admin_user_detail(update: Update, context: ContextTypes.DEFAULT_TYPE, target_user_id: int, page: int = 0) -> None:
+    settings, store, _ = get_services(context)
+    user = update.effective_user
+    if user is None or not is_admin(settings, user.id):
+        await send_menu_message(update, "只有管理员可以查看用户详情。")
+        return
+    row = await call_blocking(store.get_user, target_user_id)
+    if not row:
+        await reply_inline(update, f"找不到用户 {target_user_id}。", InlineKeyboardMarkup([[InlineKeyboardButton("返回列表", callback_data=f"adm:users:{page}")]]))
+        return
+    username_text = f"@{row.get('username')}" if row.get("username") else "未设置"
+    text = (
+        "用户详情\n\n"
+        f"ID：{row.get('user_id')}\n"
+        f"名称：{user_label(row)}\n"
+        f"用户名：{username_text}\n"
+        f"注册时间：{format_user_created_at(row.get('created_at'))}\n"
+        f"余额：{format_money(safe_float(row.get('balance')))} USDT\n"
+        f"状态：{'活跃' if safe_int(row.get('is_active'), 1) == 1 else '失效'}"
+    )
+    keyboard = InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("私信TA", callback_data=f"adm:sendu:{target_user_id}")],
+            [InlineKeyboardButton("返回列表", callback_data=f"adm:users:{page}")],
+        ]
+    )
+    await reply_inline(update, text, keyboard)
+
+
+async def show_admin_config_page(update: Update, context: ContextTypes.DEFAULT_TYPE, section: str) -> None:
+    settings, _, _ = get_services(context)
+    if section == "recharge":
+        text = (
+            "充值地址配置\n\n"
+            f"当前充值地址：{effective_recharge_address(context) or '未配置'}\n"
+            f"当前充值说明：{settings.recharge_text}"
+        )
+        keyboard = InlineKeyboardMarkup(
+            [
+                [InlineKeyboardButton("修改充值地址", callback_data="adm:set:raddr")],
+                [InlineKeyboardButton("返回后台", callback_data="adm:home")],
+            ]
+        )
+    elif section == "okpay":
+        text = (
+            "OKPAY 配置\n\n"
+            f"当前配置：{effective_okpay_config(context) or '未配置'}\n"
+            "后面接 OKPAY API 时，先从这里取配置。"
+        )
+        keyboard = InlineKeyboardMarkup(
+            [
+                [InlineKeyboardButton("修改 OKPAY 配置", callback_data="adm:set:okpay")],
+                [InlineKeyboardButton("返回后台", callback_data="adm:home")],
+            ]
+        )
+    else:
+        text = (
+            "客服 / 补货配置\n\n"
+            f"客服：{effective_customer_service_contact(context, settings)}\n"
+            f"补货频道：{effective_restock_channel(context, settings)}"
+        )
+        keyboard = InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton("修改客服", callback_data="adm:set:cs"),
+                    InlineKeyboardButton("修改补货频道", callback_data="adm:set:restock"),
+                ],
+                [InlineKeyboardButton("返回后台", callback_data="adm:home")],
+            ]
+        )
+    await reply_inline(update, text, keyboard)
+
+
+async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await show_admin_home(update, context)
+
+
+async def prompt_admin_send_target(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    set_pending_admin_action(context, {"kind": "send_target"})
+    await send_menu_message(update, "请发送目标用户的 user_id 或 @username。")
+
+
+async def prompt_admin_send_content(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    scope: str,
+    target_user_id: int | None = None,
+    target_label: str = "",
+) -> None:
+    pending = {
+        "kind": "send_content",
+        "scope": scope,
+        "target_user_id": int(target_user_id) if target_user_id else None,
+        "target_label": target_label,
+    }
+    set_pending_admin_action(context, pending)
+    if scope == ADMIN_SEND_SCOPE_SINGLE:
+        await send_menu_message(update, f"准备私信 {target_label or target_user_id}。\n现在发送文本，或者直接发一张图片并带 caption。")
+    else:
+        await send_menu_message(update, "准备群发给全部活跃用户。\n现在发送文本，或者直接发一张图片并带 caption。")
+
+
+async def prompt_admin_setting_edit(update: Update, context: ContextTypes.DEFAULT_TYPE, key: str, title: str) -> None:
+    set_pending_admin_action(context, {"kind": "setting_edit", "setting_key": key, "setting_title": title})
+    await send_menu_message(update, f"请发送新的 {title}。\n如果要清空，直接发：-")
+
+
+async def send_admin_preview(update: Update, context: ContextTypes.DEFAULT_TYPE, pending: dict[str, Any]) -> None:
+    payload = pending.get("payload") or {}
+    reply_markup = admin_send_button_markup(payload)
+    preview_title = "消息预览"
+    if pending.get("scope") == ADMIN_SEND_SCOPE_ALL:
+        preview_title += "（群发全部活跃用户）"
+    else:
+        preview_title += f"（发送给 {pending.get('target_label') or pending.get('target_user_id')}）"
+    target_message = update.callback_query.message if update.callback_query is not None else update.message
+    if target_message is None:
+        return
+    await target_message.reply_text(preview_title)
+    if payload.get("content_type") == "photo" and payload.get("photo_file_id"):
+        await target_message.reply_photo(
+            photo=payload["photo_file_id"],
+            caption=str(payload.get("text") or "").strip() or None,
+            reply_markup=reply_markup,
+        )
+    else:
+        await target_message.reply_text(str(payload.get("text") or "（空文本）"), reply_markup=reply_markup)
+    pending["kind"] = "send_ready"
+    set_pending_admin_action(context, pending)
+    await target_message.reply_text("确认无误后点下面发送。", reply_markup=admin_control_keyboard())
+
+
+async def deliver_admin_payload(context: ContextTypes.DEFAULT_TYPE, user_id: int, payload: dict[str, Any]) -> None:
+    reply_markup = admin_send_button_markup(payload)
+    if payload.get("content_type") == "photo" and payload.get("photo_file_id"):
+        await context.bot.send_photo(
+            chat_id=int(user_id),
+            photo=payload["photo_file_id"],
+            caption=str(payload.get("text") or "").strip() or None,
+            reply_markup=reply_markup,
+        )
+        return
+    await context.bot.send_message(
+        chat_id=int(user_id),
+        text=str(payload.get("text") or "").strip() or " ",
+        reply_markup=reply_markup,
+    )
+
+
+async def execute_admin_send(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    settings, store, _ = get_services(context)
+    user = update.effective_user
+    pending = get_pending_admin_action(context)
+    if user is None or not is_admin(settings, user.id) or pending is None or pending.get("kind") != "send_ready":
+        await send_menu_message(update, "当前没有可发送的管理员消息。")
+        return
+    payload = pending.get("payload") or {}
+    scope = pending.get("scope")
+    clear_pending_admin_action(context)
+    if scope == ADMIN_SEND_SCOPE_SINGLE:
+        target_user_id = safe_int(pending.get("target_user_id"), 0)
+        try:
+            await deliver_admin_payload(context, target_user_id, payload)
+        except Exception as exc:
+            if is_delivery_failure(exc):
+                await call_blocking(store.mark_user_inactive, target_user_id)
+            await send_menu_message(update, f"发送失败：{exc}")
+            return
+        await call_blocking(store.log_admin_action, user.id, "admin_dm_single", str(target_user_id), str(payload.get("text") or payload.get("content_type") or ""))
+        await send_menu_message(update, f"已发送给用户 {target_user_id}。")
+        return
+
+    users = await call_blocking(store.list_users, 100000, 0, True)
+    total = len(users)
+    sent = 0
+    failed = 0
+    cleared = 0
+    progress_message = None
+    if update.callback_query is not None and update.callback_query.message is not None:
+        progress_message = await update.callback_query.message.reply_text(f"群发进度：0/{total}")
+    elif update.message is not None:
+        progress_message = await update.message.reply_text(f"群发进度：0/{total}")
+    for index, row in enumerate(users, start=1):
+        try:
+            await deliver_admin_payload(context, safe_int(row.get("user_id")), payload)
+            sent += 1
+        except Exception as exc:
+            failed += 1
+            if is_delivery_failure(exc):
+                await call_blocking(store.mark_user_inactive, safe_int(row.get("user_id")))
+                cleared += 1
+        if progress_message is not None and (index == total or index % 10 == 0):
+            try:
+                await progress_message.edit_text(f"群发进度：{index}/{total}\n成功：{sent}\n失败：{failed}\n已清理失效用户：{cleared}")
+            except BadRequest:
+                pass
+    await call_blocking(store.log_admin_action, user.id, "admin_broadcast", str(total), f"sent={sent},failed={failed},cleared={cleared}")
+    await send_menu_message(update, f"群发完成。\n总数：{total}\n成功：{sent}\n失败：{failed}\n已清理失效用户：{cleared}")
+
+
+async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> bool:
+    settings, store, _ = get_services(context)
+    user = update.effective_user
+    pending = get_pending_admin_action(context)
+    if user is None or pending is None or not is_admin(settings, user.id):
+        return False
+    kind = str(pending.get("kind") or "")
+    if kind == "send_target":
+        target = None
+        if text.isdigit():
+            target = await call_blocking(store.get_user, int(text))
+        if target is None:
+            target = await call_blocking(store.get_user_by_username, text)
+        if target is None:
+            await update.message.reply_text("没找到这个用户，请重新发送 user_id 或 @username。", reply_markup=MENU_KEYBOARD)
+            return True
+        await prompt_admin_send_content(update, context, ADMIN_SEND_SCOPE_SINGLE, safe_int(target.get("user_id")), user_label(target))
+        return True
+    if kind == "setting_edit":
+        setting_key = str(pending.get("setting_key") or "")
+        setting_title = str(pending.get("setting_title") or "配置")
+        value = "" if text.strip() == "-" else text.strip()
+        await call_blocking(store.set_runtime_setting, setting_key, value, user.id)
+        get_runtime_config(context)[setting_key] = value
+        await call_blocking(store.log_admin_action, user.id, "admin_setting_update", setting_key, value)
+        clear_pending_admin_action(context)
+        await send_menu_message(update, f"{setting_title} 已更新。")
+        return True
+    if kind == "send_content":
+        pending["payload"] = {
+            "content_type": "text",
+            "text": text,
+            "button_text": "",
+            "button_url": "",
+        }
+        pending["kind"] = "send_button_choice"
+        set_pending_admin_action(context, pending)
+        await update.message.reply_text(
+            "消息内容已记录。要不要加按钮？",
+            reply_markup=InlineKeyboardMarkup(
+                [
+                    [
+                        InlineKeyboardButton("直接预览", callback_data="adm:sendopt:none"),
+                        InlineKeyboardButton("添加按钮", callback_data="adm:sendopt:add"),
+                    ],
+                    [InlineKeyboardButton("取消", callback_data="adm:cancel")],
+                ]
+            ),
+        )
+        return True
+    if kind == "send_button_choice":
+        await update.message.reply_text("请直接点按钮选择“直接预览”或“添加按钮”。", reply_markup=MENU_KEYBOARD)
+        return True
+    if kind == "send_button":
+        pieces = [part.strip() for part in text.split("|", 1)]
+        if len(pieces) != 2 or not pieces[0] or not pieces[1].startswith(("http://", "https://")):
+            await update.message.reply_text("格式不对，请按这个发：按钮文字 | https://example.com", reply_markup=MENU_KEYBOARD)
+            return True
+        payload = pending.get("payload") or {}
+        payload["button_text"] = pieces[0]
+        payload["button_url"] = pieces[1]
+        pending["payload"] = payload
+        await send_admin_preview(update, context, pending)
+        return True
+    if kind == "send_ready":
+        await update.message.reply_text("预览已经生成了，直接点“确认发送”或“取消”就行。", reply_markup=MENU_KEYBOARD)
+        return True
+    return False
+
+
+async def handle_admin_photo_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    settings, _, _ = get_services(context)
+    user = update.effective_user
+    pending = get_pending_admin_action(context)
+    if user is None or update.message is None or pending is None or not is_admin(settings, user.id):
+        return
+    if str(pending.get("kind") or "") != "send_content":
+        return
+    photo = update.message.photo[-1] if update.message.photo else None
+    if photo is None:
+        return
+    pending["payload"] = {
+        "content_type": "photo",
+        "photo_file_id": photo.file_id,
+        "text": str(update.message.caption or "").strip(),
+        "button_text": "",
+        "button_url": "",
+    }
+    pending["kind"] = "send_button_choice"
+    set_pending_admin_action(context, pending)
+    await update.message.reply_text(
+        "图片内容已记录。要不要加按钮？",
+        reply_markup=InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton("直接预览", callback_data="adm:sendopt:none"),
+                    InlineKeyboardButton("添加按钮", callback_data="adm:sendopt:add"),
+                ],
+                [InlineKeyboardButton("取消", callback_data="adm:cancel")],
+            ]
+        ),
+    )
+
+
+async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE, parts: list[str]) -> None:
+    settings, _, _ = get_services(context)
+    user = update.effective_user
+    query = update.callback_query
+    if query is None or user is None:
+        return
+    if not is_admin(settings, user.id):
+        await query.answer("只有管理员可以操作", show_alert=True)
+        return
+    sub = parts[1] if len(parts) > 1 else ""
+    if sub == "home":
+        await show_admin_home(update, context)
+        return
+    if sub == "cancel":
+        clear_pending_admin_action(context)
+        await send_menu_message(update, "已取消当前管理员操作。")
+        return
+    if sub == "users":
+        await show_admin_users(update, context, safe_int(parts[2], 0) if len(parts) > 2 else 0)
+        return
+    if sub == "user" and len(parts) > 3:
+        await show_admin_user_detail(update, context, safe_int(parts[2], 0), safe_int(parts[3], 0))
+        return
+    if sub == "send" and len(parts) > 2:
+        if parts[2] == "single":
+            await prompt_admin_send_target(update, context)
+            return
+        if parts[2] == "all":
+            await prompt_admin_send_content(update, context, ADMIN_SEND_SCOPE_ALL)
+            return
+    if sub == "sendu" and len(parts) > 2:
+        await prompt_admin_send_content(update, context, ADMIN_SEND_SCOPE_SINGLE, safe_int(parts[2], 0), str(parts[2]))
+        return
+    if sub == "sendopt" and len(parts) > 2:
+        pending = get_pending_admin_action(context)
+        if pending is None:
+            await query.answer("没有待发送内容", show_alert=True)
+            return
+        if parts[2] == "none":
+            await send_admin_preview(update, context, pending)
+            return
+        pending["kind"] = "send_button"
+        set_pending_admin_action(context, pending)
+        await send_menu_message(update, "请发送按钮，格式：按钮文字 | https://example.com")
+        return
+    if sub == "sendgo":
+        await execute_admin_send(update, context)
+        return
+    if sub == "cfg" and len(parts) > 2:
+        await show_admin_config_page(update, context, parts[2])
+        return
+    if sub == "set" and len(parts) > 2:
+        mapping = {
+            "raddr": (RUNTIME_KEY_RECHARGE_ADDRESS, "充值地址"),
+            "okpay": (RUNTIME_KEY_OKPAY_CONFIG, "OKPAY 配置"),
+            "cs": (RUNTIME_KEY_CUSTOMER_SERVICE, "客服联系方式"),
+            "restock": (RUNTIME_KEY_RESTOCK_CHANNEL, "补货频道"),
+        }
+        if parts[2] in mapping:
+            key, title = mapping[parts[2]]
+            await prompt_admin_setting_edit(update, context, key, title)
+            return
+    await query.answer("暂不支持这个后台按钮", show_alert=False)
 
 
 async def show_orders(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1601,6 +2154,8 @@ async def search_text_rich(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if update.message is None or not update.message.text:
         return
     keyword = normalize_search_keyword(update.message.text)
+    if await handle_admin_text_input(update, context, keyword):
+        return
     pending_purchase = get_pending_purchase(context)
     if pending_purchase is not None:
         quantity = safe_int(keyword, -1)
@@ -1663,6 +2218,10 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     parts = query.data.split(":")
     action = parts[0]
+
+    if action == "adm":
+        await handle_admin_callback(update, context, parts)
+        return
 
     if action == "nav":
         clear_pending_purchase(context)
@@ -1780,10 +2339,12 @@ def build_application(settings: Settings) -> Application:
     application.bot_data["settings"] = settings
     application.bot_data["store"] = store
     application.bot_data["supplier"] = supplier
+    application.bot_data["runtime_config"] = store.get_runtime_settings()
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("menu", menu))
     application.add_handler(CommandHandler("help", reply_help))
+    application.add_handler(CommandHandler("admin", admin))
     application.add_handler(CommandHandler("me", me))
     application.add_handler(CommandHandler("categories", categories))
     application.add_handler(CommandHandler("products", products))
@@ -1799,6 +2360,7 @@ def build_application(settings: Settings) -> Application:
     application.add_handler(CallbackQueryHandler(on_callback))
     button_pattern = "^(" + "|".join(re.escape(text) for text in sorted(NON_SEARCH_BUTTON_TEXTS)) + ")$"
     application.add_handler(MessageHandler(filters.Regex(button_pattern), route_menu_text))
+    application.add_handler(MessageHandler(filters.PHOTO & ~filters.COMMAND, handle_admin_photo_input))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, search_text_rich))
 
     if application.job_queue is not None:

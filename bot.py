@@ -830,7 +830,6 @@ async def show_recharge(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     )
     keyboard = InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton("👤 个人中心", callback_data="nav:profile")],
             [premium_inline_button(BUTTON_MAIN_MENU, "nav:menu", HOME_EMOJI_ID)],
         ]
     )

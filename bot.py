@@ -82,6 +82,10 @@ MENU_KEYBOARD = ReplyKeyboardMarkup(
 )
 
 PENDING_PURCHASE_KEY = "pending_purchase_quantity"
+START_MENU_EMOJI_USDT_ID = "6334575946938451719"
+START_MENU_EMOJI_SPENT_ID = "6334456344984159861"
+START_MENU_EMOJI_QUANTITY_ID = "6334602442591700514"
+START_MENU_EMOJI_RESTOCK_ID = "6334740096293537039"
 
 
 def format_money(value: float) -> str:
@@ -115,6 +119,10 @@ def safe_float(value: Any, default: float = 0.0) -> float:
 
 async def call_blocking(func, *args, **kwargs):
     return await asyncio.to_thread(func, *args, **kwargs)
+
+
+def tg_custom_emoji(emoji_id: str, fallback: str) -> str:
+    return f'<tg-emoji emoji-id="{emoji_id}">{html.escape(fallback)}</tg-emoji>'
 
 
 def get_pending_purchase(context: ContextTypes.DEFAULT_TYPE) -> dict[str, int] | None:
@@ -194,13 +202,17 @@ def plain_catalog_button(label: str, callback_data: str) -> InlineKeyboardButton
 
 def build_start_menu_text(settings: Settings, user: Any, balance: float, total_spent: float, total_quantity: int) -> str:
     display_name = html.escape((getattr(user, "first_name", "") or getattr(user, "full_name", "") or "朋友").strip())
+    usdt_icon = tg_custom_emoji(START_MENU_EMOJI_USDT_ID, "💰")
+    spent_icon = tg_custom_emoji(START_MENU_EMOJI_SPENT_ID, "📊")
+    quantity_icon = tg_custom_emoji(START_MENU_EMOJI_QUANTITY_ID, "📦")
+    restock_icon = tg_custom_emoji(START_MENU_EMOJI_RESTOCK_ID, "🟢")
     return (
         f"晚上好，{display_name}\n"
         f"ID: {user.id}\n\n"
-        f"💰 USDT : {format_money(balance)}\n"
-        f"📊 消费金额 : {format_money(total_spent)}\n"
-        f"📦 购买数量 : {total_quantity}\n\n"
-        f"补货频道：{html.escape(settings.restock_channel)}"
+        f"{usdt_icon} USDT : {format_money(balance)}\n"
+        f"{spent_icon} 消费金额 : {format_money(total_spent)}\n"
+        f"{quantity_icon} 购买数量 : {total_quantity}\n\n"
+        f"{restock_icon} 补货频道：{html.escape(settings.restock_channel)}"
     )
 
 

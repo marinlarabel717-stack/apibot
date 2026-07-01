@@ -880,6 +880,65 @@ def download_delivery_file(supplier: SupplierClient, task_id: str, file_url: str
     return target_path
 
 
+async def deliver_order_file(
+    context: ContextTypes.DEFAULT_TYPE,
+    order_row: dict[str, Any],
+    supplier: SupplierClient,
+    include_ready_photo: bool = True,
+    notify_failure: bool = True,
+) -> bool:
+    _, store, _ = get_services(context)
+    task_id = str(order_row.get("task_id") or "").strip()
+    file_url = str(order_row.get("file_url") or "").strip()
+    if not task_id or not file_url:
+        return False
+    if str(order_row.get("delivery_sent_at") or "").strip():
+        return True
+
+    quantity = safe_int(order_row.get("quantity"))
+    quantity_success = safe_int(order_row.get("quantity_success"))
+    refund_amount = safe_float(order_row.get("refund_amount"))
+    user_id = safe_int(order_row.get("user_id"))
+    product_name = str(order_row.get("product_name") or f"商品 {order_row.get('product_id')}")
+
+    try:
+        zip_path = await call_blocking(download_delivery_file, supplier, task_id, file_url)
+        if include_ready_photo and DELIVERY_READY_IMAGE_PATH.exists():
+            with DELIVERY_READY_IMAGE_PATH.open("rb") as photo_fp:
+                delivery_text, delivery_entities = build_delivery_ready_text(
+                    product_name,
+                    quantity,
+                    quantity_success,
+                    refund_amount,
+                )
+                await context.bot.send_photo(
+                    chat_id=user_id,
+                    photo=photo_fp,
+                    caption=delivery_text,
+                    caption_entities=delivery_entities,
+                )
+        with zip_path.open("rb") as document_fp:
+            await context.bot.send_document(
+                chat_id=user_id,
+                document=document_fp,
+                filename=delivery_display_filename(product_name, quantity, file_url),
+                reply_markup=MENU_KEYBOARD,
+            )
+    except Exception as exc:
+        await call_blocking(store.mark_order_delivery_failed, task_id, repr(exc))
+        logger.exception("发送订单 zip 文件失败: %s", task_id)
+        if notify_failure:
+            await context.bot.send_message(
+                chat_id=user_id,
+                text=f"zip 文件发送失败，请稍后用 /order {task_id} 重试。",
+                reply_markup=MENU_KEYBOARD,
+            )
+        return False
+
+    await call_blocking(store.mark_order_delivery_sent, task_id)
+    return True
+
+
 async def reply_inline(
     update: Update,
     text: str,
@@ -2132,41 +2191,14 @@ async def finalize_remote_order(
                 text="\n".join(lines),
                 reply_markup=MENU_KEYBOARD,
             )
-            if file_url:
-                try:
-                    zip_path = await call_blocking(download_delivery_file, supplier, task_id, file_url)
-                    if DELIVERY_READY_IMAGE_PATH.exists():
-                        with DELIVERY_READY_IMAGE_PATH.open("rb") as photo_fp:
-                            delivery_text, delivery_entities = build_delivery_ready_text(
-                                str(final_row.get("product_name") or f"商品 {final_row.get('product_id')}"),
-                                quantity,
-                                quantity_success,
-                                refund_amount,
-                            )
-                            await context.bot.send_photo(
-                                chat_id=int(final_row["user_id"]),
-                                photo=photo_fp,
-                                caption=delivery_text,
-                                caption_entities=delivery_entities,
-                            )
-                    with zip_path.open("rb") as document_fp:
-                        await context.bot.send_document(
-                            chat_id=int(final_row["user_id"]),
-                            document=document_fp,
-                            filename=delivery_display_filename(
-                                str(final_row.get("product_name") or f"商品 {final_row.get('product_id')}"),
-                                quantity,
-                                file_url,
-                            ),
-                            reply_markup=MENU_KEYBOARD,
-                        )
-                except Exception:
-                    logger.exception("发送订单 zip 文件失败: %s", task_id)
-                    await context.bot.send_message(
-                        chat_id=int(final_row["user_id"]),
-                        text=f"zip 文件发送失败，请稍后用 /order {task_id} 重试。",
-                        reply_markup=MENU_KEYBOARD,
-                    )
+        if final_row and file_url and not str(final_row.get("delivery_sent_at") or "").strip():
+            await deliver_order_file(
+                context,
+                final_row,
+                supplier,
+                include_ready_photo=notify_user,
+                notify_failure=notify_user,
+            )
         summary = f"订单完成，成功数量 {quantity_success}/{quantity}"
         if refund_amount > 0:
             summary += f"，已退款 {format_money(refund_amount)} USDT"
@@ -2208,7 +2240,7 @@ def schedule_fast_order_probe(context: ContextTypes.DEFAULT_TYPE, task_id: str) 
 
 
 async def order(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    _, store, _ = get_services(context)
+    _, store, supplier = get_services(context)
     if update.message is None:
         return
     if not context.args:
@@ -2221,6 +2253,15 @@ async def order(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     _, summary = await finalize_remote_order(context, task_id, notify_user=False)
     local_order = await call_blocking(store.get_order, task_id) or local_order
+    if local_order.get("file_url") and not str(local_order.get("delivery_sent_at") or "").strip():
+        await deliver_order_file(
+            context,
+            local_order,
+            supplier,
+            include_ready_photo=True,
+            notify_failure=True,
+        )
+        local_order = await call_blocking(store.get_order, task_id) or local_order
     lines = [
         f"订单号: {task_id}",
         f"商品: {local_order.get('product_name')}",
@@ -2231,7 +2272,10 @@ async def order(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         f"结果: {summary}",
     ]
     if local_order.get("file_url"):
-        lines.append("发货文件: 机器人会直接发送 zip 文件")
+        if str(local_order.get("delivery_sent_at") or "").strip():
+            lines.append("发货文件: zip 已发送")
+        else:
+            lines.append("发货文件: zip 待发送，可用 /order 重试")
     await update.message.reply_text("\n".join(lines), reply_markup=MENU_KEYBOARD)
 
 
@@ -2580,18 +2624,31 @@ async def poll_processing_orders(context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     async with poll_lock:
-        settings, store, _ = get_services(context)
-        rows = await call_blocking(store.list_processing_orders, settings.order_poll_limit)
-        if not rows:
+        settings, store, supplier = get_services(context)
+        processing_rows = await call_blocking(store.list_processing_orders, settings.order_poll_limit)
+        pending_delivery_rows = await call_blocking(store.list_pending_delivery_orders, settings.order_poll_limit)
+        if not processing_rows and not pending_delivery_rows:
             return
 
         semaphore = asyncio.Semaphore(settings.order_poll_concurrency)
 
-        async def run_row(task_id: str) -> None:
+        async def run_processing_row(task_id: str) -> None:
             async with semaphore:
                 await poll_single_processing_order(context, task_id)
 
-        await asyncio.gather(*(run_row(str(row["task_id"])) for row in rows))
+        async def run_delivery_row(row: dict[str, Any]) -> None:
+            async with semaphore:
+                await deliver_order_file(
+                    context,
+                    row,
+                    supplier,
+                    include_ready_photo=False,
+                    notify_failure=False,
+                )
+
+        tasks = [run_processing_row(str(row["task_id"])) for row in processing_rows]
+        tasks.extend(run_delivery_row(row) for row in pending_delivery_rows)
+        await asyncio.gather(*tasks)
 
 
 def build_application(settings: Settings) -> Application:

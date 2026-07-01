@@ -62,6 +62,8 @@ class Store:
                     refund_amount REAL NOT NULL DEFAULT 0,
                     state TEXT NOT NULL,
                     file_url TEXT NOT NULL DEFAULT '',
+                    delivery_sent_at TEXT NOT NULL DEFAULT '',
+                    delivery_error TEXT NOT NULL DEFAULT '',
                     raw_payload TEXT NOT NULL DEFAULT '',
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
@@ -89,6 +91,11 @@ class Store:
                 conn.execute("ALTER TABLE users ADD COLUMN display_name TEXT NOT NULL DEFAULT ''")
             if "is_active" not in user_columns:
                 conn.execute("ALTER TABLE users ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1")
+            order_columns = {row["name"] for row in conn.execute("PRAGMA table_info(orders)").fetchall()}
+            if "delivery_sent_at" not in order_columns:
+                conn.execute("ALTER TABLE orders ADD COLUMN delivery_sent_at TEXT NOT NULL DEFAULT ''")
+            if "delivery_error" not in order_columns:
+                conn.execute("ALTER TABLE orders ADD COLUMN delivery_error TEXT NOT NULL DEFAULT ''")
             conn.commit()
 
     def ensure_user(self, user_id: int, username: str = "", display_name: str = "") -> None:
@@ -192,8 +199,8 @@ class Store:
                 INSERT OR REPLACE INTO orders (
                     task_id, user_id, username, product_id, product_name, quantity,
                     quantity_success, unit_price, total_price, refund_amount, state,
-                    file_url, raw_payload, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, 0, 'processing', '', ?, ?, ?)
+                    file_url, delivery_sent_at, delivery_error, raw_payload, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, 0, 'processing', '', '', '', ?, ?, ?)
                 """,
                 (
                     str(task_id),
@@ -338,6 +345,22 @@ class Store:
             ).fetchall()
             return [dict(row) for row in rows]
 
+    def list_pending_delivery_orders(self, limit: int = 100) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM orders
+                WHERE state IN ('completed', 'partial')
+                  AND file_url != ''
+                  AND delivery_sent_at = ''
+                ORDER BY updated_at ASC
+                LIMIT ?
+                """,
+                (int(limit),),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
     def finalize_order(
         self,
         task_id: str,
@@ -387,3 +410,33 @@ class Store:
             conn.commit()
             fresh = conn.execute("SELECT * FROM orders WHERE task_id = ?", (str(task_id),)).fetchone()
             return dict(fresh) if fresh else None, True
+
+    def mark_order_delivery_sent(self, task_id: str) -> dict[str, Any] | None:
+        with self._lock, self._connect() as conn:
+            ts = now_iso()
+            conn.execute(
+                """
+                UPDATE orders
+                SET delivery_sent_at = ?, delivery_error = '', updated_at = ?
+                WHERE task_id = ?
+                """,
+                (ts, ts, str(task_id)),
+            )
+            conn.commit()
+            row = conn.execute("SELECT * FROM orders WHERE task_id = ?", (str(task_id),)).fetchone()
+            return dict(row) if row else None
+
+    def mark_order_delivery_failed(self, task_id: str, error: str) -> dict[str, Any] | None:
+        with self._lock, self._connect() as conn:
+            ts = now_iso()
+            conn.execute(
+                """
+                UPDATE orders
+                SET delivery_error = ?, updated_at = ?
+                WHERE task_id = ?
+                """,
+                (str(error or "")[:1000], ts, str(task_id)),
+            )
+            conn.commit()
+            row = conn.execute("SELECT * FROM orders WHERE task_id = ?", (str(task_id),)).fetchone()
+            return dict(row) if row else None

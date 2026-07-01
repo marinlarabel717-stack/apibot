@@ -421,6 +421,30 @@ def detail_notice() -> str:
     return premium_text_prefix(ALERT_EMOJI_ID, "❗️", "未使用过的本店商品，请先少量购买测试，以免造成不必要的争议。")
 
 
+def build_product_detail_text(
+    product_name: str,
+    price: float,
+    stock: int,
+) -> tuple[str, tuple[MessageEntity, ...]]:
+    parts: list[tuple[str, str | None]] = [
+        ("✅", BUYING_EMOJI_ID),
+        (" 您正在购买：", None),
+        (product_name, None),
+        ("\n\n", None),
+        ("💰", PRICE_EMOJI_ID),
+        (" 价格：", None),
+        (f"{format_money(price)} USDT", None),
+        ("\n\n", None),
+        ("📊", STOCK_EMOJI_ID),
+        (" 库存：", None),
+        (str(stock), None),
+        ("\n\n", None),
+        ("❗️", ALERT_EMOJI_ID),
+        (" 未使用过的本店商品，请先少量购买测试，以免造成不必要的争议", None),
+    ]
+    return build_text_with_custom_emoji(parts)
+
+
 def purchase_confirm_caption(product_name: str, unit_price: float, quantity: int) -> str:
     total_price = unit_price * quantity
     return (
@@ -518,6 +542,7 @@ async def reply_inline(
     text: str,
     reply_markup: InlineKeyboardMarkup | None = None,
     parse_mode: str | None = None,
+    entities: tuple[MessageEntity, ...] | None = None,
 ) -> None:
     if update.callback_query is not None:
         query = update.callback_query
@@ -533,15 +558,15 @@ async def reply_inline(
                 await query.edit_message_reply_markup(reply_markup=None)
             except BadRequest:
                 pass
-            await message.reply_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
+            await message.reply_text(text, reply_markup=reply_markup, parse_mode=parse_mode, entities=entities)
             return
         try:
-            await query.edit_message_text(text=text, reply_markup=reply_markup, parse_mode=parse_mode)
+            await query.edit_message_text(text=text, reply_markup=reply_markup, parse_mode=parse_mode, entities=entities)
         except BadRequest as exc:
             if "message is not modified" not in str(exc).lower():
                 raise
     elif update.message is not None:
-        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
+        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode=parse_mode, entities=entities)
 
 
 async def send_menu_message(update: Update, text: str) -> None:
@@ -702,16 +727,15 @@ def render_product_detail_view(
     row: dict[str, Any],
     category_id: int,
     page: int,
-) -> tuple[str, InlineKeyboardMarkup]:
+) -> tuple[str, tuple[MessageEntity, ...], InlineKeyboardMarkup]:
     product_id = safe_int(row.get("productId"))
     product_name = str(row.get("productName") or f"商品 {product_id}")
-    text = (
-        f"{premium_text_prefix(BUYING_EMOJI_ID, '✅', '您正在购买：')}{html.escape(product_name)}\n\n"
-        f"{premium_text_prefix(PRICE_EMOJI_ID, '💰', '价格：')}{format_money(safe_float(row.get('price')))} USDT\n\n"
-        f"{premium_text_prefix(STOCK_EMOJI_ID, '📊', '库存：')}{safe_int(row.get('totalStock'))}\n\n"
-        f"{detail_notice()}"
+    text, entities = build_product_detail_text(
+        product_name,
+        safe_float(row.get("price")),
+        safe_int(row.get("totalStock")),
     )
-    return text, build_product_detail_keyboard(product_id, category_id, page)
+    return text, entities, build_product_detail_keyboard(product_id, category_id, page)
 
 
 def build_category_keyboard_configured(settings: Settings, rows: list[dict[str, Any]]) -> InlineKeyboardMarkup:
@@ -764,17 +788,16 @@ def render_product_detail_view_configured(
     row: dict[str, Any],
     category_id: int,
     page: int,
-) -> tuple[str, InlineKeyboardMarkup]:
+) -> tuple[str, tuple[MessageEntity, ...], InlineKeyboardMarkup]:
     product_id = safe_int(row.get("productId"))
     product_name = str(row.get("productName") or f"商品 {product_id}")
     sell_price = resolve_sell_price(settings, row)
-    text = (
-        f"{premium_text_prefix(BUYING_EMOJI_ID, '✅', '您正在购买：')}{html.escape(product_name)}\n\n"
-        f"{premium_text_prefix(PRICE_EMOJI_ID, '💰', '价格：')}{format_money(sell_price)} USDT\n\n"
-        f"{premium_text_prefix(STOCK_EMOJI_ID, '📊', '库存：')}{safe_int(row.get('totalStock'))}\n\n"
-        f"{detail_notice()}"
+    text, entities = build_product_detail_text(
+        product_name,
+        sell_price,
+        safe_int(row.get("totalStock")),
     )
-    return text, build_product_detail_keyboard(product_id, category_id, page)
+    return text, entities, build_product_detail_keyboard(product_id, category_id, page)
 
 
 async def fetch_categories(supplier: SupplierClient) -> list[dict[str, Any]]:
@@ -1030,8 +1053,8 @@ async def product(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(f"获取商品详情失败: {exc}")
         return
     row = payload.get("data") or {}
-    text, keyboard = render_product_detail_view_configured(settings, row, category_id=0, page=0)
-    await update.message.reply_text(text, reply_markup=keyboard, parse_mode="HTML")
+    text, entities, keyboard = render_product_detail_view_configured(settings, row, category_id=0, page=0)
+    await update.message.reply_text(text, entities=entities, reply_markup=keyboard)
 
 
 async def execute_purchase(
@@ -1600,8 +1623,8 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             await reply_inline(update, f"获取商品详情失败: {exc}")
             return
         row = payload.get("data") or {}
-        text, keyboard = render_product_detail_view_configured(settings, row, category_id, page)
-        await reply_inline(update, text, keyboard, parse_mode="HTML")
+        text, entities, keyboard = render_product_detail_view_configured(settings, row, category_id, page)
+        await reply_inline(update, text, keyboard, entities=entities)
         return
 
     if action == "qbuy" and len(parts) == 5:

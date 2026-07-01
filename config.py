@@ -88,6 +88,8 @@ class Settings:
     order_poll_limit: int
     order_poll_concurrency: int
     order_fast_probe_seconds: int
+    telegram_media_write_timeout_seconds: int
+    telegram_media_read_timeout_seconds: int
 
 
 def load_settings() -> Settings:
@@ -135,4 +137,6 @@ def load_settings() -> Settings:
         order_poll_limit=max(10, int(os.getenv("ORDER_POLL_LIMIT", "100"))),
         order_poll_concurrency=max(1, int(os.getenv("ORDER_POLL_CONCURRENCY", "8"))),
         order_fast_probe_seconds=max(1, int(os.getenv("ORDER_FAST_PROBE_SECONDS", "2"))),
+        telegram_media_write_timeout_seconds=max(20, int(os.getenv("TELEGRAM_MEDIA_WRITE_TIMEOUT_SECONDS", "180"))),
+        telegram_media_read_timeout_seconds=max(20, int(os.getenv("TELEGRAM_MEDIA_READ_TIMEOUT_SECONDS", "120"))),
     )

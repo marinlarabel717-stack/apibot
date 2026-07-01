@@ -887,7 +887,7 @@ async def deliver_order_file(
     include_ready_photo: bool = True,
     notify_failure: bool = True,
 ) -> bool:
-    _, store, _ = get_services(context)
+    settings, store, _ = get_services(context)
     task_id = str(order_row.get("task_id") or "").strip()
     file_url = str(order_row.get("file_url") or "").strip()
     if not task_id or not file_url:
@@ -899,6 +899,9 @@ async def deliver_order_file(
     quantity_success = safe_int(order_row.get("quantity_success"))
     refund_amount = safe_float(order_row.get("refund_amount"))
     user_id = safe_int(order_row.get("user_id"))
+
+    media_write_timeout = max(20, int(settings.telegram_media_write_timeout_seconds))
+    media_read_timeout = max(20, int(settings.telegram_media_read_timeout_seconds))
     product_name = str(order_row.get("product_name") or f"商品 {order_row.get('product_id')}")
 
     try:
@@ -916,13 +919,26 @@ async def deliver_order_file(
                     photo=photo_fp,
                     caption=delivery_text,
                     caption_entities=delivery_entities,
+                    write_timeout=media_write_timeout,
+                    read_timeout=media_read_timeout,
+                    connect_timeout=min(media_read_timeout, 30),
                 )
         with zip_path.open("rb") as document_fp:
+            logger.info(
+                "å‡†å¤‡å‘é€è®¢å• zip: task_id=%s user_id=%s size=%s timeout=%ss",
+                task_id,
+                user_id,
+                zip_path.stat().st_size,
+                media_write_timeout,
+            )
             await context.bot.send_document(
                 chat_id=user_id,
                 document=document_fp,
                 filename=delivery_display_filename(product_name, quantity, file_url),
                 reply_markup=MENU_KEYBOARD,
+                write_timeout=media_write_timeout,
+                read_timeout=media_read_timeout,
+                connect_timeout=min(media_read_timeout, 30),
             )
     except Exception as exc:
         await call_blocking(store.mark_order_delivery_failed, task_id, repr(exc))

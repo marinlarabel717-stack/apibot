@@ -102,6 +102,25 @@ NON_SEARCH_BUTTON_TEXTS = MENU_BUTTON_TEXTS | LEGACY_MENU_BUTTON_TEXTS | {
     BUTTON_PROFILE,
     BUTTON_RECHARGE,
 }
+SEARCH_COUNTRY_KEYWORDS = {
+    "中国", "香港", "澳门", "台湾",
+    "日本", "韩国", "朝鲜", "蒙古",
+    "越南", "泰国", "老挝", "柬埔寨", "缅甸",
+    "马来西亚", "新加坡", "印尼", "印度尼西亚", "菲律宾", "文莱", "东帝汶",
+    "印度", "巴基斯坦", "孟加拉", "尼泊尔", "斯里兰卡", "不丹", "马尔代夫",
+    "哈萨克斯坦", "乌兹别克斯坦", "土库曼斯坦", "吉尔吉斯斯坦", "塔吉克斯坦",
+    "阿联酋", "迪拜", "沙特", "沙特阿拉伯", "卡塔尔", "科威特", "阿曼", "巴林", "也门",
+    "伊朗", "伊拉克", "叙利亚", "约旦", "黎巴嫩", "以色列", "巴勒斯坦", "土耳其",
+    "埃及", "阿尔及利亚", "摩洛哥", "突尼斯", "利比亚", "苏丹",
+    "尼日利亚", "加纳", "肯尼亚", "乌干达", "坦桑尼亚", "埃塞俄比亚", "卢旺达",
+    "南非", "赞比亚", "津巴布韦", "安哥拉", "喀麦隆", "科特迪瓦", "塞内加尔",
+    "美国", "加拿大", "墨西哥", "巴西", "阿根廷", "智利", "哥伦比亚", "秘鲁",
+    "委内瑞拉", "玻利维亚", "巴拉圭", "乌拉圭", "厄瓜多尔", "巴拿马", "哥斯达黎加",
+    "英国", "爱尔兰", "法国", "德国", "意大利", "西班牙", "葡萄牙", "荷兰", "比利时",
+    "瑞士", "奥地利", "波兰", "捷克", "匈牙利", "罗马尼亚", "希腊", "瑞典", "挪威",
+    "芬兰", "丹麦", "冰岛", "乌克兰", "俄罗斯", "白俄罗斯",
+    "澳洲", "澳大利亚", "新西兰",
+}
 
 MENU_KEYBOARD = ReplyKeyboardMarkup(
     [
@@ -201,6 +220,22 @@ def safe_float(value: Any, default: float = 0.0) -> float:
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+def normalize_search_keyword(value: str) -> str:
+    return " ".join(str(value or "").split())
+
+
+def should_trigger_product_search(keyword: str) -> bool:
+    normalized = normalize_search_keyword(keyword)
+    if not normalized or normalized in NON_SEARCH_BUTTON_TEXTS:
+        return False
+
+    compact = normalized.replace(" ", "")
+    if re.fullmatch(r"\+\d{1,4}(?:[^\d].*)?", compact):
+        return True
+
+    return any(compact.startswith(country) for country in SEARCH_COUNTRY_KEYWORDS)
 
 
 async def call_blocking(func, *args, **kwargs):
@@ -1531,8 +1566,8 @@ async def search_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     _, _, supplier = get_services(context)
     if update.message is None or not update.message.text:
         return
-    keyword = update.message.text.strip()
-    if not keyword or keyword in NON_SEARCH_BUTTON_TEXTS:
+    keyword = normalize_search_keyword(update.message.text)
+    if not should_trigger_product_search(keyword):
         return
     try:
         payload = await call_blocking(supplier.search_products, keyword)
@@ -1544,21 +1579,11 @@ async def search_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await update.message.reply_text("没有搜到商品。", reply_markup=MENU_KEYBOARD)
         return
 
-    text_lines = [
-        f"🔎 搜索结果：{keyword}",
-        "点击下面商品按钮查看详情：",
-        "",
-    ]
     text, entities = build_search_results_text(keyword, rows, lambda row: safe_float(row.get("price")))
     buttons: list[list[InlineKeyboardButton]] = []
     for row in rows[:SEARCH_RESULTS_LIMIT]:
         product_id = safe_int(row.get("productId"))
         category_id = safe_int(row.get("categoryId"))
-        text_lines.append(
-            f"- {row.get('productName')} | "
-            f"库存 {safe_int(row.get('totalStock'))} | "
-            f"${safe_float(row.get('price')):.2f}"
-        )
         buttons.append(
             [
                 InlineKeyboardButton(
@@ -1575,7 +1600,7 @@ async def search_text_rich(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     settings, _, supplier = get_services(context)
     if update.message is None or not update.message.text:
         return
-    keyword = update.message.text.strip()
+    keyword = normalize_search_keyword(update.message.text)
     pending_purchase = get_pending_purchase(context)
     if pending_purchase is not None:
         quantity = safe_int(keyword, -1)
@@ -1607,7 +1632,7 @@ async def search_text_rich(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         else:
             await update.message.reply_text(caption, entities=caption_entities, reply_markup=keyboard)
         return
-    if not keyword or keyword in NON_SEARCH_BUTTON_TEXTS:
+    if not should_trigger_product_search(keyword):
         return
     try:
         payload = await call_blocking(supplier.search_products, keyword)
@@ -1619,22 +1644,12 @@ async def search_text_rich(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await update.message.reply_text("没有搜到商品。", reply_markup=MENU_KEYBOARD)
         return
 
-    text_lines = [
-        f"🔎 搜索结果：{keyword}",
-        "点击下面商品按钮查看详情：",
-        "",
-    ]
     text, entities = build_search_results_text(keyword, rows, lambda row: resolve_sell_price(settings, row))
     buttons: list[list[InlineKeyboardButton]] = []
     for row in rows[:SEARCH_RESULTS_LIMIT]:
         product_id = safe_int(row.get("productId"))
         category_id = safe_int(row.get("categoryId"))
         sell_price = resolve_sell_price(settings, row)
-        text_lines.append(
-            f"- {row.get('productName')} | "
-            f"库存 {safe_int(row.get('totalStock'))} | "
-            f"${sell_price:.2f}"
-        )
         buttons.append([plain_catalog_button(f"{shorten(str(row.get('productName')), 22)} | ${sell_price:.2f}", f"prd:{product_id}:{category_id}:0")])
     buttons.append([InlineKeyboardButton("🛒 浏览全部分类", callback_data="nav:cats")])
     await update.message.reply_text(text, entities=entities, reply_markup=InlineKeyboardMarkup(buttons))

@@ -9,7 +9,14 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, Update
+from telegram import (
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    KeyboardButton,
+    MessageEntity,
+    ReplyKeyboardMarkup,
+    Update,
+)
 from telegram.error import BadRequest
 from telegram.ext import (
     Application,
@@ -178,7 +185,8 @@ async def call_blocking(func, *args, **kwargs):
 
 
 def tg_custom_emoji(emoji_id: str, fallback: str) -> str:
-    return f'<tg-emoji emoji-id="{emoji_id}">{html.escape(fallback)}</tg-emoji>'
+    del fallback
+    return f'<tg-emoji emoji-id="{emoji_id}"></tg-emoji>'
 
 
 def premium_text_prefix(emoji_id: str, fallback: str, label: str) -> str:
@@ -299,20 +307,75 @@ def premium_inline_button(label: str, callback_data: str, custom_emoji_id: str) 
     )
 
 
-def build_start_menu_text(settings: Settings, user: Any, balance: float, total_spent: float, total_quantity: int) -> str:
-    usdt_icon = tg_custom_emoji(START_MENU_EMOJI_USDT_ID, "💰")
-    spent_icon = tg_custom_emoji(START_MENU_EMOJI_SPENT_ID, "📊")
-    quantity_icon = tg_custom_emoji(START_MENU_EMOJI_QUANTITY_ID, "📦")
-    restock_icon = tg_custom_emoji(START_MENU_EMOJI_RESTOCK_ID, "🟢")
-    support_icon = tg_custom_emoji(START_MENU_EMOJI_SUPPORT_ID, "☎️")
-    return (
-        f"ID: <code>{user.id}</code>\n\n"
-        f"{usdt_icon} USDT : <code>{format_money(balance)}</code>\n"
-        f"{spent_icon} 消费金额 : <code>{format_money(total_spent)}</code>\n"
-        f"{quantity_icon} 购买数量 : <code>{total_quantity}</code>\n\n"
-        f"{restock_icon} 补货频道：{html.escape(settings.restock_channel)}\n"
-        f"{support_icon} 联系客服：{html.escape(settings.customer_service_contact)}"
-    )
+def build_text_with_custom_emoji(parts: list[tuple[str, str | None]], code_spans: list[tuple[int, int]] | None = None) -> tuple[str, tuple[MessageEntity, ...]]:
+    text_parts: list[str] = []
+    entities: list[MessageEntity] = []
+    offset = 0
+    for text, custom_emoji_id in parts:
+        text_parts.append(text)
+        length = len(text)
+        if custom_emoji_id:
+            entities.append(
+                MessageEntity(
+                    type=MessageEntity.CUSTOM_EMOJI,
+                    offset=offset,
+                    length=length,
+                    custom_emoji_id=custom_emoji_id,
+                )
+            )
+        offset += length
+    for span_offset, span_length in code_spans or []:
+        entities.append(
+            MessageEntity(
+                type=MessageEntity.CODE,
+                offset=span_offset,
+                length=span_length,
+            )
+        )
+    text = "".join(text_parts)
+    utf16_entities = MessageEntity.adjust_message_entities_to_utf_16(text, entities)
+    return text, tuple(utf16_entities)
+
+
+def build_start_menu_text(settings: Settings, user: Any, balance: float, total_spent: float, total_quantity: int) -> tuple[str, tuple[MessageEntity, ...]]:
+    parts: list[tuple[str, str | None]] = []
+    code_spans: list[tuple[int, int]] = []
+    offset = 0
+
+    def add_text(value: str, custom_emoji_id: str | None = None, code: bool = False) -> None:
+        nonlocal offset
+        parts.append((value, custom_emoji_id))
+        length = len(value)
+        if code:
+            code_spans.append((offset, length))
+        offset += length
+
+    add_text("ID: ")
+    add_text(str(user.id), code=True)
+    add_text("\n\n")
+
+    add_text("💰", custom_emoji_id=START_MENU_EMOJI_USDT_ID)
+    add_text(" USDT : ")
+    add_text(format_money(balance), code=True)
+    add_text("\n")
+
+    add_text("📊", custom_emoji_id=START_MENU_EMOJI_SPENT_ID)
+    add_text(" 消费金额 : ")
+    add_text(format_money(total_spent), code=True)
+    add_text("\n")
+
+    add_text("📦", custom_emoji_id=START_MENU_EMOJI_QUANTITY_ID)
+    add_text(" 购买数量 : ")
+    add_text(str(total_quantity), code=True)
+    add_text("\n\n")
+
+    add_text("🟢", custom_emoji_id=START_MENU_EMOJI_RESTOCK_ID)
+    add_text(f" 补货频道：{settings.restock_channel}\n")
+
+    add_text("☎️", custom_emoji_id=START_MENU_EMOJI_SUPPORT_ID)
+    add_text(f" 联系客服：{settings.customer_service_contact}")
+
+    return build_text_with_custom_emoji(parts, code_spans)
 
 
 def categories_intro() -> str:
@@ -493,31 +556,30 @@ def get_services(context: ContextTypes.DEFAULT_TYPE) -> tuple[Settings, Store, S
     return settings, store, supplier
 
 
-def build_main_menu_inline() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        [
-            [InlineKeyboardButton("🛒 商品列表", callback_data="nav:cats")],
-            [
-                InlineKeyboardButton("👤 个人中心", callback_data="nav:profile"),
-                InlineKeyboardButton("💰 我要充值", callback_data="nav:recharge"),
-            ],
-            [InlineKeyboardButton("📦 我的订单", callback_data="nav:orders")],
-        ]
-    )
+def build_main_menu_button(
+    settings: Settings,
+    label: str,
+    callback_data: str,
+    custom_emoji_id: str,
+    fallback_icon: str,
+) -> InlineKeyboardButton:
+    if settings.inline_button_custom_emoji_enabled:
+        return premium_inline_button(label, callback_data, custom_emoji_id)
+    return InlineKeyboardButton(text=f"{fallback_icon} {label}", callback_data=callback_data)
 
 
-def build_main_menu_inline() -> InlineKeyboardMarkup:
+def build_main_menu_inline(settings: Settings) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
             [
-                premium_inline_button(BUTTON_ACCOUNT_LIST, "nav:cats", MAIN_MENU_EMOJI_ACCOUNT_LIST_ID),
-                premium_inline_button(BUTTON_RECHARGE_BALANCE, "nav:recharge", MAIN_MENU_EMOJI_RECHARGE_BALANCE_ID),
+                build_main_menu_button(settings, BUTTON_ACCOUNT_LIST, "nav:cats", MAIN_MENU_EMOJI_ACCOUNT_LIST_ID, "📂"),
+                build_main_menu_button(settings, BUTTON_RECHARGE_BALANCE, "nav:recharge", MAIN_MENU_EMOJI_RECHARGE_BALANCE_ID, "💰"),
             ],
             [
-                premium_inline_button(BUTTON_PURCHASE_NOTICE, "nav:notice", MAIN_MENU_EMOJI_PURCHASE_NOTICE_ID),
-                premium_inline_button(BUTTON_ORDER_HISTORY, "nav:orders", MAIN_MENU_EMOJI_ORDER_HISTORY_ID),
+                build_main_menu_button(settings, BUTTON_PURCHASE_NOTICE, "nav:notice", MAIN_MENU_EMOJI_PURCHASE_NOTICE_ID, "📖"),
+                build_main_menu_button(settings, BUTTON_ORDER_HISTORY, "nav:orders", MAIN_MENU_EMOJI_ORDER_HISTORY_ID, "📦"),
             ],
-            [premium_inline_button(BUTTON_SWITCH_LANGUAGE, "nav:language", MAIN_MENU_EMOJI_SWITCH_LANGUAGE_ID)],
+            [build_main_menu_button(settings, BUTTON_SWITCH_LANGUAGE, "nav:language", MAIN_MENU_EMOJI_SWITCH_LANGUAGE_ID, "🌐")],
         ]
     )
 
@@ -706,20 +768,20 @@ async def fetch_category_products(supplier: SupplierClient, category_id: int) ->
 async def build_main_menu_message(
     context: ContextTypes.DEFAULT_TYPE,
     user: Any,
-) -> tuple[str, InlineKeyboardMarkup]:
+) -> tuple[str, tuple[MessageEntity, ...], InlineKeyboardMarkup]:
     settings, store, _ = get_services(context)
     await call_blocking(store.ensure_user, user.id, user.username or "")
     balance = await call_blocking(store.get_balance, user.id)
     summary = await call_blocking(store.get_user_summary, user.id)
-    text = build_start_menu_text(
+    text, entities = build_start_menu_text(
         settings,
         user,
         balance,
         safe_float(summary.get("total_spent")),
         safe_int(summary.get("total_quantity")),
     )
-    main_menu_inline = build_main_menu_inline()
-    return text, main_menu_inline
+    main_menu_inline = build_main_menu_inline(settings)
+    return text, entities, main_menu_inline
 
 
 async def refresh_bottom_menu_keyboard(update: Update) -> None:
@@ -731,7 +793,7 @@ async def show_start_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     user = update.effective_user
     if user is None:
         return
-    text, main_menu_inline = await build_main_menu_message(context, user)
+    text, text_entities, main_menu_inline = await build_main_menu_message(context, user)
     if update.callback_query is not None:
         await update.callback_query.answer()
     await refresh_bottom_menu_keyboard(update)
@@ -742,21 +804,21 @@ async def show_start_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 await update.message.reply_photo(
                     photo=photo_fp,
                     caption=text,
-                    parse_mode="HTML",
+                    caption_entities=text_entities,
                     reply_markup=main_menu_inline,
                 )
             elif update.callback_query is not None and update.callback_query.message is not None:
                 await update.callback_query.message.reply_photo(
                     photo=photo_fp,
                     caption=text,
-                    parse_mode="HTML",
+                    caption_entities=text_entities,
                     reply_markup=main_menu_inline,
                 )
         return
     if update.message is not None:
-        await update.message.reply_text(text, parse_mode="HTML", reply_markup=main_menu_inline)
+        await update.message.reply_text(text, entities=text_entities, reply_markup=main_menu_inline)
     elif update.callback_query is not None and update.callback_query.message is not None:
-        await update.callback_query.message.reply_text(text, parse_mode="HTML", reply_markup=main_menu_inline)
+        await update.callback_query.message.reply_text(text, entities=text_entities, reply_markup=main_menu_inline)
 
 
 async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

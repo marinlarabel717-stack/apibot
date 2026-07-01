@@ -81,6 +81,8 @@ MENU_KEYBOARD = ReplyKeyboardMarkup(
     is_persistent=True,
 )
 
+PENDING_PURCHASE_KEY = "pending_purchase_quantity"
+
 
 def format_money(value: float) -> str:
     return f"{value:.2f}"
@@ -113,6 +115,28 @@ def safe_float(value: Any, default: float = 0.0) -> float:
 
 async def call_blocking(func, *args, **kwargs):
     return await asyncio.to_thread(func, *args, **kwargs)
+
+
+def get_pending_purchase(context: ContextTypes.DEFAULT_TYPE) -> dict[str, int] | None:
+    pending = context.user_data.get(PENDING_PURCHASE_KEY)
+    return pending if isinstance(pending, dict) else None
+
+
+def set_pending_purchase(
+    context: ContextTypes.DEFAULT_TYPE,
+    product_id: int,
+    category_id: int,
+    page: int,
+) -> None:
+    context.user_data[PENDING_PURCHASE_KEY] = {
+        "product_id": product_id,
+        "category_id": category_id,
+        "page": page,
+    }
+
+
+def clear_pending_purchase(context: ContextTypes.DEFAULT_TYPE) -> None:
+    context.user_data.pop(PENDING_PURCHASE_KEY, None)
 
 
 def build_price_match_text(row: dict[str, Any]) -> str:
@@ -768,10 +792,12 @@ async def show_orders(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    clear_pending_purchase(context)
     await show_start_menu(update, context)
 
 
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    clear_pending_purchase(context)
     await show_main_menu(update, context)
 
 
@@ -1188,21 +1214,27 @@ async def route_menu_text(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
     text = update.message.text.strip()
     if text == BUTTON_PRODUCTS or text == BUTTON_ACCOUNT_LIST:
+        clear_pending_purchase(context)
         await show_categories(update, context)
         return
     if text == BUTTON_MAIN_MENU:
+        clear_pending_purchase(context)
         await show_main_menu(update, context)
         return
     if text == BUTTON_PROFILE or text == BUTTON_RECHARGE_BALANCE:
+        clear_pending_purchase(context)
         await show_recharge(update, context)
         return
     if text == BUTTON_PURCHASE_NOTICE:
+        clear_pending_purchase(context)
         await show_notice(update, context)
         return
     if text == BUTTON_ORDER_HISTORY:
+        clear_pending_purchase(context)
         await show_orders(update, context)
         return
     if text == BUTTON_SWITCH_LANGUAGE:
+        clear_pending_purchase(context)
         await show_language(update, context)
 
 
@@ -1254,6 +1286,36 @@ async def search_text_rich(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if update.message is None or not update.message.text:
         return
     keyword = update.message.text.strip()
+    pending_purchase = get_pending_purchase(context)
+    if pending_purchase is not None:
+        quantity = safe_int(keyword, -1)
+        if quantity <= 0:
+            await update.message.reply_text("请输入要购买的数量，直接发数字即可，例如：1", reply_markup=MENU_KEYBOARD)
+            return
+        clear_pending_purchase(context)
+        product_id = safe_int(pending_purchase.get("product_id"), -1)
+        category_id = safe_int(pending_purchase.get("category_id"), 0)
+        page = safe_int(pending_purchase.get("page"), 0)
+        try:
+            payload = await call_blocking(supplier.get_product_detail, product_id)
+        except SupplierApiError as exc:
+            await update.message.reply_text(f"获取商品详情失败: {exc}", reply_markup=MENU_KEYBOARD)
+            return
+        row = payload.get("data") or {}
+        product_name = str(row.get("productName") or f"商品 {product_id}")
+        unit_price = resolve_sell_price(settings, row)
+        caption = purchase_confirm_caption(product_name, unit_price, quantity)
+        keyboard = build_purchase_confirm_keyboard(product_id, quantity, category_id, page)
+        if PURCHASE_CONFIRM_IMAGE_PATH.exists():
+            with PURCHASE_CONFIRM_IMAGE_PATH.open("rb") as photo_fp:
+                await update.message.reply_photo(
+                    photo=photo_fp,
+                    caption=caption,
+                    reply_markup=keyboard,
+                )
+        else:
+            await update.message.reply_text(caption, reply_markup=keyboard)
+        return
     if not keyword or keyword in MENU_BUTTON_TEXTS | {BUTTON_PRODUCTS, BUTTON_MAIN_MENU, BUTTON_PROFILE, BUTTON_RECHARGE}:
         return
     try:
@@ -1296,6 +1358,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     action = parts[0]
 
     if action == "nav":
+        clear_pending_purchase(context)
         target = parts[1] if len(parts) > 1 else ""
         if target == "cats":
             await show_categories(update, context)
@@ -1317,6 +1380,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             return
 
     if action == "cat" and len(parts) == 3:
+        clear_pending_purchase(context)
         category_id = safe_int(parts[1], -1)
         page = safe_int(parts[2], 0)
         if category_id <= 0:
@@ -1326,6 +1390,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
 
     if action == "prd" and len(parts) == 4:
+        clear_pending_purchase(context)
         product_id = safe_int(parts[1], -1)
         category_id = safe_int(parts[2], 0)
         page = safe_int(parts[3], 0)
@@ -1344,37 +1409,17 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     if action == "qbuy" and len(parts) == 5:
         product_id = safe_int(parts[1], -1)
-        quantity = safe_int(parts[2], 0)
         category_id = safe_int(parts[3], 0)
         page = safe_int(parts[4], 0)
-        if product_id <= 0 or quantity <= 0:
+        if product_id <= 0:
             await reply_inline(update, "快捷购买参数不合法。")
             return
-        try:
-            payload = await call_blocking(supplier.get_product_detail, product_id)
-        except SupplierApiError as exc:
-            await reply_inline(update, f"获取商品详情失败: {exc}")
-            return
-        row = payload.get("data") or {}
-        product_name = str(row.get("productName") or f"商品 {product_id}")
-        unit_price = resolve_sell_price(settings, row)
-        caption = purchase_confirm_caption(product_name, unit_price, quantity)
-        keyboard = build_purchase_confirm_keyboard(product_id, quantity, category_id, page)
-        await query.answer()
-        if query.message is not None and PURCHASE_CONFIRM_IMAGE_PATH.exists():
-            with PURCHASE_CONFIRM_IMAGE_PATH.open("rb") as photo_fp:
-                await query.message.reply_photo(
-                    photo=photo_fp,
-                    caption=caption,
-                    reply_markup=keyboard,
-                )
-        elif query.message is not None:
-            await query.message.reply_text(caption, reply_markup=keyboard)
-        else:
-            await reply_inline(update, caption, keyboard)
+        set_pending_purchase(context, product_id, category_id, page)
+        await reply_inline(update, "请发送需要购买的数量，直接回复数字即可，例如：1")
         return
 
     if action == "cbuy" and len(parts) == 3:
+        clear_pending_purchase(context)
         user = update.effective_user
         product_id = safe_int(parts[1], -1)
         quantity = safe_int(parts[2], 0)

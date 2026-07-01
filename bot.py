@@ -281,14 +281,12 @@ def premium_inline_button(label: str, callback_data: str, custom_emoji_id: str) 
 
 
 def build_start_menu_text(settings: Settings, user: Any, balance: float, total_spent: float, total_quantity: int) -> str:
-    display_name = html.escape((getattr(user, "first_name", "") or getattr(user, "full_name", "") or "朋友").strip())
     usdt_icon = tg_custom_emoji(START_MENU_EMOJI_USDT_ID, "💰")
     spent_icon = tg_custom_emoji(START_MENU_EMOJI_SPENT_ID, "📊")
     quantity_icon = tg_custom_emoji(START_MENU_EMOJI_QUANTITY_ID, "📦")
     restock_icon = tg_custom_emoji(START_MENU_EMOJI_RESTOCK_ID, "🟢")
     return (
-        f"晚上好，{display_name}\n"
-        f"ID: {user.id}\n\n"
+        f"ID: <code>{user.id}</code>\n\n"
         f"{usdt_icon} USDT : {format_money(balance)}\n"
         f"{spent_icon} 消费金额 : {format_money(total_spent)}\n"
         f"{quantity_icon} 购买数量 : {total_quantity}\n\n"

@@ -58,11 +58,11 @@ BUTTON_PRODUCTS = "商品列表"
 BUTTON_MAIN_MENU = "主菜单"
 BUTTON_PROFILE = "个人中心"
 BUTTON_RECHARGE = "我要充值"
-BUTTON_ACCOUNT_LIST = "🗂 账号列表"
-BUTTON_RECHARGE_BALANCE = "💰 充值余额"
-BUTTON_PURCHASE_NOTICE = "📖 购买须知"
-BUTTON_ORDER_HISTORY = "📦 购买记录"
-BUTTON_SWITCH_LANGUAGE = "🌐 切换语言"
+BUTTON_ACCOUNT_LIST = "账号列表"
+BUTTON_RECHARGE_BALANCE = "充值余额"
+BUTTON_PURCHASE_NOTICE = "购买须知"
+BUTTON_ORDER_HISTORY = "购买记录"
+BUTTON_SWITCH_LANGUAGE = "切换语言"
 MENU_BUTTON_TEXTS = {
     BUTTON_ACCOUNT_LIST,
     BUTTON_RECHARGE_BALANCE,
@@ -86,6 +86,11 @@ START_MENU_EMOJI_USDT_ID = "6334575946938451719"
 START_MENU_EMOJI_SPENT_ID = "6334456344984159861"
 START_MENU_EMOJI_QUANTITY_ID = "6334602442591700514"
 START_MENU_EMOJI_RESTOCK_ID = "6334740096293537039"
+MAIN_MENU_EMOJI_ACCOUNT_LIST_ID = "5875462364110787088"
+MAIN_MENU_EMOJI_RECHARGE_BALANCE_ID = "5987880246865565644"
+MAIN_MENU_EMOJI_PURCHASE_NOTICE_ID = "5258328383183396223"
+MAIN_MENU_EMOJI_ORDER_HISTORY_ID = "5258134813302332906"
+MAIN_MENU_EMOJI_SWITCH_LANGUAGE_ID = "5879585266426973039"
 
 
 def format_money(value: float) -> str:
@@ -198,6 +203,14 @@ def catalog_button(settings: Settings, label: str, callback_data: str) -> Inline
 
 def plain_catalog_button(label: str, callback_data: str) -> InlineKeyboardButton:
     return InlineKeyboardButton(text=label, callback_data=callback_data)
+
+
+def premium_inline_button(label: str, callback_data: str, custom_emoji_id: str) -> InlineKeyboardButton:
+    return InlineKeyboardButton(
+        text=label,
+        callback_data=callback_data,
+        icon_custom_emoji_id=custom_emoji_id,
+    )
 
 
 def build_start_menu_text(settings: Settings, user: Any, balance: float, total_spent: float, total_quantity: int) -> str:
@@ -406,14 +419,14 @@ def build_main_menu_inline() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
             [
-                InlineKeyboardButton(BUTTON_ACCOUNT_LIST, callback_data="nav:cats"),
-                InlineKeyboardButton(BUTTON_RECHARGE_BALANCE, callback_data="nav:recharge"),
+                premium_inline_button(BUTTON_ACCOUNT_LIST, "nav:cats", MAIN_MENU_EMOJI_ACCOUNT_LIST_ID),
+                premium_inline_button(BUTTON_RECHARGE_BALANCE, "nav:recharge", MAIN_MENU_EMOJI_RECHARGE_BALANCE_ID),
             ],
             [
-                InlineKeyboardButton(BUTTON_PURCHASE_NOTICE, callback_data="nav:notice"),
-                InlineKeyboardButton(BUTTON_ORDER_HISTORY, callback_data="nav:orders"),
+                premium_inline_button(BUTTON_PURCHASE_NOTICE, "nav:notice", MAIN_MENU_EMOJI_PURCHASE_NOTICE_ID),
+                premium_inline_button(BUTTON_ORDER_HISTORY, "nav:orders", MAIN_MENU_EMOJI_ORDER_HISTORY_ID),
             ],
-            [InlineKeyboardButton(BUTTON_SWITCH_LANGUAGE, callback_data="nav:language")],
+            [premium_inline_button(BUTTON_SWITCH_LANGUAGE, "nav:language", MAIN_MENU_EMOJI_SWITCH_LANGUAGE_ID)],
         ]
     )
 

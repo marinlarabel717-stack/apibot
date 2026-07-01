@@ -259,6 +259,24 @@ def clear_pending_admin_action(context: ContextTypes.DEFAULT_TYPE) -> None:
     context.user_data.pop(PENDING_ADMIN_KEY, None)
 
 
+def get_or_create_admin_broadcast_draft(context: ContextTypes.DEFAULT_TYPE) -> dict[str, Any]:
+    pending = get_pending_admin_action(context)
+    if not isinstance(pending, dict) or str(pending.get("scope") or "") != ADMIN_SEND_SCOPE_ALL:
+        pending = {"kind": "broadcast_idle", "scope": ADMIN_SEND_SCOPE_ALL, "payload": {}}
+    payload = pending.get("payload")
+    if not isinstance(payload, dict):
+        payload = {}
+    pending["payload"] = {
+        "content_type": str(payload.get("content_type") or "text"),
+        "photo_file_id": str(payload.get("photo_file_id") or ""),
+        "text": str(payload.get("text") or ""),
+        "button_text": str(payload.get("button_text") or ""),
+        "button_url": str(payload.get("button_url") or ""),
+    }
+    set_pending_admin_action(context, pending)
+    return pending
+
+
 def get_runtime_config(context: ContextTypes.DEFAULT_TYPE) -> dict[str, str]:
     return context.application.bot_data.setdefault("runtime_config", {})
 
@@ -1200,28 +1218,32 @@ def build_admin_home_keyboard() -> InlineKeyboardMarkup:
         [
             [
                 InlineKeyboardButton("用户列表", callback_data="adm:users:0"),
-                InlineKeyboardButton("私信用户", callback_data="adm:send:single"),
+                InlineKeyboardButton("群发通知", callback_data="adm:bcast:open"),
             ],
             [
-                InlineKeyboardButton("群发通知", callback_data="adm:send:all"),
                 InlineKeyboardButton("充值地址", callback_data="adm:cfg:recharge"),
+                InlineKeyboardButton("OKPAY配置", callback_data="adm:cfg:okpay"),
             ],
             [
-                InlineKeyboardButton("OKPAY配置", callback_data="adm:cfg:okpay"),
                 InlineKeyboardButton("客服/补货", callback_data="adm:cfg:contact"),
+                InlineKeyboardButton("取消当前操作", callback_data="adm:cancel"),
             ],
-            [InlineKeyboardButton("取消当前操作", callback_data="adm:cancel")],
         ]
     )
 
 
-def admin_control_keyboard() -> InlineKeyboardMarkup:
+def build_admin_broadcast_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
             [
-                InlineKeyboardButton("确认发送", callback_data="adm:sendgo"),
-                InlineKeyboardButton("取消", callback_data="adm:cancel"),
-            ]
+                InlineKeyboardButton("图文设置", callback_data="adm:bcast:setcontent"),
+                InlineKeyboardButton("按钮设置", callback_data="adm:bcast:setbutton"),
+            ],
+            [
+                InlineKeyboardButton("查看图文", callback_data="adm:bcast:preview"),
+                InlineKeyboardButton("开始群发", callback_data="adm:bcast:start"),
+            ],
+            [InlineKeyboardButton("关闭", callback_data="adm:home")],
         ]
     )
 
@@ -1302,11 +1324,38 @@ async def show_admin_user_detail(update: Update, context: ContextTypes.DEFAULT_T
     )
     keyboard = InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton("私信TA", callback_data=f"adm:sendu:{target_user_id}")],
             [InlineKeyboardButton("返回列表", callback_data=f"adm:users:{page}")],
         ]
     )
     await reply_inline(update, text, keyboard)
+
+
+def format_admin_broadcast_summary(payload: dict[str, Any]) -> str:
+    has_content = bool(str(payload.get("text") or "").strip() or str(payload.get("photo_file_id") or "").strip())
+    has_button = bool(str(payload.get("button_text") or "").strip() and str(payload.get("button_url") or "").strip())
+    content_type = "图片" if str(payload.get("content_type") or "") == "photo" and str(payload.get("photo_file_id") or "").strip() else "文本"
+    text_preview = shorten(str(payload.get("text") or "").strip() or "未设置", 60)
+    button_preview = "未设置"
+    if has_button:
+        button_preview = f"{shorten(str(payload.get('button_text') or '').strip(), 20)} -> {shorten(str(payload.get('button_url') or '').strip(), 36)}"
+    return (
+        "群发通知\n\n"
+        f"群发状态：{'已就绪' if has_content else '未设置'}\n"
+        f"内容类型：{content_type if has_content else '未设置'}\n"
+        f"文案预览：{text_preview}\n"
+        f"按钮状态：{'已设置' if has_button else '未设置'}\n"
+        f"按钮预览：{button_preview}\n\n"
+        "操作说明：\n"
+        "1. 点 图文设置 后发送文本，或直接发图片+文案\n"
+        "2. 点 按钮设置 后发送：按钮文字 | https://example.com\n"
+        "3. 点 查看图文 先预览，再点 开始群发 正式发送"
+    )
+
+
+async def show_admin_broadcast_panel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    pending = get_or_create_admin_broadcast_draft(context)
+    payload = pending.get("payload") or {}
+    await reply_inline(update, format_admin_broadcast_summary(payload), build_admin_broadcast_keyboard())
 
 
 async def show_admin_config_page(update: Update, context: ContextTypes.DEFAULT_TYPE, section: str) -> None:
@@ -1357,29 +1406,18 @@ async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await show_admin_home(update, context)
 
 
-async def prompt_admin_send_target(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    set_pending_admin_action(context, {"kind": "send_target"})
-    await send_menu_message(update, "请发送目标用户的 user_id 或 @username。")
-
-
-async def prompt_admin_send_content(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
-    scope: str,
-    target_user_id: int | None = None,
-    target_label: str = "",
-) -> None:
-    pending = {
-        "kind": "send_content",
-        "scope": scope,
-        "target_user_id": int(target_user_id) if target_user_id else None,
-        "target_label": target_label,
-    }
+async def prompt_admin_broadcast_content(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    pending = get_or_create_admin_broadcast_draft(context)
+    pending["kind"] = "broadcast_wait_content"
     set_pending_admin_action(context, pending)
-    if scope == ADMIN_SEND_SCOPE_SINGLE:
-        await send_menu_message(update, f"准备私信 {target_label or target_user_id}。\n现在发送文本，或者直接发一张图片并带 caption。")
-    else:
-        await send_menu_message(update, "准备群发给全部活跃用户。\n现在发送文本，或者直接发一张图片并带 caption。")
+    await send_menu_message(update, "请发送群发文案，或者直接发送一张图片并带 caption。")
+
+
+async def prompt_admin_broadcast_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    pending = get_or_create_admin_broadcast_draft(context)
+    pending["kind"] = "broadcast_wait_button"
+    set_pending_admin_action(context, pending)
+    await send_menu_message(update, "请发送按钮，格式：按钮文字 | https://example.com\n如果要清空按钮，直接发送：-")
 
 
 async def prompt_admin_setting_edit(update: Update, context: ContextTypes.DEFAULT_TYPE, key: str, title: str) -> None:
@@ -1387,18 +1425,12 @@ async def prompt_admin_setting_edit(update: Update, context: ContextTypes.DEFAUL
     await send_menu_message(update, f"请发送新的 {title}。\n如果要清空，直接发：-")
 
 
-async def send_admin_preview(update: Update, context: ContextTypes.DEFAULT_TYPE, pending: dict[str, Any]) -> None:
-    payload = pending.get("payload") or {}
+async def send_admin_preview(update: Update, context: ContextTypes.DEFAULT_TYPE, payload: dict[str, Any], title: str = "消息预览") -> None:
     reply_markup = admin_send_button_markup(payload)
-    preview_title = "消息预览"
-    if pending.get("scope") == ADMIN_SEND_SCOPE_ALL:
-        preview_title += "（群发全部活跃用户）"
-    else:
-        preview_title += f"（发送给 {pending.get('target_label') or pending.get('target_user_id')}）"
     target_message = update.callback_query.message if update.callback_query is not None else update.message
     if target_message is None:
         return
-    await target_message.reply_text(preview_title)
+    await target_message.reply_text(title)
     if payload.get("content_type") == "photo" and payload.get("photo_file_id"):
         await target_message.reply_photo(
             photo=payload["photo_file_id"],
@@ -1407,9 +1439,6 @@ async def send_admin_preview(update: Update, context: ContextTypes.DEFAULT_TYPE,
         )
     else:
         await target_message.reply_text(str(payload.get("text") or "（空文本）"), reply_markup=reply_markup)
-    pending["kind"] = "send_ready"
-    set_pending_admin_action(context, pending)
-    await target_message.reply_text("确认无误后点下面发送。", reply_markup=admin_control_keyboard())
 
 
 async def deliver_admin_payload(context: ContextTypes.DEFAULT_TYPE, user_id: int, payload: dict[str, Any]) -> None:
@@ -1429,27 +1458,16 @@ async def deliver_admin_payload(context: ContextTypes.DEFAULT_TYPE, user_id: int
     )
 
 
-async def execute_admin_send(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def execute_admin_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     settings, store, _ = get_services(context)
     user = update.effective_user
-    pending = get_pending_admin_action(context)
-    if user is None or not is_admin(settings, user.id) or pending is None or pending.get("kind") != "send_ready":
-        await send_menu_message(update, "当前没有可发送的管理员消息。")
-        return
+    pending = get_or_create_admin_broadcast_draft(context)
     payload = pending.get("payload") or {}
-    scope = pending.get("scope")
-    clear_pending_admin_action(context)
-    if scope == ADMIN_SEND_SCOPE_SINGLE:
-        target_user_id = safe_int(pending.get("target_user_id"), 0)
-        try:
-            await deliver_admin_payload(context, target_user_id, payload)
-        except Exception as exc:
-            if is_delivery_failure(exc):
-                await call_blocking(store.mark_user_inactive, target_user_id)
-            await send_menu_message(update, f"发送失败：{exc}")
-            return
-        await call_blocking(store.log_admin_action, user.id, "admin_dm_single", str(target_user_id), str(payload.get("text") or payload.get("content_type") or ""))
-        await send_menu_message(update, f"已发送给用户 {target_user_id}。")
+    has_content = bool(str(payload.get("text") or "").strip() or str(payload.get("photo_file_id") or "").strip())
+    if user is None or not is_admin(settings, user.id):
+        return
+    if not has_content:
+        await send_menu_message(update, "还没有设置群发内容，先点 图文设置。")
         return
 
     users = await call_blocking(store.list_users, 100000, 0, True)
@@ -1477,6 +1495,8 @@ async def execute_admin_send(update: Update, context: ContextTypes.DEFAULT_TYPE)
             except BadRequest:
                 pass
     await call_blocking(store.log_admin_action, user.id, "admin_broadcast", str(total), f"sent={sent},failed={failed},cleared={cleared}")
+    pending["kind"] = "broadcast_idle"
+    set_pending_admin_action(context, pending)
     await send_menu_message(update, f"群发完成。\n总数：{total}\n成功：{sent}\n失败：{failed}\n已清理失效用户：{cleared}")
 
 
@@ -1487,17 +1507,6 @@ async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_
     if user is None or pending is None or not is_admin(settings, user.id):
         return False
     kind = str(pending.get("kind") or "")
-    if kind == "send_target":
-        target = None
-        if text.isdigit():
-            target = await call_blocking(store.get_user, int(text))
-        if target is None:
-            target = await call_blocking(store.get_user_by_username, text)
-        if target is None:
-            await update.message.reply_text("没找到这个用户，请重新发送 user_id 或 @username。", reply_markup=MENU_KEYBOARD)
-            return True
-        await prompt_admin_send_content(update, context, ADMIN_SEND_SCOPE_SINGLE, safe_int(target.get("user_id")), user_label(target))
-        return True
     if kind == "setting_edit":
         setting_key = str(pending.get("setting_key") or "")
         setting_title = str(pending.get("setting_title") or "配置")
@@ -1507,6 +1516,45 @@ async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_
         await call_blocking(store.log_admin_action, user.id, "admin_setting_update", setting_key, value)
         clear_pending_admin_action(context)
         await send_menu_message(update, f"{setting_title} 已更新。")
+        return True
+    if kind == "broadcast_wait_content":
+        draft = get_or_create_admin_broadcast_draft(context)
+        draft["payload"] = {
+            "content_type": "text",
+            "photo_file_id": "",
+            "text": text,
+            "button_text": str((draft.get("payload") or {}).get("button_text") or ""),
+            "button_url": str((draft.get("payload") or {}).get("button_url") or ""),
+        }
+        draft["kind"] = "broadcast_idle"
+        set_pending_admin_action(context, draft)
+        await send_menu_message(update, "群发图文已保存。")
+        await show_admin_broadcast_panel(update, context)
+        return True
+    if kind == "broadcast_wait_button":
+        draft = get_or_create_admin_broadcast_draft(context)
+        if text.strip() == "-":
+            payload = draft.get("payload") or {}
+            payload["button_text"] = ""
+            payload["button_url"] = ""
+            draft["payload"] = payload
+            draft["kind"] = "broadcast_idle"
+            set_pending_admin_action(context, draft)
+            await send_menu_message(update, "群发按钮已清空。")
+            await show_admin_broadcast_panel(update, context)
+            return True
+        pieces = [part.strip() for part in text.split("|", 1)]
+        if len(pieces) != 2 or not pieces[0] or not pieces[1].startswith(("http://", "https://")):
+            await update.message.reply_text("格式不对，请按这个发：按钮文字 | https://example.com", reply_markup=MENU_KEYBOARD)
+            return True
+        payload = draft.get("payload") or {}
+        payload["button_text"] = pieces[0]
+        payload["button_url"] = pieces[1]
+        draft["payload"] = payload
+        draft["kind"] = "broadcast_idle"
+        set_pending_admin_action(context, draft)
+        await send_menu_message(update, "群发按钮已保存。")
+        await show_admin_broadcast_panel(update, context)
         return True
     if kind == "send_content":
         pending["payload"] = {
@@ -1542,7 +1590,7 @@ async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_
         payload["button_text"] = pieces[0]
         payload["button_url"] = pieces[1]
         pending["payload"] = payload
-        await send_admin_preview(update, context, pending)
+        await send_admin_preview(update, context, payload)
         return True
     if kind == "send_ready":
         await update.message.reply_text("预览已经生成了，直接点“确认发送”或“取消”就行。", reply_markup=MENU_KEYBOARD)
@@ -1556,10 +1604,23 @@ async def handle_admin_photo_input(update: Update, context: ContextTypes.DEFAULT
     pending = get_pending_admin_action(context)
     if user is None or update.message is None or pending is None or not is_admin(settings, user.id):
         return
-    if str(pending.get("kind") or "") != "send_content":
+    kind = str(pending.get("kind") or "")
+    if kind not in {"send_content", "broadcast_wait_content"}:
         return
     photo = update.message.photo[-1] if update.message.photo else None
     if photo is None:
+        return
+    if kind == "broadcast_wait_content":
+        draft = get_or_create_admin_broadcast_draft(context)
+        payload = draft.get("payload") or {}
+        payload["content_type"] = "photo"
+        payload["photo_file_id"] = photo.file_id
+        payload["text"] = str(update.message.caption or "").strip()
+        draft["payload"] = payload
+        draft["kind"] = "broadcast_idle"
+        set_pending_admin_action(context, draft)
+        await send_menu_message(update, "群发图文已保存。")
+        await show_admin_broadcast_panel(update, context)
         return
     pending["payload"] = {
         "content_type": "photo",
@@ -1608,14 +1669,34 @@ async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
         await show_admin_user_detail(update, context, safe_int(parts[2], 0), safe_int(parts[3], 0))
         return
     if sub == "send" and len(parts) > 2:
-        if parts[2] == "single":
-            await prompt_admin_send_target(update, context)
-            return
         if parts[2] == "all":
-            await prompt_admin_send_content(update, context, ADMIN_SEND_SCOPE_ALL)
+            await show_admin_broadcast_panel(update, context)
+            return
+    if sub == "bcast" and len(parts) > 2:
+        action = parts[2]
+        if action == "open":
+            await show_admin_broadcast_panel(update, context)
+            return
+        if action == "setcontent":
+            await prompt_admin_broadcast_content(update, context)
+            return
+        if action == "setbutton":
+            await prompt_admin_broadcast_button(update, context)
+            return
+        if action == "preview":
+            pending = get_or_create_admin_broadcast_draft(context)
+            payload = pending.get("payload") or {}
+            has_content = bool(str(payload.get("text") or "").strip() or str(payload.get("photo_file_id") or "").strip())
+            if not has_content:
+                await send_menu_message(update, "还没有设置群发内容，先点 图文设置。")
+                return
+            await send_admin_preview(update, context, payload, "群发预览（仅管理员可见）")
+            return
+        if action == "start":
+            await execute_admin_broadcast(update, context)
             return
     if sub == "sendu" and len(parts) > 2:
-        await prompt_admin_send_content(update, context, ADMIN_SEND_SCOPE_SINGLE, safe_int(parts[2], 0), str(parts[2]))
+        await send_menu_message(update, "单独私信入口已经关闭，请直接使用 群发通知。")
         return
     if sub == "sendopt" and len(parts) > 2:
         pending = get_pending_admin_action(context)
@@ -1623,14 +1704,14 @@ async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
             await query.answer("没有待发送内容", show_alert=True)
             return
         if parts[2] == "none":
-            await send_admin_preview(update, context, pending)
+            await send_admin_preview(update, context, pending.get("payload") or {})
             return
         pending["kind"] = "send_button"
         set_pending_admin_action(context, pending)
         await send_menu_message(update, "请发送按钮，格式：按钮文字 | https://example.com")
         return
     if sub == "sendgo":
-        await execute_admin_send(update, context)
+        await execute_admin_broadcast(update, context)
         return
     if sub == "cfg" and len(parts) > 2:
         await show_admin_config_page(update, context, parts[2])

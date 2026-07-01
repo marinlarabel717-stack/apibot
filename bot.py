@@ -575,26 +575,14 @@ def build_product_keyboard_configured(
     category_id: int,
     page: int,
 ) -> InlineKeyboardMarkup:
-    total_pages = max(1, (len(rows) + PRODUCTS_PER_PAGE - 1) // PRODUCTS_PER_PAGE)
-    page = max(0, min(page, total_pages - 1))
-    start = page * PRODUCTS_PER_PAGE
-    page_rows = rows[start : start + PRODUCTS_PER_PAGE]
-
     buttons: list[list[InlineKeyboardButton]] = []
-    for row in page_rows:
+    for row in rows:
         product_id = safe_int(row.get("productId"))
         product_name = shorten(str(row.get("productName") or f"商品 {product_id}"), 28)
         stock = safe_int(row.get("totalStock"))
         price = resolve_sell_price(settings, row)
-        buttons.append([plain_catalog_button(f"{product_name} 库存 [{stock}] - ${price:.2f}", f"prd:{product_id}:{category_id}:{page}")])
+        buttons.append([plain_catalog_button(f"{product_name} 库存 [{stock}] - ${price:.2f}", f"prd:{product_id}:{category_id}:0")])
 
-    nav_row: list[InlineKeyboardButton] = []
-    if page > 0:
-        nav_row.append(InlineKeyboardButton("⬅️ 上一页", callback_data=f"cat:{category_id}:{page - 1}"))
-    nav_row.append(InlineKeyboardButton(f"{page + 1}/{total_pages}", callback_data=f"cat:{category_id}:{page}"))
-    if page < total_pages - 1:
-        nav_row.append(InlineKeyboardButton("下一页 ➡️", callback_data=f"cat:{category_id}:{page + 1}"))
-    buttons.append(nav_row)
     buttons.append(
         [
             premium_inline_button(BUTTON_MAIN_MENU, "nav:menu", HOME_EMOJI_ID),

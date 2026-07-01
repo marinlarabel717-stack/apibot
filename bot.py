@@ -153,6 +153,7 @@ TOTAL_DUE_EMOJI_ID = "5204242830687494041"
 PACKED_DONE_EMOJI_ID = "6323524880121726602"
 PRODUCT_LIST_EMOJI_ID = "6334767047213319650"
 PRODUCT_LIST_ALERT_EMOJI_ID = "6323546926188857158"
+SEARCH_RESULTS_EMOJI_ID = "6332075107741075109"
 CLOSE_EMOJI_ID = "6323186419518932861"
 RECENT_ORDERS_EMOJI_ID = "5278660453419996132"
 ORDER_CREATED_EMOJI_ID = "6323523703300688017"
@@ -426,6 +427,33 @@ def build_products_intro_text(category_name: str) -> tuple[str, tuple[MessageEnt
         ("❗️", PRODUCT_LIST_ALERT_EMOJI_ID),
         (" 账号放久难免会死，有差异请联系客服处理。", None),
     ]
+    return build_text_with_custom_emoji(parts)
+
+
+def build_search_results_text(keyword: str, rows: list[dict[str, Any]], price_resolver) -> tuple[str, tuple[MessageEntity, ...]]:
+    parts: list[tuple[str, str | None]] = [
+        ("🔎", SEARCH_RESULTS_EMOJI_ID),
+        (" 搜索结果：", None),
+        (keyword, None),
+        ("\n", None),
+        ("点击下面商品按钮查看详情：", None),
+        ("\n\n", None),
+    ]
+    for row in rows[:SEARCH_RESULTS_LIMIT]:
+        sell_price = price_resolver(row)
+        parts.extend(
+            [
+                ("- ", None),
+                (str(row.get("productName") or "商品"), None),
+                (" | 库存 ", None),
+                (str(safe_int(row.get("totalStock"))), None),
+                (" | $", None),
+                (f"{sell_price:.2f}", None),
+                ("\n", None),
+            ]
+        )
+    if parts[-1][0] == "\n":
+        parts.pop()
     return build_text_with_custom_emoji(parts)
 
 
@@ -1521,6 +1549,7 @@ async def search_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         "点击下面商品按钮查看详情：",
         "",
     ]
+    text, entities = build_search_results_text(keyword, rows, lambda row: safe_float(row.get("price")))
     buttons: list[list[InlineKeyboardButton]] = []
     for row in rows[:SEARCH_RESULTS_LIMIT]:
         product_id = safe_int(row.get("productId"))
@@ -1539,7 +1568,7 @@ async def search_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             ]
         )
     buttons.append([InlineKeyboardButton("🛒 浏览全部分类", callback_data="nav:cats")])
-    await update.message.reply_text("\n".join(text_lines), reply_markup=InlineKeyboardMarkup(buttons))
+    await update.message.reply_text(text, entities=entities, reply_markup=InlineKeyboardMarkup(buttons))
 
 
 async def search_text_rich(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1595,6 +1624,7 @@ async def search_text_rich(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         "点击下面商品按钮查看详情：",
         "",
     ]
+    text, entities = build_search_results_text(keyword, rows, lambda row: resolve_sell_price(settings, row))
     buttons: list[list[InlineKeyboardButton]] = []
     for row in rows[:SEARCH_RESULTS_LIMIT]:
         product_id = safe_int(row.get("productId"))
@@ -1607,7 +1637,7 @@ async def search_text_rich(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         )
         buttons.append([plain_catalog_button(f"{shorten(str(row.get('productName')), 22)} | ${sell_price:.2f}", f"prd:{product_id}:{category_id}:0")])
     buttons.append([InlineKeyboardButton("🛒 浏览全部分类", callback_data="nav:cats")])
-    await update.message.reply_text("\n".join(text_lines), reply_markup=InlineKeyboardMarkup(buttons))
+    await update.message.reply_text(text, entities=entities, reply_markup=InlineKeyboardMarkup(buttons))
 
 
 async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

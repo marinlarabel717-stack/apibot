@@ -109,6 +109,7 @@ PRODUCT_LIST_EMOJI_ID = "6334767047213319650"
 PRODUCT_LIST_ALERT_EMOJI_ID = "6323546926188857158"
 CLOSE_EMOJI_ID = "6323186419518932861"
 RECENT_ORDERS_EMOJI_ID = "5278660453419996132"
+ORDER_CREATED_EMOJI_ID = "6323523703300688017"
 CATEGORY_BUTTON_EMOJI_IDS: dict[str, str] = {
     "asia": "6334321852378252986",
     "west": "6334717028024190508",
@@ -360,6 +361,10 @@ def delivery_ready_caption(
     if refund_amount > 0:
         lines.append(f"💸 已退款：{format_money(refund_amount)} USDT")
     return "\n".join(lines)
+
+
+def order_created_caption() -> str:
+    return premium_text_prefix(ORDER_CREATED_EMOJI_ID, "⏳", "订单已创建，正在检查账号存活并打包，请稍后...")
 
 
 def delivery_storage_filename(task_id: str, file_url: str) -> str:
@@ -1024,6 +1029,8 @@ async def buy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     if result:
         await update.message.reply_text(result, reply_markup=MENU_KEYBOARD)
+    else:
+        await update.message.reply_text(order_created_caption(), reply_markup=MENU_KEYBOARD, parse_mode="HTML")
 
 
 async def finalize_remote_order(
@@ -1510,6 +1517,12 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             await query.message.reply_text(result, reply_markup=MENU_KEYBOARD)
         elif result:
             await reply_inline(update, result)
+        elif query.message is not None:
+            await query.message.reply_text(
+                order_created_caption(),
+                reply_markup=MENU_KEYBOARD,
+                parse_mode="HTML",
+            )
         return
 
     await query.answer("暂不支持这个按钮", show_alert=False)

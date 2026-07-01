@@ -402,9 +402,9 @@ def build_start_menu_text(settings: Settings, user: Any, balance: float, total_s
 
 def categories_intro() -> str:
     return (
-        f"{premium_text_prefix(CATEGORY_LIST_EMOJI_ID, '🛒', '这是商品分类列表，请选择你需要的分类：')}\n\n"
-        f"{premium_text_prefix(ALERT_EMOJI_ID, '❗️', '首次购买建议先少量测试，确认符合需求再放量。')}\n"
-        f"{premium_text_prefix(ALERT_EMOJI_ID, '❗️', '虚拟商品一经发货通常不支持无理由处理，请先看清分类与说明。')}"
+        f"{premium_text_prefix(PRODUCT_LIST_EMOJI_ID, '🛍', '这是商品分类列表，请选择你需要的分类：')}\n\n"
+        f"{premium_text_prefix(PRODUCT_LIST_ALERT_EMOJI_ID, '❗️', '首次购买建议先少量测试，确认符合需求再放量。')}\n"
+        f"{premium_text_prefix(PRODUCT_LIST_ALERT_EMOJI_ID, '❗️', '虚拟商品一经发货通常不支持无理由处理，请先看清分类与说明。')}"
     )
 
 

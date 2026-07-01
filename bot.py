@@ -400,21 +400,33 @@ def build_start_menu_text(settings: Settings, user: Any, balance: float, total_s
     return build_text_with_custom_emoji(parts, code_spans)
 
 
-def categories_intro() -> str:
-    return (
-        f"{premium_text_prefix(PRODUCT_LIST_EMOJI_ID, '🛍', '这是商品分类列表，请选择你需要的分类：')}\n\n"
-        f"{premium_text_prefix(PRODUCT_LIST_ALERT_EMOJI_ID, '❗️', '首次购买建议先少量测试，确认符合需求再放量。')}\n"
-        f"{premium_text_prefix(PRODUCT_LIST_ALERT_EMOJI_ID, '❗️', '虚拟商品一经发货通常不支持无理由处理，请先看清分类与说明。')}"
-    )
+def build_categories_intro_text() -> tuple[str, tuple[MessageEntity, ...]]:
+    parts: list[tuple[str, str | None]] = [
+        ("🛍", PRODUCT_LIST_EMOJI_ID),
+        (" 这是商品分类列表，请选择你需要的分类：", None),
+        ("\n\n", None),
+        ("❗️", PRODUCT_LIST_ALERT_EMOJI_ID),
+        (" 首次购买建议先少量测试，确认符合需求再放量。", None),
+        ("\n", None),
+        ("❗️", PRODUCT_LIST_ALERT_EMOJI_ID),
+        (" 虚拟商品一经发货通常不支持无理由处理，请先看清分类与说明。", None),
+    ]
+    return build_text_with_custom_emoji(parts)
 
 
-def products_intro(category_name: str) -> str:
-    safe_category_name = html.escape(category_name)
-    return (
-        f"{premium_text_prefix(PRODUCT_LIST_EMOJI_ID, '🛍', '这是商品列表，当前分类：')}{safe_category_name}\n\n"
-        f"{premium_text_prefix(PRODUCT_LIST_ALERT_EMOJI_ID, '❗️', '没用过的本店商品，请先少量购买测试，以免造成不必要的争议。')}\n"
-        f"{premium_text_prefix(PRODUCT_LIST_ALERT_EMOJI_ID, '❗️', '账号放久难免会死，有差异请联系客服处理。')}"
-    )
+def build_products_intro_text(category_name: str) -> tuple[str, tuple[MessageEntity, ...]]:
+    parts: list[tuple[str, str | None]] = [
+        ("🛍", PRODUCT_LIST_EMOJI_ID),
+        (" 这是商品列表，当前分类：", None),
+        (category_name, None),
+        ("\n\n", None),
+        ("❗️", PRODUCT_LIST_ALERT_EMOJI_ID),
+        (" 没用过的本店商品，请先少量购买测试，以免造成不必要的争议。", None),
+        ("\n", None),
+        ("❗️", PRODUCT_LIST_ALERT_EMOJI_ID),
+        (" 账号放久难免会死，有差异请联系客服处理。", None),
+    ]
+    return build_text_with_custom_emoji(parts)
 
 
 def detail_notice() -> str:
@@ -730,10 +742,10 @@ def render_products_view(
     category_id: int,
     rows: list[dict[str, Any]],
     page: int,
-) -> tuple[str, InlineKeyboardMarkup]:
-    text = products_intro(category_name)
+) -> tuple[str, tuple[MessageEntity, ...], InlineKeyboardMarkup]:
+    text, entities = build_products_intro_text(category_name)
     keyboard = build_product_keyboard(rows, category_id, page)
-    return text, keyboard
+    return text, entities, keyboard
 
 
 def build_product_detail_keyboard(product_id: int, category_id: int, page: int) -> InlineKeyboardMarkup:
@@ -806,8 +818,9 @@ def render_products_view_configured(
     category_id: int,
     rows: list[dict[str, Any]],
     page: int,
-) -> tuple[str, InlineKeyboardMarkup]:
-    return products_intro(category_name), build_product_keyboard_configured(settings, rows, category_id, page)
+) -> tuple[str, tuple[MessageEntity, ...], InlineKeyboardMarkup]:
+    text, entities = build_products_intro_text(category_name)
+    return text, entities, build_product_keyboard_configured(settings, rows, category_id, page)
 
 
 def render_product_detail_view_configured(
@@ -911,7 +924,8 @@ async def show_categories(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if not rows:
         await reply_inline(update, "当前没有分类。")
         return
-    await reply_inline(update, categories_intro(), build_category_keyboard_configured(settings, rows), parse_mode="HTML")
+    text, entities = build_categories_intro_text()
+    await reply_inline(update, text, build_category_keyboard_configured(settings, rows), entities=entities)
 
 
 async def show_products(
@@ -931,8 +945,8 @@ async def show_products(
         await reply_inline(update, "这个分类下没有商品。")
         return
     category_name = category_name_from_rows(categories, category_id)
-    text, keyboard = render_products_view_configured(settings, category_name, category_id, rows, page)
-    await reply_inline(update, text, keyboard, parse_mode="HTML")
+    text, entities, keyboard = render_products_view_configured(settings, category_name, category_id, rows, page)
+    await reply_inline(update, text, keyboard, entities=entities)
 
 
 async def show_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

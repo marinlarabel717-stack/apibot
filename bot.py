@@ -17,6 +17,7 @@ from telegram import (
     ReplyKeyboardMarkup,
     Update,
 )
+from telegram.constants import KeyboardButtonStyle
 from telegram.error import BadRequest
 from telegram.ext import (
     Application,
@@ -71,13 +72,22 @@ BUTTON_RECHARGE_BALANCE = "充值余额"
 BUTTON_PURCHASE_NOTICE = "购买须知"
 BUTTON_ORDER_HISTORY = "购买记录"
 BUTTON_SWITCH_LANGUAGE = "切换语言"
-BOTTOM_BUTTON_MAIN_MENU = "🏠主菜单"
-BOTTOM_BUTTON_CUSTOMER_SERVICE = "☎️ 联系客服"
-BOTTOM_BUTTON_RECHARGE_BALANCE = "💰充值余额"
+BOTTOM_BUTTON_MAIN_MENU = "主菜单"
+BOTTOM_BUTTON_CUSTOMER_SERVICE = "联系客服"
+BOTTOM_BUTTON_RECHARGE_BALANCE = "充值余额"
+LEGACY_BOTTOM_BUTTON_MAIN_MENU = "🏠主菜单"
+LEGACY_BOTTOM_BUTTON_CUSTOMER_SERVICE = "☎️ 联系客服"
+LEGACY_BOTTOM_BUTTON_RECHARGE_BALANCE = "💰充值余额"
+BOTTOM_BUTTON_HOME_EMOJI_ID = "6334492495723890409"
+BOTTOM_BUTTON_CUSTOMER_SERVICE_EMOJI_ID = "6334344946417404152"
+BOTTOM_BUTTON_RECHARGE_EMOJI_ID = "6334575946938451719"
 MENU_BUTTON_TEXTS = {
     BOTTOM_BUTTON_MAIN_MENU,
     BOTTOM_BUTTON_CUSTOMER_SERVICE,
     BOTTOM_BUTTON_RECHARGE_BALANCE,
+    LEGACY_BOTTOM_BUTTON_MAIN_MENU,
+    LEGACY_BOTTOM_BUTTON_CUSTOMER_SERVICE,
+    LEGACY_BOTTOM_BUTTON_RECHARGE_BALANCE,
 }
 LEGACY_MENU_BUTTON_TEXTS = {
     BUTTON_ACCOUNT_LIST,
@@ -96,9 +106,21 @@ NON_SEARCH_BUTTON_TEXTS = MENU_BUTTON_TEXTS | LEGACY_MENU_BUTTON_TEXTS | {
 MENU_KEYBOARD = ReplyKeyboardMarkup(
     [
         [
-            KeyboardButton(BOTTOM_BUTTON_MAIN_MENU),
-            KeyboardButton(BOTTOM_BUTTON_CUSTOMER_SERVICE),
-            KeyboardButton(BOTTOM_BUTTON_RECHARGE_BALANCE),
+            KeyboardButton(
+                BOTTOM_BUTTON_MAIN_MENU,
+                icon_custom_emoji_id=BOTTOM_BUTTON_HOME_EMOJI_ID,
+                style=KeyboardButtonStyle.PRIMARY,
+            ),
+            KeyboardButton(
+                BOTTOM_BUTTON_CUSTOMER_SERVICE,
+                icon_custom_emoji_id=BOTTOM_BUTTON_CUSTOMER_SERVICE_EMOJI_ID,
+                style=KeyboardButtonStyle.DANGER,
+            ),
+            KeyboardButton(
+                BOTTOM_BUTTON_RECHARGE_BALANCE,
+                icon_custom_emoji_id=BOTTOM_BUTTON_RECHARGE_EMOJI_ID,
+                style=KeyboardButtonStyle.SUCCESS,
+            ),
         ],
     ],
     resize_keyboard=True,
@@ -1387,15 +1409,15 @@ async def route_menu_text(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         clear_pending_purchase(context)
         await show_categories(update, context)
         return
-    if text == BUTTON_MAIN_MENU or text == BOTTOM_BUTTON_MAIN_MENU:
+    if text in {BUTTON_MAIN_MENU, BOTTOM_BUTTON_MAIN_MENU, LEGACY_BOTTOM_BUTTON_MAIN_MENU}:
         clear_pending_purchase(context)
         await show_start_menu(update, context)
         return
-    if text == BUTTON_PROFILE or text == BUTTON_RECHARGE_BALANCE or text == BOTTOM_BUTTON_RECHARGE_BALANCE:
+    if text in {BUTTON_PROFILE, BUTTON_RECHARGE_BALANCE, BOTTOM_BUTTON_RECHARGE_BALANCE, LEGACY_BOTTOM_BUTTON_RECHARGE_BALANCE}:
         clear_pending_purchase(context)
         await show_recharge(update, context)
         return
-    if text == BOTTOM_BUTTON_CUSTOMER_SERVICE:
+    if text in {BOTTOM_BUTTON_CUSTOMER_SERVICE, LEGACY_BOTTOM_BUTTON_CUSTOMER_SERVICE}:
         clear_pending_purchase(context)
         await show_customer_service(update, context)
         return

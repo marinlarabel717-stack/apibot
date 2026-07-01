@@ -62,6 +62,7 @@ class Store:
                     refund_amount REAL NOT NULL DEFAULT 0,
                     state TEXT NOT NULL,
                     file_url TEXT NOT NULL DEFAULT '',
+                    delivery_ready_sent_at TEXT NOT NULL DEFAULT '',
                     delivery_sent_at TEXT NOT NULL DEFAULT '',
                     delivery_error TEXT NOT NULL DEFAULT '',
                     raw_payload TEXT NOT NULL DEFAULT '',
@@ -92,6 +93,8 @@ class Store:
             if "is_active" not in user_columns:
                 conn.execute("ALTER TABLE users ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1")
             order_columns = {row["name"] for row in conn.execute("PRAGMA table_info(orders)").fetchall()}
+            if "delivery_ready_sent_at" not in order_columns:
+                conn.execute("ALTER TABLE orders ADD COLUMN delivery_ready_sent_at TEXT NOT NULL DEFAULT ''")
             if "delivery_sent_at" not in order_columns:
                 conn.execute("ALTER TABLE orders ADD COLUMN delivery_sent_at TEXT NOT NULL DEFAULT ''")
             if "delivery_error" not in order_columns:
@@ -199,8 +202,8 @@ class Store:
                 INSERT OR REPLACE INTO orders (
                     task_id, user_id, username, product_id, product_name, quantity,
                     quantity_success, unit_price, total_price, refund_amount, state,
-                    file_url, delivery_sent_at, delivery_error, raw_payload, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, 0, 'processing', '', '', '', ?, ?, ?)
+                    file_url, delivery_ready_sent_at, delivery_sent_at, delivery_error, raw_payload, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, 0, 'processing', '', '', '', '', ?, ?, ?)
                 """,
                 (
                     str(task_id),
@@ -410,6 +413,25 @@ class Store:
             conn.commit()
             fresh = conn.execute("SELECT * FROM orders WHERE task_id = ?", (str(task_id),)).fetchone()
             return dict(fresh) if fresh else None, True
+
+    def mark_order_delivery_ready_sent(self, task_id: str) -> dict[str, Any] | None:
+        with self._lock, self._connect() as conn:
+            ts = now_iso()
+            conn.execute(
+                """
+                UPDATE orders
+                SET delivery_ready_sent_at = CASE
+                        WHEN delivery_ready_sent_at = '' THEN ?
+                        ELSE delivery_ready_sent_at
+                    END,
+                    updated_at = ?
+                WHERE task_id = ?
+                """,
+                (ts, ts, str(task_id)),
+            )
+            conn.commit()
+            row = conn.execute("SELECT * FROM orders WHERE task_id = ?", (str(task_id),)).fetchone()
+            return dict(row) if row else None
 
     def mark_order_delivery_sent(self, task_id: str) -> dict[str, Any] | None:
         with self._lock, self._connect() as conn:

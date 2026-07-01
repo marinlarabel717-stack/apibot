@@ -902,11 +902,12 @@ async def deliver_order_file(
 
     media_write_timeout = max(20, int(settings.telegram_media_write_timeout_seconds))
     media_read_timeout = max(20, int(settings.telegram_media_read_timeout_seconds))
+    ready_photo_sent = str(order_row.get("delivery_ready_sent_at") or "").strip()
     product_name = str(order_row.get("product_name") or f"商品 {order_row.get('product_id')}")
 
     try:
         zip_path = await call_blocking(download_delivery_file, supplier, task_id, file_url)
-        if include_ready_photo and DELIVERY_READY_IMAGE_PATH.exists():
+        if include_ready_photo and not ready_photo_sent and DELIVERY_READY_IMAGE_PATH.exists():
             with DELIVERY_READY_IMAGE_PATH.open("rb") as photo_fp:
                 delivery_text, delivery_entities = build_delivery_ready_text(
                     product_name,
@@ -923,6 +924,7 @@ async def deliver_order_file(
                     read_timeout=media_read_timeout,
                     connect_timeout=min(media_read_timeout, 30),
                 )
+            order_row = await call_blocking(store.mark_order_delivery_ready_sent, task_id) or order_row
         with zip_path.open("rb") as document_fp:
             logger.info(
                 "å‡†å¤‡å‘é€è®¢å• zip: task_id=%s user_id=%s size=%s timeout=%ss",
@@ -2658,7 +2660,7 @@ async def poll_processing_orders(context: ContextTypes.DEFAULT_TYPE) -> None:
                     context,
                     row,
                     supplier,
-                    include_ready_photo=False,
+                    include_ready_photo=True,
                     notify_failure=False,
                 )
 

@@ -287,9 +287,9 @@ def build_start_menu_text(settings: Settings, user: Any, balance: float, total_s
     restock_icon = tg_custom_emoji(START_MENU_EMOJI_RESTOCK_ID, "🟢")
     return (
         f"ID: <code>{user.id}</code>\n\n"
-        f"{usdt_icon} USDT : {format_money(balance)}\n"
-        f"{spent_icon} 消费金额 : {format_money(total_spent)}\n"
-        f"{quantity_icon} 购买数量 : {total_quantity}\n\n"
+        f"{usdt_icon} USDT : <code>{format_money(balance)}</code>\n"
+        f"{spent_icon} 消费金额 : <code>{format_money(total_spent)}</code>\n"
+        f"{quantity_icon} 购买数量 : <code>{total_quantity}</code>\n\n"
         f"{restock_icon} 补货频道：{html.escape(settings.restock_channel)}"
     )
 

@@ -4,6 +4,7 @@ import asyncio
 import html
 import logging
 import re
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
@@ -107,6 +108,7 @@ PACKED_DONE_EMOJI_ID = "6323524880121726602"
 PRODUCT_LIST_EMOJI_ID = "6334767047213319650"
 PRODUCT_LIST_ALERT_EMOJI_ID = "6323546926188857158"
 CLOSE_EMOJI_ID = "6323186419518932861"
+RECENT_ORDERS_EMOJI_ID = "5278660453419996132"
 CATEGORY_BUTTON_EMOJI_IDS: dict[str, str] = {
     "asia": "6334321852378252986",
     "west": "6334717028024190508",
@@ -162,6 +164,37 @@ def tg_custom_emoji(emoji_id: str, fallback: str) -> str:
 
 def premium_text_prefix(emoji_id: str, fallback: str, label: str) -> str:
     return f"{tg_custom_emoji(emoji_id, fallback)} {html.escape(label)}"
+
+
+def format_order_date(value: Any) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    try:
+        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        return f"{dt.year}/{dt.month}-{dt.day}"
+    except ValueError:
+        match = re.match(r"^(\d{4})-(\d{1,2})-(\d{1,2})", raw)
+        if match:
+            year, month, day = match.groups()
+            return f"{int(year)}/{int(month)}-{int(day)}"
+    return raw
+
+
+def build_orders_text(rows: list[dict[str, Any]]) -> str:
+    title = premium_text_prefix(RECENT_ORDERS_EMOJI_ID, "🛍", "最近订单")
+    if not rows:
+        return f"{title}\n\n暂无订单"
+    text_lines = [title, ""]
+    for row in rows:
+        order_date = format_order_date(row.get("created_at")) or "-"
+        product_name = " ".join(str(row.get("product_name") or "").split()) or "商品"
+        quantity = safe_int(row.get("quantity"), 1)
+        spent = max(0.0, safe_float(row.get("total_price")) - safe_float(row.get("refund_amount")))
+        text_lines.append(
+            f"{html.escape(order_date)} | {html.escape(product_name)} |{quantity} | {format_money(spent)} $"
+        )
+    return "\n".join(text_lines)
 
 
 def get_pending_purchase(context: ContextTypes.DEFAULT_TYPE) -> dict[str, int] | None:
@@ -820,23 +853,9 @@ async def show_orders(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if user is None:
         return
     rows = await call_blocking(store.list_user_orders, user.id, 10)
-    if not rows:
-        text = "📦 最近订单\n\n你还没有订单记录。"
-    else:
-        text_lines = ["📦 最近订单", ""]
-        for row in rows:
-            text_lines.append(
-                f"- {row['task_id']} | {row['product_name']} | "
-                f"{row['state']} | {row['quantity_success']}/{row['quantity']}"
-            )
-        text = "\n".join(text_lines)
-    keyboard = InlineKeyboardMarkup(
-        [
-            [InlineKeyboardButton("👤 个人中心", callback_data="nav:profile")],
-            [premium_inline_button(BUTTON_MAIN_MENU, "nav:menu", HOME_EMOJI_ID)],
-        ]
-    )
-    await reply_inline(update, text, keyboard)
+    text = build_orders_text(rows)
+    keyboard = InlineKeyboardMarkup([[premium_inline_button(BUTTON_MAIN_MENU, "nav:menu", HOME_EMOJI_ID)]])
+    await reply_inline(update, text, keyboard, parse_mode="HTML")
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

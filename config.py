@@ -84,6 +84,10 @@ class Settings:
     api_extra_query: dict[str, str]
     database_path: Path
     order_poll_seconds: int
+    order_poll_first_seconds: int
+    order_poll_limit: int
+    order_poll_concurrency: int
+    order_fast_probe_seconds: int
 
 
 def load_settings() -> Settings:
@@ -126,5 +130,9 @@ def load_settings() -> Settings:
         api_extra_headers=_parse_json_map(os.getenv("API_EXTRA_HEADERS_JSON", "{}"), "API_EXTRA_HEADERS_JSON"),
         api_extra_query=_parse_json_map(os.getenv("API_EXTRA_QUERY_JSON", "{}"), "API_EXTRA_QUERY_JSON"),
         database_path=database_path,
-        order_poll_seconds=max(10, int(os.getenv("ORDER_POLL_SECONDS", "20"))),
+        order_poll_seconds=max(3, int(os.getenv("ORDER_POLL_SECONDS", "5"))),
+        order_poll_first_seconds=max(1, int(os.getenv("ORDER_POLL_FIRST_SECONDS", "2"))),
+        order_poll_limit=max(10, int(os.getenv("ORDER_POLL_LIMIT", "100"))),
+        order_poll_concurrency=max(1, int(os.getenv("ORDER_POLL_CONCURRENCY", "8"))),
+        order_fast_probe_seconds=max(1, int(os.getenv("ORDER_FAST_PROBE_SECONDS", "2"))),
     )

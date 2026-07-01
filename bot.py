@@ -2024,6 +2024,7 @@ async def execute_purchase(
         total_price,
         remain,
     )
+    schedule_fast_order_probe(context, task_id)
     return None
 
 
@@ -2172,6 +2173,38 @@ async def finalize_remote_order(
         return final_state, summary
 
     return "unknown", f"未知订单状态: {status}"
+
+
+async def poll_single_processing_order(
+    context: ContextTypes.DEFAULT_TYPE,
+    task_id: str,
+) -> None:
+    try:
+        await finalize_remote_order(context, task_id, notify_user=True)
+    except Exception:
+        logger.exception("轮询订单失败: %s", task_id)
+
+
+async def poll_single_processing_order_job(context: ContextTypes.DEFAULT_TYPE) -> None:
+    job = getattr(context, "job", None)
+    payload = getattr(job, "data", None) or {}
+    task_id = str(payload.get("task_id") or "").strip()
+    if not task_id:
+        return
+    await poll_single_processing_order(context, task_id)
+
+
+def schedule_fast_order_probe(context: ContextTypes.DEFAULT_TYPE, task_id: str) -> None:
+    settings, _, _ = get_services(context)
+    application = getattr(context, "application", None)
+    job_queue = getattr(application, "job_queue", None)
+    if job_queue is None:
+        return
+    job_queue.run_once(
+        poll_single_processing_order_job,
+        when=settings.order_fast_probe_seconds,
+        data={"task_id": str(task_id)},
+    )
 
 
 async def order(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -2538,14 +2571,27 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 
 async def poll_processing_orders(context: ContextTypes.DEFAULT_TYPE) -> None:
-    _, store, _ = get_services(context)
-    rows = await call_blocking(store.list_processing_orders, 50)
-    for row in rows:
-        task_id = str(row["task_id"])
-        try:
-            await finalize_remote_order(context, task_id, notify_user=True)
-        except Exception:
-            logger.exception("轮询订单失败: %s", task_id)
+    application = getattr(context, "application", None)
+    if application is None:
+        return
+    poll_lock = application.bot_data.setdefault("order_poll_lock", asyncio.Lock())
+    if poll_lock.locked():
+        logger.info("订单轮询仍在执行，跳过本轮")
+        return
+
+    async with poll_lock:
+        settings, store, _ = get_services(context)
+        rows = await call_blocking(store.list_processing_orders, settings.order_poll_limit)
+        if not rows:
+            return
+
+        semaphore = asyncio.Semaphore(settings.order_poll_concurrency)
+
+        async def run_row(task_id: str) -> None:
+            async with semaphore:
+                await poll_single_processing_order(context, task_id)
+
+        await asyncio.gather(*(run_row(str(row["task_id"])) for row in rows))
 
 
 def build_application(settings: Settings) -> Application:
@@ -2584,7 +2630,7 @@ def build_application(settings: Settings) -> Application:
         application.job_queue.run_repeating(
             poll_processing_orders,
             interval=settings.order_poll_seconds,
-            first=10,
+            first=settings.order_poll_first_seconds,
             name="poll_processing_orders",
         )
     return application

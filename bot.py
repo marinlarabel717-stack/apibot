@@ -64,19 +64,35 @@ BUTTON_RECHARGE_BALANCE = "充值余额"
 BUTTON_PURCHASE_NOTICE = "购买须知"
 BUTTON_ORDER_HISTORY = "购买记录"
 BUTTON_SWITCH_LANGUAGE = "切换语言"
+BOTTOM_BUTTON_MAIN_MENU = "🏠主菜单"
+BOTTOM_BUTTON_CUSTOMER_SERVICE = "☎️ 联系客服"
+BOTTOM_BUTTON_RECHARGE_BALANCE = "💰充值余额"
 MENU_BUTTON_TEXTS = {
+    BOTTOM_BUTTON_MAIN_MENU,
+    BOTTOM_BUTTON_CUSTOMER_SERVICE,
+    BOTTOM_BUTTON_RECHARGE_BALANCE,
+}
+LEGACY_MENU_BUTTON_TEXTS = {
     BUTTON_ACCOUNT_LIST,
     BUTTON_RECHARGE_BALANCE,
     BUTTON_PURCHASE_NOTICE,
     BUTTON_ORDER_HISTORY,
     BUTTON_SWITCH_LANGUAGE,
 }
+NON_SEARCH_BUTTON_TEXTS = MENU_BUTTON_TEXTS | LEGACY_MENU_BUTTON_TEXTS | {
+    BUTTON_PRODUCTS,
+    BUTTON_MAIN_MENU,
+    BUTTON_PROFILE,
+    BUTTON_RECHARGE,
+}
 
 MENU_KEYBOARD = ReplyKeyboardMarkup(
     [
-        [KeyboardButton(BUTTON_ACCOUNT_LIST), KeyboardButton(BUTTON_RECHARGE_BALANCE)],
-        [KeyboardButton(BUTTON_PURCHASE_NOTICE), KeyboardButton(BUTTON_ORDER_HISTORY)],
-        [KeyboardButton(BUTTON_SWITCH_LANGUAGE)],
+        [
+            KeyboardButton(BOTTOM_BUTTON_MAIN_MENU),
+            KeyboardButton(BOTTOM_BUTTON_CUSTOMER_SERVICE),
+            KeyboardButton(BOTTOM_BUTTON_RECHARGE_BALANCE),
+        ],
     ],
     resize_keyboard=True,
     is_persistent=True,
@@ -87,15 +103,15 @@ START_MENU_EMOJI_USDT_ID = "6334575946938451719"
 START_MENU_EMOJI_SPENT_ID = "6334456344984159861"
 START_MENU_EMOJI_QUANTITY_ID = "6334602442591700514"
 START_MENU_EMOJI_RESTOCK_ID = "6334740096293537039"
-START_MENU_EMOJI_SUPPORT_ID = "5954078884310814346"
+START_MENU_EMOJI_SUPPORT_ID = "6334344946417404152"
 MAIN_MENU_EMOJI_ACCOUNT_LIST_ID = "5875462364110787088"
-MAIN_MENU_EMOJI_RECHARGE_BALANCE_ID = "5987880246865565644"
+MAIN_MENU_EMOJI_RECHARGE_BALANCE_ID = "6334575946938451719"
 MAIN_MENU_EMOJI_PURCHASE_NOTICE_ID = "5258328383183396223"
 MAIN_MENU_EMOJI_ORDER_HISTORY_ID = "5258134813302332906"
 MAIN_MENU_EMOJI_SWITCH_LANGUAGE_ID = "5879585266426973039"
 CATEGORY_LIST_EMOJI_ID = "6334677956706698772"
 ALERT_EMOJI_ID = "5775887550262546277"
-HOME_EMOJI_ID = "5967822972931542886"
+HOME_EMOJI_ID = "6334492495723890409"
 BUYING_EMOJI_ID = "5776375003280838798"
 PRICE_EMOJI_ID = "5897958754267174109"
 STOCK_EMOJI_ID = "5875291072225087249"
@@ -111,6 +127,7 @@ PRODUCT_LIST_ALERT_EMOJI_ID = "6323546926188857158"
 CLOSE_EMOJI_ID = "6323186419518932861"
 RECENT_ORDERS_EMOJI_ID = "5278660453419996132"
 ORDER_CREATED_EMOJI_ID = "6323523703300688017"
+CUSTOMER_SERVICE_EMOJI_ID = "6334344946417404152"
 CATEGORY_BUTTON_EMOJI_IDS: dict[str, str] = {
     "asia": "6334321852378252986",
     "west": "6334717028024190508",
@@ -464,7 +481,7 @@ async def reply_help(update: Update, context: ContextTypes.DEFAULT_TYPE | None =
         "/supplier_balance - 管理员查看上游余额\n"
         "/add <user_id> <+金额/-金额> - 管理员调整余额\n"
         "/credit <user_id> <金额> - 兼容旧命令\n\n"
-        "底部也有常驻按钮：账号列表 / 充值余额 / 购买须知 / 购买记录 / 切换语言。"
+        "底部也有常驻按钮：🏠主菜单 / ☎️ 联系客服 / 💰充值余额。"
     )
     await send_menu_message(update, text)
 
@@ -834,6 +851,16 @@ async def show_recharge(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         ]
     )
     await reply_inline(update, text, keyboard)
+
+
+async def show_customer_service(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    settings, _, _ = get_services(context)
+    text = premium_text_prefix(
+        CUSTOMER_SERVICE_EMOJI_ID,
+        "☎️",
+        f"联系客服：{settings.customer_service_contact}",
+    )
+    await reply_inline(update, text, parse_mode="HTML")
 
 
 async def show_notice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1292,13 +1319,17 @@ async def route_menu_text(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         clear_pending_purchase(context)
         await show_categories(update, context)
         return
-    if text == BUTTON_MAIN_MENU:
+    if text == BUTTON_MAIN_MENU or text == BOTTOM_BUTTON_MAIN_MENU:
         clear_pending_purchase(context)
         await show_start_menu(update, context)
         return
-    if text == BUTTON_PROFILE or text == BUTTON_RECHARGE_BALANCE:
+    if text == BUTTON_PROFILE or text == BUTTON_RECHARGE_BALANCE or text == BOTTOM_BUTTON_RECHARGE_BALANCE:
         clear_pending_purchase(context)
         await show_recharge(update, context)
+        return
+    if text == BOTTOM_BUTTON_CUSTOMER_SERVICE:
+        clear_pending_purchase(context)
+        await show_customer_service(update, context)
         return
     if text == BUTTON_PURCHASE_NOTICE:
         clear_pending_purchase(context)
@@ -1318,7 +1349,7 @@ async def search_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if update.message is None or not update.message.text:
         return
     keyword = update.message.text.strip()
-    if not keyword or keyword in MENU_BUTTON_TEXTS | {BUTTON_PRODUCTS, BUTTON_MAIN_MENU, BUTTON_PROFILE, BUTTON_RECHARGE}:
+    if not keyword or keyword in NON_SEARCH_BUTTON_TEXTS:
         return
     try:
         payload = await call_blocking(supplier.search_products, keyword)
@@ -1392,7 +1423,7 @@ async def search_text_rich(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         else:
             await update.message.reply_text(caption, reply_markup=keyboard, parse_mode="HTML")
         return
-    if not keyword or keyword in MENU_BUTTON_TEXTS | {BUTTON_PRODUCTS, BUTTON_MAIN_MENU, BUTTON_PROFILE, BUTTON_RECHARGE}:
+    if not keyword or keyword in NON_SEARCH_BUTTON_TEXTS:
         return
     try:
         payload = await call_blocking(supplier.search_products, keyword)
@@ -1566,7 +1597,7 @@ def build_application(settings: Settings) -> Application:
     application.add_handler(CallbackQueryHandler(show_notice, pattern=r"^nav:notice$"))
     application.add_handler(CallbackQueryHandler(show_language, pattern=r"^nav:language$"))
     application.add_handler(CallbackQueryHandler(on_callback))
-    button_pattern = "^(" + "|".join(re.escape(text) for text in sorted(MENU_BUTTON_TEXTS | {BUTTON_PRODUCTS, BUTTON_MAIN_MENU, BUTTON_PROFILE, BUTTON_RECHARGE})) + ")$"
+    button_pattern = "^(" + "|".join(re.escape(text) for text in sorted(NON_SEARCH_BUTTON_TEXTS)) + ")$"
     application.add_handler(MessageHandler(filters.Regex(button_pattern), route_menu_text))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, search_text_rich))
 

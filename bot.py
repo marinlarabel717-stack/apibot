@@ -445,14 +445,26 @@ def build_product_detail_text(
     return build_text_with_custom_emoji(parts)
 
 
-def purchase_confirm_caption(product_name: str, unit_price: float, quantity: int) -> str:
+def build_purchase_confirm_text(product_name: str, unit_price: float, quantity: int) -> tuple[str, tuple[MessageEntity, ...]]:
     total_price = unit_price * quantity
-    return (
-        f"{premium_text_prefix(PRODUCT_EMOJI_ID, '🛍', '商品：')}{html.escape(product_name)}\n"
-        f"{premium_text_prefix(UNIT_PRICE_EMOJI_ID, '🪙', '单价：')}{format_money(unit_price)} USDT\n"
-        f"{premium_text_prefix(ITEM_COUNT_EMOJI_ID, '📦', '数量：')}{quantity}\n\n"
-        f"{premium_text_prefix(TOTAL_DUE_EMOJI_ID, '🧾', '应付金额：')}{format_money(total_price)} USDT"
-    )
+    parts: list[tuple[str, str | None]] = [
+        ("🛍", PRODUCT_EMOJI_ID),
+        (" 商品：", None),
+        (product_name, None),
+        ("\n", None),
+        ("🪙", UNIT_PRICE_EMOJI_ID),
+        (" 单价：", None),
+        (f"{format_money(unit_price)} USDT", None),
+        ("\n", None),
+        ("📦", ITEM_COUNT_EMOJI_ID),
+        (" 数量：", None),
+        (str(quantity), None),
+        ("\n\n", None),
+        ("🧾", TOTAL_DUE_EMOJI_ID),
+        (" 应付金额：", None),
+        (f"{format_money(total_price)} USDT", None),
+    ]
+    return build_text_with_custom_emoji(parts)
 
 
 def build_purchase_confirm_keyboard(
@@ -476,20 +488,35 @@ def build_purchase_confirm_keyboard(
     return InlineKeyboardMarkup(buttons)
 
 
-def delivery_ready_caption(
+def build_delivery_ready_text(
     product_name: str,
     quantity: int,
     quantity_success: int,
     refund_amount: float,
-) -> str:
-    lines = [
-        f"{premium_text_prefix(PRODUCT_EMOJI_ID, '🛍', '商品：')}{html.escape(product_name)}",
-        f"{premium_text_prefix(ITEM_COUNT_EMOJI_ID, '📦', '数量：')}{quantity}",
-        f"{premium_text_prefix(PACKED_DONE_EMOJI_ID, '✅', '打包完成：存活账号 ')}{quantity_success}",
+) -> tuple[str, tuple[MessageEntity, ...]]:
+    parts: list[tuple[str, str | None]] = [
+        ("🛍", PRODUCT_EMOJI_ID),
+        (" 商品：", None),
+        (product_name, None),
+        ("\n", None),
+        ("📦", ITEM_COUNT_EMOJI_ID),
+        (" 数量：", None),
+        (str(quantity), None),
+        ("\n", None),
+        ("✅", PACKED_DONE_EMOJI_ID),
+        (" 打包完成：存活账号 ", None),
+        (str(quantity_success), None),
     ]
     if refund_amount > 0:
-        lines.append(f"💸 已退款：{format_money(refund_amount)} USDT")
-    return "\n".join(lines)
+        parts.extend(
+            [
+                ("\n", None),
+                ("💸", None),
+                (" 已退款：", None),
+                (f"{format_money(refund_amount)} USDT", None),
+            ]
+        )
+    return build_text_with_custom_emoji(parts)
 
 
 def order_created_caption() -> str:
@@ -1255,16 +1282,17 @@ async def finalize_remote_order(
                     zip_path = await call_blocking(download_delivery_file, supplier, task_id, file_url)
                     if DELIVERY_READY_IMAGE_PATH.exists():
                         with DELIVERY_READY_IMAGE_PATH.open("rb") as photo_fp:
+                            delivery_text, delivery_entities = build_delivery_ready_text(
+                                str(final_row.get("product_name") or f"商品 {final_row.get('product_id')}"),
+                                quantity,
+                                quantity_success,
+                                refund_amount,
+                            )
                             await context.bot.send_photo(
                                 chat_id=int(final_row["user_id"]),
                                 photo=photo_fp,
-                                caption=delivery_ready_caption(
-                                    str(final_row.get("product_name") or f"商品 {final_row.get('product_id')}"),
-                                    quantity,
-                                    quantity_success,
-                                    refund_amount,
-                                ),
-                                parse_mode="HTML",
+                                caption=delivery_text,
+                                caption_entities=delivery_entities,
                             )
                     with zip_path.open("rb") as document_fp:
                         await context.bot.send_document(
@@ -1523,18 +1551,18 @@ async def search_text_rich(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         row = payload.get("data") or {}
         product_name = str(row.get("productName") or f"商品 {product_id}")
         unit_price = resolve_sell_price(settings, row)
-        caption = purchase_confirm_caption(product_name, unit_price, quantity)
+        caption, caption_entities = build_purchase_confirm_text(product_name, unit_price, quantity)
         keyboard = build_purchase_confirm_keyboard(product_id, quantity, category_id, page)
         if PURCHASE_CONFIRM_IMAGE_PATH.exists():
             with PURCHASE_CONFIRM_IMAGE_PATH.open("rb") as photo_fp:
                 await update.message.reply_photo(
                     photo=photo_fp,
                     caption=caption,
+                    caption_entities=caption_entities,
                     reply_markup=keyboard,
-                    parse_mode="HTML",
                 )
         else:
-            await update.message.reply_text(caption, reply_markup=keyboard, parse_mode="HTML")
+            await update.message.reply_text(caption, entities=caption_entities, reply_markup=keyboard)
         return
     if not keyword or keyword in NON_SEARCH_BUTTON_TEXTS:
         return

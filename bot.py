@@ -87,6 +87,7 @@ START_MENU_EMOJI_USDT_ID = "6334575946938451719"
 START_MENU_EMOJI_SPENT_ID = "6334456344984159861"
 START_MENU_EMOJI_QUANTITY_ID = "6334602442591700514"
 START_MENU_EMOJI_RESTOCK_ID = "6334740096293537039"
+START_MENU_EMOJI_SUPPORT_ID = "5954078884310814346"
 MAIN_MENU_EMOJI_ACCOUNT_LIST_ID = "5875462364110787088"
 MAIN_MENU_EMOJI_RECHARGE_BALANCE_ID = "5987880246865565644"
 MAIN_MENU_EMOJI_PURCHASE_NOTICE_ID = "5258328383183396223"
@@ -286,12 +287,14 @@ def build_start_menu_text(settings: Settings, user: Any, balance: float, total_s
     spent_icon = tg_custom_emoji(START_MENU_EMOJI_SPENT_ID, "📊")
     quantity_icon = tg_custom_emoji(START_MENU_EMOJI_QUANTITY_ID, "📦")
     restock_icon = tg_custom_emoji(START_MENU_EMOJI_RESTOCK_ID, "🟢")
+    support_icon = tg_custom_emoji(START_MENU_EMOJI_SUPPORT_ID, "☎️")
     return (
         f"ID: <code>{user.id}</code>\n\n"
         f"{usdt_icon} USDT : <code>{format_money(balance)}</code>\n"
         f"{spent_icon} 消费金额 : <code>{format_money(total_spent)}</code>\n"
         f"{quantity_icon} 购买数量 : <code>{total_quantity}</code>\n\n"
-        f"{restock_icon} 补货频道：{html.escape(settings.restock_channel)}"
+        f"{restock_icon} 补货频道：{html.escape(settings.restock_channel)}\n"
+        f"{support_icon} 联系客服：{html.escape(settings.customer_service_contact)}"
     )
 
 

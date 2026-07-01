@@ -67,6 +67,7 @@ class Settings:
     admin_user_ids: set[int]
     shop_title: str
     restock_channel: str
+    customer_service_contact: str
     recharge_text: str
     sell_price_add: float
     sell_price_rules: list[dict[str, Any]]
@@ -106,6 +107,7 @@ def load_settings() -> Settings:
         admin_user_ids=admin_user_ids,
         shop_title=os.getenv("SHOP_TITLE", "TG-Matrix 账号商城").strip() or "TG-Matrix 账号商城",
         restock_channel=os.getenv("RESTOCK_CHANNEL", "@xxx").strip() or "@xxx",
+        customer_service_contact=os.getenv("CUSTOMER_SERVICE_CONTACT", "@id2uu").strip() or "@id2uu",
         recharge_text=os.getenv(
             "RECHARGE_TEXT",
             "请联系管理员充值，或者让管理员使用 /add 给你调整余额。",

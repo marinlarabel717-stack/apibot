@@ -288,26 +288,35 @@ def download_delivery_file(supplier: SupplierClient, task_id: str, file_url: str
     return target_path
 
 
-async def reply_inline(update: Update, text: str, reply_markup: InlineKeyboardMarkup | None = None) -> None:
+async def reply_inline(
+    update: Update,
+    text: str,
+    reply_markup: InlineKeyboardMarkup | None = None,
+    parse_mode: str | None = None,
+) -> None:
     if update.callback_query is not None:
         query = update.callback_query
         await query.answer()
+        message = query.message
+        if message is not None and (
+            message.photo
+            or message.video
+            or message.animation
+            or message.document
+        ):
+            try:
+                await query.edit_message_reply_markup(reply_markup=None)
+            except BadRequest:
+                pass
+            await message.reply_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
+            return
         try:
-            message = query.message
-            if message is not None and (
-                message.photo
-                or message.video
-                or message.animation
-                or message.document
-            ):
-                await query.edit_message_caption(caption=text, reply_markup=reply_markup)
-            else:
-                await query.edit_message_text(text=text, reply_markup=reply_markup)
+            await query.edit_message_text(text=text, reply_markup=reply_markup, parse_mode=parse_mode)
         except BadRequest as exc:
             if "message is not modified" not in str(exc).lower():
                 raise
     elif update.message is not None:
-        await update.message.reply_text(text, reply_markup=reply_markup)
+        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
 
 
 async def send_menu_message(update: Update, text: str) -> None:
@@ -566,11 +575,11 @@ async def fetch_category_products(supplier: SupplierClient, category_id: int) ->
     return payload.get("data") or []
 
 
-async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def build_main_menu_message(
+    context: ContextTypes.DEFAULT_TYPE,
+    user: Any,
+) -> tuple[str, InlineKeyboardMarkup]:
     settings, store, _ = get_services(context)
-    user = update.effective_user
-    if user is None:
-        return
     await call_blocking(store.ensure_user, user.id, user.username or "")
     balance = await call_blocking(store.get_balance, user.id)
     summary = await call_blocking(store.get_user_summary, user.id)
@@ -581,10 +590,18 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         safe_float(summary.get("total_spent")),
         safe_int(summary.get("total_quantity")),
     )
+    main_menu_inline = build_main_menu_inline()
+    return text, main_menu_inline
+
+
+async def show_start_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user = update.effective_user
+    if user is None:
+        return
+    text, main_menu_inline = await build_main_menu_message(context, user)
     if update.callback_query is not None:
         await update.callback_query.answer()
     start_menu_image_path = START_MENU_IMAGE_PATH if START_MENU_IMAGE_PATH.exists() else LEGACY_START_MENU_IMAGE_PATH
-    main_menu_inline = build_main_menu_inline()
     if start_menu_image_path.exists():
         with start_menu_image_path.open("rb") as photo_fp:
             if update.message is not None:
@@ -606,6 +623,14 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await update.message.reply_text(text, parse_mode="HTML", reply_markup=main_menu_inline)
     elif update.callback_query is not None and update.callback_query.message is not None:
         await update.callback_query.message.reply_text(text, parse_mode="HTML", reply_markup=main_menu_inline)
+
+
+async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user = update.effective_user
+    if user is None:
+        return
+    text, main_menu_inline = await build_main_menu_message(context, user)
+    await reply_inline(update, text, main_menu_inline, parse_mode="HTML")
 
 
 async def show_categories(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -743,7 +768,7 @@ async def show_orders(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await show_main_menu(update, context)
+    await show_start_menu(update, context)
 
 
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

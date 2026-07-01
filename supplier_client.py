@@ -143,7 +143,13 @@ class SupplierClient:
         )
 
     def query_order(self, task_id: str) -> dict[str, Any]:
-        return self._get("/tgapi/queryOrderState", {"taskId": str(task_id)})
+        return self._get(
+            "/tgapi/queryOrderState",
+            {
+                "taskId": str(task_id),
+                "timestamp": int(time.time() * 1000),
+            },
+        )
 
     def query_balance(self) -> dict[str, Any]:
         return self._get("/tgapi/queryBalance")

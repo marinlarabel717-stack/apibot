@@ -902,6 +902,7 @@ async def refresh_delivery_file_url(
     context: ContextTypes.DEFAULT_TYPE,
     supplier: SupplierClient,
     task_id: str,
+    previous_file_url: str = "",
 ) -> dict[str, Any] | None:
     _, store, _ = get_services(context)
     payload = await call_blocking(supplier.query_order, task_id)
@@ -916,6 +917,12 @@ async def refresh_delivery_file_url(
             bool(file_url),
         )
         return None
+    logger.info(
+        "刷新订单 zip 下载链接: task_id=%s changed=%s expired=%s",
+        task_id,
+        file_url != str(previous_file_url or "").strip(),
+        is_delivery_file_url_expired(file_url),
+    )
     return await call_blocking(store.update_order_delivery_file, task_id, file_url, payload)
 
 
@@ -929,7 +936,7 @@ async def download_delivery_file_with_refresh(
     current_order = order_row
 
     if is_delivery_file_url_expired(file_url):
-        refreshed_row = await refresh_delivery_file_url(context, supplier, task_id)
+        refreshed_row = await refresh_delivery_file_url(context, supplier, task_id, file_url)
         if refreshed_row:
             current_order = refreshed_row
             file_url = str(current_order.get("file_url") or "").strip()
@@ -942,7 +949,7 @@ async def download_delivery_file_with_refresh(
         if status_code != 403:
             raise
         logger.warning("订单 zip 下载链接返回 403，尝试刷新后重试: %s", task_id)
-        refreshed_row = await refresh_delivery_file_url(context, supplier, task_id)
+        refreshed_row = await refresh_delivery_file_url(context, supplier, task_id, file_url)
         if not refreshed_row:
             raise
         current_order = refreshed_row

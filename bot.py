@@ -185,6 +185,14 @@ CLOSE_EMOJI_ID = "6323186419518932861"
 RECENT_ORDERS_EMOJI_ID = "5278660453419996132"
 ORDER_CREATED_EMOJI_ID = "6323523703300688017"
 CUSTOMER_SERVICE_EMOJI_ID = "6334344946417404152"
+BALANCE_NOTICE_TITLE_EMOJI_ID = "6321283126236552928"
+BALANCE_NOTICE_INCREASE_EMOJI_ID = "6320894118163651482"
+BALANCE_NOTICE_REFUND_EMOJI_ID = "6321175945327680365"
+BALANCE_NOTICE_CURRENT_EMOJI_ID = "6323372022235667141"
+ADMIN_ADD_BALANCE_TITLE_EMOJI_ID = "6321041414067068140"
+ADMIN_ADD_BALANCE_USER_EMOJI_ID = "6273676592036191055"
+ADMIN_ADD_BALANCE_INCREASE_EMOJI_ID = "6320823470246600333"
+SYSTEM_ERROR_EMOJI_ID = "6321241559543062538"
 CATEGORY_BUTTON_EMOJI_IDS: dict[str, str] = {
     "asia": "6334321852378252986",
     "west": "6334717028024190508",
@@ -492,6 +500,47 @@ def build_text_with_custom_emoji(parts: list[tuple[str, str | None]], code_spans
     text = "".join(text_parts)
     utf16_entities = MessageEntity.adjust_message_entities_to_utf_16(text, entities)
     return text, tuple(utf16_entities)
+
+
+def build_balance_change_notice_text(action_label: str, amount: float, balance: float) -> tuple[str, tuple[MessageEntity, ...]]:
+    return build_text_with_custom_emoji(
+        [
+            ("😄", BALANCE_NOTICE_TITLE_EMOJI_ID),
+            (" 余额变动提醒\n\n", None),
+            ("😃", BALANCE_NOTICE_INCREASE_EMOJI_ID),
+            (f" {action_label}: {format_money(amount)} USDT\n\n", None),
+            ("😃", BALANCE_NOTICE_CURRENT_EMOJI_ID),
+            (f" 当前余额: {format_money(balance)} USDT", None),
+        ]
+    )
+
+
+def build_admin_add_balance_text(target_user_id: int, amount: float, balance: float) -> tuple[str, tuple[MessageEntity, ...]]:
+    return build_text_with_custom_emoji(
+        [
+            ("👤", ADMIN_ADD_BALANCE_TITLE_EMOJI_ID),
+            (" 管理员添加余额\n\n", None),
+            ("😀", ADMIN_ADD_BALANCE_USER_EMOJI_ID),
+            (f" 用户 {target_user_id}\n\n", None),
+            ("➕", ADMIN_ADD_BALANCE_INCREASE_EMOJI_ID),
+            (f" 已增加 {format_money(amount)} USDT\n\n", None),
+            ("😃", BALANCE_NOTICE_CURRENT_EMOJI_ID),
+            (f" 当前余额: {format_money(balance)} USDT", None),
+        ]
+    )
+
+
+def build_purchase_refund_error_text(refund_amount: float, balance: float) -> tuple[str, tuple[MessageEntity, ...]]:
+    return build_text_with_custom_emoji(
+        [
+            ("⚠️", SYSTEM_ERROR_EMOJI_ID),
+            ("系统错误 ：请咨询客服\n\n", None),
+            ("😃", BALANCE_NOTICE_REFUND_EMOJI_ID),
+            (f"已退款 {format_money(refund_amount)} USDT\n", None),
+            ("😃", BALANCE_NOTICE_CURRENT_EMOJI_ID),
+            (f"当前余额: {format_money(balance)} USDT", None),
+        ]
+    )
 
 
 def build_start_menu_text(
@@ -1801,7 +1850,7 @@ async def execute_purchase(
     username: str,
     product_id: int,
     quantity: int,
-) -> str | None:
+) -> tuple[str, tuple[MessageEntity, ...] | None] | None:
     settings, store, supplier = get_services(context)
     await call_blocking(store.ensure_user, user_id, username)
 
@@ -1813,7 +1862,7 @@ async def execute_purchase(
     total_price = unit_price * quantity
 
     if total_stock < quantity:
-        return f"库存不足。当前库存 {total_stock}，你要买 {quantity}"
+        return f"库存不足。当前库存 {total_stock}，你要买 {quantity}", None
 
     ok, remain = await call_blocking(
         store.debit_balance,
@@ -1828,7 +1877,7 @@ async def execute_purchase(
             "余额不足。\n"
             f"当前余额: {format_money(remain)} USDT\n"
             f"本次需要: {format_money(total_price)} USDT"
-        )
+        ), None
 
     try:
         buy_payload = await call_blocking(supplier.buy_product, product_id, quantity)
@@ -1841,11 +1890,8 @@ async def execute_purchase(
             "",
             f"下单失败退款: {product_name}",
         )
-        return (
-            f"上游下单失败: {exc}\n"
-            f"已退款 {format_money(total_price)} USDT\n"
-            f"当前余额: {format_money(refunded)} USDT"
-        )
+        logger.warning("上游下单失败，已退款 user_id=%s product_id=%s quantity=%s error=%s", user_id, product_id, quantity, exc)
+        return build_purchase_refund_error_text(total_price, refunded)
 
     data = buy_payload.get("data") or {}
     task_id = str(data.get("taskId") or "").strip()
@@ -1864,11 +1910,8 @@ async def execute_purchase(
             "",
             f"下单失败退款: {product_name}",
         )
-        return (
-            f"下单失败: {upstream_reason}\n"
-            f"已退款 {format_money(total_price)} USDT\n"
-            f"当前余额: {format_money(refunded)} USDT"
-        )
+        logger.warning("上游创建订单失败，已退款 user_id=%s product_id=%s quantity=%s reason=%s", user_id, product_id, quantity, upstream_reason)
+        return build_purchase_refund_error_text(total_price, refunded)
 
     await call_blocking(
         store.record_order,
@@ -1908,7 +1951,8 @@ async def buy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(f"获取商品详情失败: {exc}")
         return
     if result:
-        await update.message.reply_text(result, reply_markup=MENU_KEYBOARD)
+        result_text, result_entities = result
+        await update.message.reply_text(result_text, entities=result_entities, reply_markup=MENU_KEYBOARD)
     else:
         await update.message.reply_text(order_created_caption(), reply_markup=MENU_KEYBOARD, parse_mode="HTML")
 
@@ -2115,15 +2159,8 @@ async def credit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             "",
             f"by {user.id}",
         )
-        text = (
-            f"已给用户 {target_user_id} 增加 {format_money(amount)} USDT\n"
-            f"当前余额: {format_money(balance)} USDT"
-        )
-        user_notice = (
-            "余额变动提醒\n"
-            f"已增加: {format_money(amount)} USDT\n"
-            f"当前余额: {format_money(balance)} USDT"
-        )
+        text, text_entities = build_admin_add_balance_text(target_user_id, amount, balance)
+        user_notice, user_notice_entities = build_balance_change_notice_text("已增加", amount, balance)
     else:
         debit_amount = abs(amount)
         ok, balance = await call_blocking(
@@ -2146,21 +2183,19 @@ async def credit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             f"已给用户 {target_user_id} 扣减 {format_money(debit_amount)} USDT\n"
             f"当前余额: {format_money(balance)} USDT"
         )
-        user_notice = (
-            "余额变动提醒\n"
-            f"已扣减: {format_money(debit_amount)} USDT\n"
-            f"当前余额: {format_money(balance)} USDT"
-        )
+        text_entities = None
+        user_notice, user_notice_entities = build_balance_change_notice_text("已扣减", debit_amount, balance)
     if target_user_id != user.id:
         try:
             await context.bot.send_message(
                 chat_id=target_user_id,
                 text=user_notice,
+                entities=user_notice_entities,
                 reply_markup=MENU_KEYBOARD,
             )
         except Exception:
             logger.exception("发送余额变动提醒失败: %s", target_user_id)
-    await update.message.reply_text(text, reply_markup=MENU_KEYBOARD)
+    await update.message.reply_text(text, entities=text_entities, reply_markup=MENU_KEYBOARD)
 
 
 async def route_menu_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -2387,9 +2422,11 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                 await reply_inline(update, f"获取商品详情失败: {exc}")
             return
         if result and query.message is not None:
-            await query.message.reply_text(result, reply_markup=MENU_KEYBOARD)
+            result_text, result_entities = result
+            await query.message.reply_text(result_text, entities=result_entities, reply_markup=MENU_KEYBOARD)
         elif result:
-            await reply_inline(update, result)
+            result_text, result_entities = result
+            await reply_inline(update, result_text, entities=result_entities)
         elif query.message is not None:
             await query.message.reply_text(
                 order_created_caption(),

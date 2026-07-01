@@ -4,10 +4,12 @@ import asyncio
 import html
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
+
+import requests
 
 from telegram import (
     InlineKeyboardButton,
@@ -880,6 +882,75 @@ def download_delivery_file(supplier: SupplierClient, task_id: str, file_url: str
     return target_path
 
 
+def is_delivery_file_url_expired(file_url: str, now: datetime | None = None) -> bool:
+    parsed = urlparse(str(file_url or "").strip())
+    query = parse_qs(parsed.query)
+    amz_date = (query.get("X-Amz-Date") or [""])[0].strip()
+    amz_expires = (query.get("X-Amz-Expires") or [""])[0].strip()
+    if not amz_date or not amz_expires:
+        return False
+    try:
+        issued_at = datetime.strptime(amz_date, "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc)
+        expires_after = max(0, int(amz_expires))
+    except (ValueError, TypeError):
+        return False
+    current = now or datetime.now(timezone.utc)
+    return current >= issued_at + timedelta(seconds=max(0, expires_after - 30))
+
+
+async def refresh_delivery_file_url(
+    context: ContextTypes.DEFAULT_TYPE,
+    supplier: SupplierClient,
+    task_id: str,
+) -> dict[str, Any] | None:
+    _, store, _ = get_services(context)
+    payload = await call_blocking(supplier.query_order, task_id)
+    data = payload.get("data") or {}
+    status = safe_int(data.get("taskStatus"))
+    file_url = str(data.get("fileUrl") or "").strip()
+    if status != 1 or not file_url:
+        logger.warning(
+            "刷新订单 zip 下载链接失败: task_id=%s status=%s has_file_url=%s",
+            task_id,
+            status,
+            bool(file_url),
+        )
+        return None
+    return await call_blocking(store.update_order_delivery_file, task_id, file_url, payload)
+
+
+async def download_delivery_file_with_refresh(
+    context: ContextTypes.DEFAULT_TYPE,
+    supplier: SupplierClient,
+    order_row: dict[str, Any],
+) -> tuple[Path, dict[str, Any]]:
+    task_id = str(order_row.get("task_id") or "").strip()
+    file_url = str(order_row.get("file_url") or "").strip()
+    current_order = order_row
+
+    if is_delivery_file_url_expired(file_url):
+        refreshed_row = await refresh_delivery_file_url(context, supplier, task_id)
+        if refreshed_row:
+            current_order = refreshed_row
+            file_url = str(current_order.get("file_url") or "").strip()
+
+    try:
+        zip_path = await call_blocking(download_delivery_file, supplier, task_id, file_url)
+        return zip_path, current_order
+    except requests.HTTPError as exc:
+        status_code = getattr(getattr(exc, "response", None), "status_code", None)
+        if status_code != 403:
+            raise
+        logger.warning("订单 zip 下载链接返回 403，尝试刷新后重试: %s", task_id)
+        refreshed_row = await refresh_delivery_file_url(context, supplier, task_id)
+        if not refreshed_row:
+            raise
+        current_order = refreshed_row
+        file_url = str(current_order.get("file_url") or "").strip()
+        zip_path = await call_blocking(download_delivery_file, supplier, task_id, file_url)
+        return zip_path, current_order
+
+
 async def deliver_order_file(
     context: ContextTypes.DEFAULT_TYPE,
     order_row: dict[str, Any],
@@ -906,7 +977,9 @@ async def deliver_order_file(
     product_name = str(order_row.get("product_name") or f"商品 {order_row.get('product_id')}")
 
     try:
-        zip_path = await call_blocking(download_delivery_file, supplier, task_id, file_url)
+        zip_path, order_row = await download_delivery_file_with_refresh(context, supplier, order_row)
+        file_url = str(order_row.get("file_url") or "").strip()
+        ready_photo_sent = str(order_row.get("delivery_ready_sent_at") or "").strip()
         if include_ready_photo and not ready_photo_sent and DELIVERY_READY_IMAGE_PATH.exists():
             with DELIVERY_READY_IMAGE_PATH.open("rb") as photo_fp:
                 delivery_text, delivery_entities = build_delivery_ready_text(

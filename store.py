@@ -462,3 +462,38 @@ class Store:
             conn.commit()
             row = conn.execute("SELECT * FROM orders WHERE task_id = ?", (str(task_id),)).fetchone()
             return dict(row) if row else None
+
+    def update_order_delivery_file(
+        self,
+        task_id: str,
+        file_url: str,
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        with self._lock, self._connect() as conn:
+            ts = now_iso()
+            if payload is None:
+                conn.execute(
+                    """
+                    UPDATE orders
+                    SET file_url = ?, updated_at = ?
+                    WHERE task_id = ?
+                    """,
+                    (str(file_url or ""), ts, str(task_id)),
+                )
+            else:
+                conn.execute(
+                    """
+                    UPDATE orders
+                    SET file_url = ?, raw_payload = ?, updated_at = ?
+                    WHERE task_id = ?
+                    """,
+                    (
+                        str(file_url or ""),
+                        json.dumps(payload, ensure_ascii=False),
+                        ts,
+                        str(task_id),
+                    ),
+                )
+            conn.commit()
+            row = conn.execute("SELECT * FROM orders WHERE task_id = ?", (str(task_id),)).fetchone()
+            return dict(row) if row else None

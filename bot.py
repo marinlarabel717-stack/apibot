@@ -16,8 +16,11 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 
-import qrcode
 import requests
+try:
+    import qrcode
+except ModuleNotFoundError:
+    qrcode = None
 
 from telegram import (
     InlineKeyboardButton,
@@ -2269,26 +2272,41 @@ async def create_trc20_topup_order(update: Update, context: ContextTypes.DEFAULT
             [InlineKeyboardButton("取消订单", callback_data=f"rchg:trc20:cancel:{order_id}")],
         ]
     )
-    qr_image = await call_blocking(qrcode.make, recharge_address)
-    qr_buffer = io.BytesIO()
-    await call_blocking(qr_image.save, qr_buffer, "PNG")
-    qr_buffer.seek(0)
-    qr_buffer.name = f"{order_id}.png"
     sent_message = None
-    if update.callback_query is not None and update.callback_query.message is not None:
-        sent_message = await update.callback_query.message.reply_photo(
-            photo=qr_buffer,
-            caption=caption,
-            parse_mode="HTML",
-            reply_markup=keyboard,
-        )
-    elif update.message is not None:
-        sent_message = await update.message.reply_photo(
-            photo=qr_buffer,
-            caption=caption,
-            parse_mode="HTML",
-            reply_markup=keyboard,
-        )
+    if qrcode is not None:
+        qr_image = await call_blocking(qrcode.make, recharge_address)
+        qr_buffer = io.BytesIO()
+        await call_blocking(qr_image.save, qr_buffer, "PNG")
+        qr_buffer.seek(0)
+        qr_buffer.name = f"{order_id}.png"
+        if update.callback_query is not None and update.callback_query.message is not None:
+            sent_message = await update.callback_query.message.reply_photo(
+                photo=qr_buffer,
+                caption=caption,
+                parse_mode="HTML",
+                reply_markup=keyboard,
+            )
+        elif update.message is not None:
+            sent_message = await update.message.reply_photo(
+                photo=qr_buffer,
+                caption=caption,
+                parse_mode="HTML",
+                reply_markup=keyboard,
+            )
+    else:
+        logger.warning("qrcode module not installed; sending TRC20 topup details without QR image")
+        if update.callback_query is not None and update.callback_query.message is not None:
+            sent_message = await update.callback_query.message.reply_text(
+                caption,
+                parse_mode="HTML",
+                reply_markup=keyboard,
+            )
+        elif update.message is not None:
+            sent_message = await update.message.reply_text(
+                caption,
+                parse_mode="HTML",
+                reply_markup=keyboard,
+            )
     if sent_message is not None:
         await call_blocking(store.set_topup_order_message_id, order_id, sent_message.message_id)
 

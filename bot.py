@@ -2116,6 +2116,13 @@ def recharge_channel_label(channel: str) -> str:
     return "在线充值"
 
 
+RECHARGE_PRESET_AMOUNTS: tuple[tuple[int, ...], ...] = (
+    (10, 50, 100),
+    (200, 500, 1000),
+    (2000, 5000),
+)
+
+
 def build_recharge_keyboard(
     okpay_config: dict[str, str],
     recharge_address: str,
@@ -2151,19 +2158,20 @@ def build_recharge_keyboard(
         rows.append(channel_buttons)
 
     if selected_channel is not None:
-        rows.extend(
+        for amount_row in RECHARGE_PRESET_AMOUNTS:
+            rows.append(
+                [
+                    InlineKeyboardButton(
+                        f"{amount} USDT",
+                        callback_data=f"rchg:{selected_channel}:create:{amount}",
+                    )
+                    for amount in amount_row
+                ]
+            )
+        rows.append(
             [
-                [
-                    InlineKeyboardButton("10", callback_data=f"rchg:{selected_channel}:create:10"),
-                    InlineKeyboardButton("30", callback_data=f"rchg:{selected_channel}:create:30"),
-                    InlineKeyboardButton("50", callback_data=f"rchg:{selected_channel}:create:50"),
-                ],
-                [
-                    InlineKeyboardButton("100", callback_data=f"rchg:{selected_channel}:create:100"),
-                    InlineKeyboardButton("200", callback_data=f"rchg:{selected_channel}:create:200"),
-                    InlineKeyboardButton("500", callback_data=f"rchg:{selected_channel}:create:500"),
-                ],
-                [InlineKeyboardButton("自定义金额", callback_data=f"rchg:{selected_channel}:custom")],
+                InlineKeyboardButton("🏦 自定义金额", callback_data=f"rchg:{selected_channel}:custom"),
+                premium_inline_button("返回", "rchg:back", BACK_EMOJI_ID),
             ]
         )
     for pending_order in pending_orders:
@@ -2481,7 +2489,7 @@ async def show_recharge(
         lines.extend(["", f"TRC20 地址：`{recharge_address}`"])
     if selected_channel is not None:
         lines.extend(["", f"当前方式：{recharge_channel_label(selected_channel)}"])
-        lines.extend(["", "请选择充值金额：10 / 30 / 50 / 100 / 200 / 500，或点自定义金额。"])
+        lines.extend(["", "请选择充值金额：10 / 50 / 100 / 200 / 500 / 1000 / 2000 / 5000，或点自定义金额。"])
     elif trc20_available or okpay_available:
         lines.extend(["", "请先选择充值方式，再选择金额。"])
     else:
@@ -3712,6 +3720,11 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             return
 
     if action == "rchg" and len(parts) >= 2:
+        if parts[1] == "back":
+            clear_pending_purchase(context)
+            clear_pending_recharge(context)
+            await show_recharge(update, context, None)
+            return
         if parts[1] in {"custom", "create", "paid", "cancel"}:
             legacy_parts = ["rchg", "okpay", *parts[1:]]
             parts = legacy_parts
@@ -3729,7 +3742,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             set_pending_recharge(context, channel)
             await reply_inline(
                 update,
-                f"当前方式：{recharge_channel_label(channel)}\n请直接发送充值金额，支持整数或两位小数，例如：10 或 25.5",
+                f"当前方式：{recharge_channel_label(channel)}\n请直接发送充值金额，支持整数或两位小数，例如：10 或 100.5",
             )
             return
         if subaction == "create" and len(parts) >= 4:

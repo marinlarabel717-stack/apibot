@@ -35,11 +35,17 @@
   - 用户余额
   - 钱包流水
   - 订单记录
+  - 充值订单
 - 后台轮询处理中的订单
   - 完成后自动通知用户
   - 完成后自动发送打包预览图 + zip 文件
   - 失败自动退款
   - 部分成功自动按差额退款
+- OKPay 充值
+  - 创建支付链接
+  - 支付回调自动到账
+  - 手动“我已支付”补查
+  - 防重复加款
 
 ## 交互风格
 
@@ -101,6 +107,11 @@ BOT_TOKEN=
 ADMIN_USER_IDS=
 RESTOCK_CHANNEL=@xxx
 CUSTOMER_SERVICE_CONTACT=@id2uu
+OKPAY_SHOP_ID=
+OKPAY_SHOP_TOKEN=
+OKPAY_NAME=号铺
+OKPAY_CALLBACK_URL=
+OKPAY_CALLBACK_PORT=8088
 SELL_PRICE_ADD=0.2
 API_AUTH_HEADER_NAME=Authorization
 API_AUTH_HEADER_VALUE=
@@ -114,6 +125,10 @@ API_AUTH_TRY_BEARER_VARIANTS=true
 - `API_AUTH_HEADER_VALUE`
 - `RESTOCK_CHANNEL`
 - `CUSTOMER_SERVICE_CONTACT`
+- `OKPAY_SHOP_ID`
+- `OKPAY_SHOP_TOKEN`
+- `OKPAY_NAME`
+- `OKPAY_CALLBACK_URL`
 - 如果要微调利润，再改 `SELL_PRICE_ADD` 和 `SELL_PRICE_RULES_JSON`
 
 ### 3. 启动
@@ -151,6 +166,12 @@ API_EXTRA_QUERY_JSON={"uid":"10001"}
 - `SELL_PRICE_ADD`
   - 全局固定差价，最终售价 = 上游价格 + 这里的金额
   - 例如 `SELL_PRICE_ADD=0.2`，上游 `1.3` 会卖 `1.5`
+- `OKPAY_SHOP_ID` / `OKPAY_SHOP_TOKEN`
+  - OKPay 商户配置，缺一不可
+- `OKPAY_CALLBACK_URL`
+  - 公网可访问的回调地址，支付成功后用来自动到账
+- `OKPAY_CALLBACK_HOST` / `OKPAY_CALLBACK_PORT`
+  - 本地回调监听地址，默认 `0.0.0.0:8088`
 - `SELL_PRICE_RULES_JSON`
   - 按关键字单独覆盖固定差价
   - 示例：`{"VIP":{"add":0.5},"Spam":{"add":0.1},"7年":{"add":0.8}}`
@@ -173,4 +194,4 @@ API_EXTRA_QUERY_JSON={"uid":"10001"}
 - 供应商订单失败或部分成功时，会自动退回本地余额。
 - 按钮购买现在会先弹“确认购买”图片卡片，订单完成后不再发下载链接，而是直接给用户发 zip 文件。
 - 亚洲 / 欧美 / 非洲 / 年龄段这类分类按钮已经内置固定图标规则；如果打开 custom emoji，会优先显示你在 `.env` 里配置的会员图标。
-- 这是一个独立起点，后续还可以继续加真充值、支付回调、自动上分等功能。
+- 现在已经接入 OKPay 充值订单和自动到账；如果要正式收款，记得把 `OKPAY_CALLBACK_URL` 反代到本机监听端口。

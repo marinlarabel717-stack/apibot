@@ -85,6 +85,27 @@ class Store:
                     detail TEXT NOT NULL DEFAULT '',
                     created_at TEXT NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS topup_orders (
+                    order_id TEXT PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    channel TEXT NOT NULL,
+                    amount REAL NOT NULL,
+                    currency TEXT NOT NULL DEFAULT 'USDT',
+                    state TEXT NOT NULL,
+                    pay_url TEXT NOT NULL DEFAULT '',
+                    upstream_order_id TEXT NOT NULL DEFAULT '',
+                    pay_user_id TEXT NOT NULL DEFAULT '',
+                    callback_payload TEXT NOT NULL DEFAULT '',
+                    note TEXT NOT NULL DEFAULT '',
+                    message_id INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    expire_at TEXT NOT NULL DEFAULT '',
+                    paid_at TEXT NOT NULL DEFAULT '',
+                    canceled_at TEXT NOT NULL DEFAULT '',
+                    cancel_reason TEXT NOT NULL DEFAULT ''
+                );
                 """
             )
             user_columns = {row["name"] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
@@ -314,6 +335,239 @@ class Store:
                 (int(admin_user_id), str(action), str(target), str(detail), now_iso()),
             )
             conn.commit()
+
+    def cancel_pending_topup_orders(self, user_id: int, channel: str, reason: str = "recreated") -> int:
+        with self._lock, self._connect() as conn:
+            ts = now_iso()
+            cur = conn.execute(
+                """
+                UPDATE topup_orders
+                SET state = 'canceled',
+                    canceled_at = ?,
+                    cancel_reason = ?,
+                    updated_at = ?
+                WHERE user_id = ? AND channel = ? AND state = 'pending'
+                """,
+                (ts, str(reason), ts, int(user_id), str(channel)),
+            )
+            conn.commit()
+            return int(cur.rowcount or 0)
+
+    def create_topup_order(
+        self,
+        order_id: str,
+        user_id: int,
+        channel: str,
+        amount: float,
+        currency: str = "USDT",
+        *,
+        pay_url: str = "",
+        upstream_order_id: str = "",
+        note: str = "",
+        message_id: int = 0,
+        expire_at: str = "",
+    ) -> dict[str, Any]:
+        with self._lock, self._connect() as conn:
+            ts = now_iso()
+            conn.execute(
+                """
+                INSERT INTO topup_orders (
+                    order_id, user_id, channel, amount, currency, state, pay_url,
+                    upstream_order_id, pay_user_id, callback_payload, note, message_id,
+                    created_at, updated_at, expire_at, paid_at, canceled_at, cancel_reason
+                ) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, '', '', ?, ?, ?, ?, ?, '', '', '')
+                """,
+                (
+                    str(order_id),
+                    int(user_id),
+                    str(channel),
+                    float(amount),
+                    str(currency or "USDT").upper(),
+                    str(pay_url or ""),
+                    str(upstream_order_id or ""),
+                    str(note or ""),
+                    int(message_id),
+                    ts,
+                    ts,
+                    str(expire_at or ""),
+                ),
+            )
+            conn.commit()
+            row = conn.execute("SELECT * FROM topup_orders WHERE order_id = ?", (str(order_id),)).fetchone()
+            return dict(row) if row else {}
+
+    def set_topup_order_message_id(self, order_id: str, message_id: int) -> None:
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                "UPDATE topup_orders SET message_id = ?, updated_at = ? WHERE order_id = ?",
+                (int(message_id), now_iso(), str(order_id)),
+            )
+            conn.commit()
+
+    def get_topup_order(self, order_id: str) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM topup_orders WHERE order_id = ?", (str(order_id),)).fetchone()
+            return dict(row) if row else None
+
+    def get_latest_pending_topup_order(self, user_id: int, channel: str = "") -> dict[str, Any] | None:
+        query = "SELECT * FROM topup_orders WHERE user_id = ? AND state = 'pending'"
+        params: list[Any] = [int(user_id)]
+        if channel:
+            query += " AND channel = ?"
+            params.append(str(channel))
+        query += " ORDER BY created_at DESC LIMIT 1"
+        with self._connect() as conn:
+            row = conn.execute(query, tuple(params)).fetchone()
+            return dict(row) if row else None
+
+    def cancel_topup_order(self, order_id: str, *, user_id: int | None = None, reason: str = "canceled") -> tuple[bool, dict[str, Any] | None]:
+        with self._lock, self._connect() as conn:
+            row = conn.execute("SELECT * FROM topup_orders WHERE order_id = ?", (str(order_id),)).fetchone()
+            if row is None:
+                return False, None
+            payload = dict(row)
+            if user_id is not None and int(payload.get("user_id") or 0) != int(user_id):
+                return False, payload
+            if payload.get("state") != "pending":
+                return False, payload
+            ts = now_iso()
+            conn.execute(
+                """
+                UPDATE topup_orders
+                SET state = 'canceled', canceled_at = ?, cancel_reason = ?, updated_at = ?
+                WHERE order_id = ? AND state = 'pending'
+                """,
+                (ts, str(reason), ts, str(order_id)),
+            )
+            conn.commit()
+            fresh = conn.execute("SELECT * FROM topup_orders WHERE order_id = ?", (str(order_id),)).fetchone()
+            return True, dict(fresh) if fresh else payload
+
+    def complete_topup_order(
+        self,
+        order_id: str,
+        *,
+        paid_amount: float,
+        currency: str = "USDT",
+        upstream_order_id: str = "",
+        pay_user_id: str = "",
+        callback_payload: dict[str, Any] | None = None,
+        note: str = "",
+    ) -> tuple[str, dict[str, Any] | None]:
+        with self._lock, self._connect() as conn:
+            row = conn.execute("SELECT * FROM topup_orders WHERE order_id = ?", (str(order_id),)).fetchone()
+            if row is None:
+                return "order_not_found", None
+            order = dict(row)
+            state = str(order.get("state") or "")
+            if state == "paid":
+                return "already_paid", order
+            if state == "processing":
+                return "processing", order
+            if state != "pending":
+                return state or "invalid_state", order
+
+            expire_at = str(order.get("expire_at") or "").strip()
+            if expire_at:
+                try:
+                    if datetime.fromisoformat(expire_at.replace("Z", "+00:00")) < datetime.now(timezone.utc):
+                        ts = now_iso()
+                        conn.execute(
+                            """
+                            UPDATE topup_orders
+                            SET state = 'expired', canceled_at = ?, cancel_reason = 'expired', updated_at = ?
+                            WHERE order_id = ? AND state = 'pending'
+                            """,
+                            (ts, ts, str(order_id)),
+                        )
+                        conn.commit()
+                        fresh = conn.execute("SELECT * FROM topup_orders WHERE order_id = ?", (str(order_id),)).fetchone()
+                        return "expired", dict(fresh) if fresh else order
+                except ValueError:
+                    pass
+
+            expected_currency = str(order.get("currency") or "USDT").upper()
+            paid_currency = str(currency or expected_currency).upper()
+            if paid_currency != expected_currency:
+                return "coin_mismatch", order
+
+            expected_amount = float(order.get("amount") or 0.0)
+            actual_amount = float(paid_amount)
+            if expected_amount <= 0 or actual_amount <= 0:
+                return "invalid_amount", order
+            if round(expected_amount, 2) != round(actual_amount, 2):
+                return "amount_mismatch", order
+
+            ts = now_iso()
+            callback_json = json.dumps(callback_payload or {}, ensure_ascii=False)
+            conn.execute(
+                """
+                UPDATE topup_orders
+                SET state = 'processing',
+                    upstream_order_id = CASE WHEN ? != '' THEN ? ELSE upstream_order_id END,
+                    pay_user_id = ?,
+                    callback_payload = ?,
+                    note = CASE WHEN ? != '' THEN ? ELSE note END,
+                    updated_at = ?
+                WHERE order_id = ? AND state = 'pending'
+                """,
+                (
+                    str(upstream_order_id or ""),
+                    str(upstream_order_id or ""),
+                    str(pay_user_id or ""),
+                    callback_json,
+                    str(note or ""),
+                    str(note or ""),
+                    ts,
+                    str(order_id),
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO users (user_id, username, display_name, balance, is_active, created_at, updated_at)
+                VALUES (?, '', '', 0, 1, ?, ?)
+                ON CONFLICT(user_id) DO NOTHING
+                """,
+                (int(order["user_id"]), ts, ts),
+            )
+            conn.execute(
+                "UPDATE users SET balance = balance + ?, updated_at = ? WHERE user_id = ?",
+                (actual_amount, ts, int(order["user_id"])),
+            )
+            conn.execute(
+                """
+                INSERT INTO wallet_ledger (user_id, amount, direction, reason, ref_id, note, created_at)
+                VALUES (?, ?, 'credit', 'okpay_topup', ?, ?, ?)
+                """,
+                (int(order["user_id"]), actual_amount, str(order_id), str(note or paid_currency), ts),
+            )
+            conn.execute(
+                """
+                UPDATE topup_orders
+                SET state = 'paid',
+                    paid_at = ?,
+                    updated_at = ?,
+                    upstream_order_id = CASE WHEN ? != '' THEN ? ELSE upstream_order_id END,
+                    pay_user_id = ?,
+                    callback_payload = ?,
+                    note = CASE WHEN ? != '' THEN ? ELSE note END
+                WHERE order_id = ? AND state = 'processing'
+                """,
+                (
+                    ts,
+                    ts,
+                    str(upstream_order_id or ""),
+                    str(upstream_order_id or ""),
+                    str(pay_user_id or ""),
+                    callback_json,
+                    str(note or ""),
+                    str(note or ""),
+                    str(order_id),
+                ),
+            )
+            conn.commit()
+            fresh = conn.execute("SELECT * FROM topup_orders WHERE order_id = ?", (str(order_id),)).fetchone()
+            return "paid", dict(fresh) if fresh else order
 
     def list_user_orders(self, user_id: int, limit: int = 10) -> list[dict[str, Any]]:
         with self._connect() as conn:

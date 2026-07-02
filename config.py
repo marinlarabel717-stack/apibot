@@ -67,6 +67,13 @@ class Settings:
     admin_user_ids: set[int]
     restock_channel: str
     customer_service_contact: str
+    okpay_shop_id: str
+    okpay_shop_token: str
+    okpay_name: str
+    okpay_callback_url: str
+    okpay_api_url: str
+    okpay_callback_host: str
+    okpay_callback_port: int
     sell_price_add: float
     sell_price_rules: list[dict[str, Any]]
     inline_button_custom_emoji_enabled: bool
@@ -112,6 +119,13 @@ def load_settings() -> Settings:
         admin_user_ids=admin_user_ids,
         restock_channel=os.getenv("RESTOCK_CHANNEL", "@xxx").strip() or "@xxx",
         customer_service_contact=os.getenv("CUSTOMER_SERVICE_CONTACT", "@id2uu").strip() or "@id2uu",
+        okpay_shop_id=os.getenv("OKPAY_SHOP_ID", "").strip(),
+        okpay_shop_token=os.getenv("OKPAY_SHOP_TOKEN", "").strip(),
+        okpay_name=os.getenv("OKPAY_NAME", "号铺").strip() or "号铺",
+        okpay_callback_url=os.getenv("OKPAY_CALLBACK_URL", "").strip(),
+        okpay_api_url=os.getenv("OKPAY_API_URL", "https://api.okaypay.me/shop").strip().rstrip("/"),
+        okpay_callback_host=os.getenv("OKPAY_CALLBACK_HOST", "0.0.0.0").strip() or "0.0.0.0",
+        okpay_callback_port=int(os.getenv("OKPAY_CALLBACK_PORT", "8088")),
         sell_price_add=_parse_float(os.getenv("SELL_PRICE_ADD", "0"), "SELL_PRICE_ADD", 0.0),
         sell_price_rules=_parse_price_rules(os.getenv("SELL_PRICE_RULES_JSON", "{}"), "SELL_PRICE_RULES_JSON"),
         inline_button_custom_emoji_enabled=os.getenv("INLINE_BUTTON_CUSTOM_EMOJI_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"},

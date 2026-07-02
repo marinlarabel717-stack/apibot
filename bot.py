@@ -1,9 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import html
+import json
 import logging
 import re
+import threading
+import urllib.parse
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -149,12 +154,17 @@ MENU_KEYBOARD = ReplyKeyboardMarkup(
 )
 
 PENDING_PURCHASE_KEY = "pending_purchase_quantity"
+PENDING_RECHARGE_KEY = "pending_recharge_amount"
 PENDING_ADMIN_KEY = "pending_admin_action"
 ADMIN_USERS_PAGE_SIZE = 8
 ADMIN_SEND_SCOPE_SINGLE = "single"
 ADMIN_SEND_SCOPE_ALL = "all"
 RUNTIME_KEY_RECHARGE_ADDRESS = "recharge_address"
 RUNTIME_KEY_OKPAY_CONFIG = "okpay_config"
+RUNTIME_KEY_OKPAY_SHOP_ID = "okpay_shop_id"
+RUNTIME_KEY_OKPAY_SHOP_TOKEN = "okpay_shop_token"
+RUNTIME_KEY_OKPAY_NAME = "okpay_name"
+RUNTIME_KEY_OKPAY_CALLBACK_URL = "okpay_callback_url"
 RUNTIME_KEY_CUSTOMER_SERVICE = "customer_service_contact"
 RUNTIME_KEY_RESTOCK_CHANNEL = "restock_channel"
 START_MENU_EMOJI_USDT_ID = "6334575946938451719"
@@ -318,6 +328,85 @@ def effective_okpay_config(context: ContextTypes.DEFAULT_TYPE) -> str:
     return runtime_value(context, RUNTIME_KEY_OKPAY_CONFIG, "")
 
 
+def parse_okpay_config_text(raw: str) -> dict[str, str]:
+    text = str(raw or "").strip()
+    if not text:
+        return {}
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        payload = None
+    if isinstance(payload, dict):
+        result: dict[str, str] = {}
+        for key in ("shop_id", "shop_token", "name", "callback_url", "api_url"):
+            value = payload.get(key)
+            if value is not None and str(value).strip():
+                result[key] = str(value).strip()
+        return result
+
+    result: dict[str, str] = {}
+    alias_map = {
+        "shop_id": "shop_id",
+        "id": "shop_id",
+        "merchant_id": "shop_id",
+        "shop_token": "shop_token",
+        "token": "shop_token",
+        "name": "name",
+        "callback_url": "callback_url",
+        "api_url": "api_url",
+    }
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        normalized = alias_map.get(key.strip().lower())
+        if normalized and value.strip():
+            result[normalized] = value.strip()
+    return result
+
+
+def summarize_okpay_config(config: dict[str, str]) -> str:
+    shop_id = config.get("shop_id", "")
+    token = config.get("shop_token", "")
+    callback_url = config.get("callback_url", "")
+    api_url = config.get("api_url", "")
+    name = config.get("name", "")
+    return (
+        f"商户ID：{shop_id or '未配置'}\n"
+        f"Token：{'已配置' if token else '未配置'}\n"
+        f"名称：{name or '未配置'}\n"
+        f"回调地址：{callback_url or '未配置'}\n"
+        f"API地址：{api_url or '未配置'}"
+    )
+
+
+def resolve_okpay_settings(runtime_config: dict[str, str], settings: Settings) -> dict[str, str]:
+    parsed = parse_okpay_config_text(str(runtime_config.get(RUNTIME_KEY_OKPAY_CONFIG) or ""))
+    shop_id = str(runtime_config.get(RUNTIME_KEY_OKPAY_SHOP_ID) or "").strip() or parsed.get("shop_id", "") or settings.okpay_shop_id
+    shop_token = str(runtime_config.get(RUNTIME_KEY_OKPAY_SHOP_TOKEN) or "").strip() or parsed.get("shop_token", "") or settings.okpay_shop_token
+    name = str(runtime_config.get(RUNTIME_KEY_OKPAY_NAME) or "").strip() or parsed.get("name", "") or settings.okpay_name
+    callback_url = str(runtime_config.get(RUNTIME_KEY_OKPAY_CALLBACK_URL) or "").strip() or parsed.get("callback_url", "") or settings.okpay_callback_url
+    api_url = parsed.get("api_url", "") or settings.okpay_api_url
+    return {
+        "shop_id": str(shop_id or "").strip(),
+        "shop_token": str(shop_token or "").strip(),
+        "name": str(name or "").strip(),
+        "callback_url": str(callback_url or "").strip(),
+        "api_url": str(api_url or "").strip().rstrip("/"),
+        "callback_host": str(settings.okpay_callback_host or "").strip(),
+        "callback_port": str(settings.okpay_callback_port),
+    }
+
+
+def effective_okpay_settings(context: ContextTypes.DEFAULT_TYPE, settings: Settings) -> dict[str, str]:
+    return resolve_okpay_settings(get_runtime_config(context), settings)
+
+
+def okpay_enabled(config: dict[str, str]) -> bool:
+    return bool(config.get("shop_id") and config.get("shop_token"))
+
+
 def user_label(row: dict[str, Any]) -> str:
     display_name = " ".join(str(row.get("display_name") or "").split()).strip()
     username = str(row.get("username") or "").strip()
@@ -418,6 +507,19 @@ def set_pending_purchase(
 
 def clear_pending_purchase(context: ContextTypes.DEFAULT_TYPE) -> None:
     context.user_data.pop(PENDING_PURCHASE_KEY, None)
+
+
+def get_pending_recharge(context: ContextTypes.DEFAULT_TYPE) -> dict[str, Any] | None:
+    pending = context.user_data.get(PENDING_RECHARGE_KEY)
+    return pending if isinstance(pending, dict) else None
+
+
+def set_pending_recharge(context: ContextTypes.DEFAULT_TYPE, channel: str = "okpay") -> None:
+    context.user_data[PENDING_RECHARGE_KEY] = {"channel": str(channel or "okpay")}
+
+
+def clear_pending_recharge(context: ContextTypes.DEFAULT_TYPE) -> None:
+    context.user_data.pop(PENDING_RECHARGE_KEY, None)
 
 
 def build_price_match_text(row: dict[str, Any]) -> str:
@@ -1076,6 +1178,267 @@ async def send_menu_message(update: Update, text: str) -> None:
         await update.callback_query.message.reply_text(text, reply_markup=MENU_KEYBOARD)
 
 
+def build_topup_order_id(channel: str, user_id: int) -> str:
+    return f"{str(channel or 'TOPUP').upper()}{int(datetime.now(timezone.utc).timestamp() * 1000)}{int(user_id)}"
+
+
+def build_topup_expire_at(minutes: int = 10) -> str:
+    return (datetime.now(timezone.utc) + timedelta(minutes=max(1, int(minutes)))).replace(microsecond=0).isoformat()
+
+
+def okpay_sign_payload(config: dict[str, str], data: dict[str, Any]) -> dict[str, Any]:
+    shop_id = str(config.get("shop_id") or "").strip()
+    shop_token = str(config.get("shop_token") or "").strip()
+    if not shop_id or not shop_token:
+        raise RuntimeError("OKPay 未配置完整，请先设置商户ID和Token。")
+    payload = dict(data)
+    payload["id"] = shop_id
+    payload = {key: value for key, value in payload.items() if value not in (None, "")}
+    ordered_items = sorted((str(key), value) for key, value in payload.items())
+    query = urllib.parse.urlencode(ordered_items, quote_via=urllib.parse.quote)
+    query = urllib.parse.unquote(query)
+    payload["sign"] = hashlib.md5((query + "&token=" + shop_token).encode()).hexdigest().upper()
+    return payload
+
+
+def okpay_post(config: dict[str, str], api_name: str, data: dict[str, Any]) -> dict[str, Any]:
+    url = str(config.get("api_url") or "https://api.okaypay.me/shop").rstrip("/") + "/" + str(api_name).lstrip("/")
+    response = requests.post(url, data=okpay_sign_payload(config, data), timeout=20)
+    response.raise_for_status()
+    payload = response.json()
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"OKPay 返回了异常响应：{payload!r}")
+    return payload
+
+
+def okpay_pay_link(config: dict[str, str], order_id: str, amount: float, bot_username: str = "", include_callback: bool = True) -> dict[str, Any]:
+    data: dict[str, Any] = {
+        "unique_id": str(order_id),
+        "name": f"{config.get('name') or 'OKPay'}充值",
+        "amount": format_money(amount),
+        "return_url": f"https://t.me/{bot_username}" if bot_username else "https://t.me/",
+        "coin": "USDT",
+    }
+    if include_callback and config.get("callback_url"):
+        data["callback_url"] = str(config.get("callback_url") or "")
+    return okpay_post(config, "payLink", data)
+
+
+def okpay_check_deposit(config: dict[str, str], order_id: str) -> dict[str, Any]:
+    return okpay_post(config, "checkDeposit", {"unique_id": str(order_id)})
+
+
+def okpay_build_query(data: dict[str, Any]) -> str:
+    pairs: list[str] = []
+    for key in sorted(data.keys()):
+        value = data[key]
+        if value in (None, ""):
+            continue
+        encoded_key = urllib.parse.quote(str(key), safe="[]")
+        encoded_value = urllib.parse.quote(str(value), safe="+-")
+        pairs.append(f"{encoded_key}={encoded_value}")
+    return "&".join(pairs)
+
+
+def okpay_build_nested_callback_query(data: dict[str, Any]) -> str:
+    normal: dict[str, Any] = {}
+    nested_data: dict[str, Any] = {}
+    for key, value in data.items():
+        matched = re.fullmatch(r"data\[([^\]]+)\]", str(key))
+        if matched:
+            nested_data[matched.group(1)] = value
+        else:
+            normal[str(key)] = value
+
+    parts: list[str] = []
+    for key in sorted(normal.keys()):
+        if key == "data":
+            continue
+        parts.append(f"{urllib.parse.quote(key, safe='[]')}={urllib.parse.quote(str(normal[key]), safe='+-')}")
+        if key == "code" and nested_data:
+            primary_keys = ["order_id", "unique_id", "pay_user_id", "amount", "coin", "status", "type"]
+            for nested_key in primary_keys:
+                if nested_key in nested_data and nested_data[nested_key] not in (None, ""):
+                    parts.append(f"data[{nested_key}]={urllib.parse.quote(str(nested_data[nested_key]), safe='+-')}")
+            for nested_key in sorted(k for k in nested_data if k not in primary_keys):
+                if nested_data[nested_key] not in (None, ""):
+                    parts.append(f"data[{nested_key}]={urllib.parse.quote(str(nested_data[nested_key]), safe='+-')}")
+    if nested_data and "code" not in normal:
+        for nested_key in ["order_id", "unique_id", "pay_user_id", "amount", "coin", "status", "type"]:
+            if nested_key in nested_data and nested_data[nested_key] not in (None, ""):
+                parts.append(f"data[{nested_key}]={urllib.parse.quote(str(nested_data[nested_key]), safe='+-')}")
+    return "&".join(parts)
+
+
+def okpay_verify_callback(config: dict[str, str], payload: dict[str, Any]) -> bool:
+    raw_sign = str(payload.get("sign") or "").strip()
+    token = str(config.get("shop_token") or "").strip()
+    if not raw_sign or not token:
+        return False
+    data = {str(key): value for key, value in payload.items() if str(key) != "sign" and value not in (None, "")}
+    for query in (okpay_build_query(data), okpay_build_nested_callback_query(data)):
+        sign = hashlib.md5((query + "&token=" + token).encode()).hexdigest().upper()
+        if sign == raw_sign:
+            return True
+    return False
+
+
+def okpay_normalize_check_result(result: dict[str, Any]) -> dict[str, Any]:
+    data = result.get("data") if isinstance(result, dict) and isinstance(result.get("data"), dict) else result
+    return {
+        "unique_id": data.get("unique_id") or result.get("unique_id"),
+        "order_id": data.get("order_id") or result.get("order_id"),
+        "amount": data.get("amount") or result.get("amount"),
+        "status": str(data.get("status") or result.get("status") or ""),
+        "coin": data.get("coin") or result.get("coin") or "USDT",
+        "type": data.get("type") or result.get("type") or "deposit",
+        "pay_user_id": data.get("pay_user_id") or result.get("pay_user_id") or "",
+    }
+
+
+async def send_okpay_topup_notifications(
+    application: Application,
+    order: dict[str, Any],
+    paid_amount: float,
+    paid_coin: str,
+) -> None:
+    settings = application.bot_data["settings"]
+    store = application.bot_data["store"]
+    user_id = safe_int(order.get("user_id"))
+    user_row = await call_blocking(store.get_user, user_id) or {}
+    balance = safe_float(user_row.get("balance"))
+    username = str(user_row.get("username") or "").strip()
+    user_text = (
+        f"✅ OKPay充值到账\n\n"
+        f"金额：{format_money(paid_amount)} {paid_coin}\n"
+        f"当前余额：{format_money(balance)} USDT"
+    )
+    try:
+        await application.bot.send_message(chat_id=user_id, text=user_text, reply_markup=MENU_KEYBOARD)
+    except Exception:
+        logger.exception("发送 OKPay 到账通知失败: %s", user_id)
+
+    admin_lines = ["用户充值到账", "", f"用户ID：{user_id}"]
+    if username:
+        admin_lines.append(f"用户名：@{username}")
+    admin_text = "\n".join(admin_lines)
+    admin_text += (
+        f"\n订单号：{order.get('order_id')}\n"
+        f"金额：{format_money(paid_amount)} {paid_coin}\n"
+        f"余额：{format_money(balance)} USDT"
+    )
+    for admin_user_id in sorted(settings.admin_user_ids):
+        try:
+            await application.bot.send_message(chat_id=int(admin_user_id), text=admin_text)
+        except Exception:
+            logger.exception("发送管理员到账通知失败: %s", admin_user_id)
+
+
+def process_okpay_topup(application: Application, payload: dict[str, Any], source: str = "callback") -> tuple[bool, str, dict[str, Any] | None]:
+    settings = application.bot_data["settings"]
+    store = application.bot_data["store"]
+    runtime_config = application.bot_data.get("runtime_config", {})
+    config = resolve_okpay_settings(runtime_config, settings)
+    unique_id = str(payload.get("data[unique_id]") or payload.get("unique_id") or "").strip()
+    pay_type = str(payload.get("data[type]") or payload.get("type") or "deposit").strip().lower()
+    pay_status = str(payload.get("data[status]") or payload.get("status") or "").strip()
+    paid_amount = safe_float(payload.get("data[amount]") or payload.get("amount"))
+    paid_coin = str(payload.get("data[coin]") or payload.get("coin") or "USDT").strip().upper()
+    upstream_order_id = str(payload.get("data[order_id]") or payload.get("order_id") or "").strip()
+    pay_user_id = str(payload.get("data[pay_user_id]") or payload.get("pay_user_id") or "").strip()
+    if not unique_id or pay_type != "deposit" or pay_status != "1":
+        return False, "not_paid", None
+    status, order = store.complete_topup_order(
+        unique_id,
+        paid_amount=paid_amount,
+        currency=paid_coin,
+        upstream_order_id=upstream_order_id,
+        pay_user_id=pay_user_id,
+        callback_payload=payload,
+        note=f"{source}:{paid_coin}",
+    )
+    if status == "paid" and order is not None:
+        loop = application.bot_data.get("main_loop")
+        if loop is not None:
+            asyncio.run_coroutine_threadsafe(
+                send_okpay_topup_notifications(application, order, paid_amount, paid_coin),
+                loop,
+            )
+        return True, status, order
+    return status == "already_paid", status, order
+
+
+class OkpayCallbackHandler(BaseHTTPRequestHandler):
+    def log_message(self, format: str, *args: Any) -> None:
+        return
+
+    def do_GET(self) -> None:
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"OKPay callback server is running")
+
+    def do_POST(self) -> None:
+        application = getattr(self.server, "apibot_application", None)
+        if application is None:
+            self.send_response(500)
+            self.end_headers()
+            self.wfile.write(b"application unavailable")
+            return
+
+        settings = application.bot_data["settings"]
+        runtime_config = application.bot_data.get("runtime_config", {})
+        config = resolve_okpay_settings(runtime_config, settings)
+        length = int(self.headers.get("Content-Length", "0") or 0)
+        raw = self.rfile.read(length).decode("utf-8", errors="ignore")
+        if "application/json" in str(self.headers.get("Content-Type") or "").lower():
+            try:
+                body = json.loads(raw or "{}")
+            except json.JSONDecodeError:
+                body = {}
+            payload: dict[str, Any] = {}
+            if isinstance(body, dict):
+                for key, value in body.items():
+                    if isinstance(value, dict):
+                        for inner_key, inner_value in value.items():
+                            payload[f"{key}[{inner_key}]"] = inner_value
+                    else:
+                        payload[str(key)] = value
+        else:
+            parsed = parse_qs(raw, keep_blank_values=True)
+            payload = {str(key): values[-1] for key, values in parsed.items()}
+
+        if not okpay_verify_callback(config, payload):
+            self.send_response(403)
+            self.end_headers()
+            self.wfile.write(b"bad sign")
+            return
+
+        ok, status, _ = process_okpay_topup(application, payload, source="callback")
+        self.send_response(200 if ok else 400)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(json.dumps({"status": "success" if ok else "error", "message": status}).encode())
+
+
+async def ensure_okpay_callback_server(application: Application) -> None:
+    settings = application.bot_data["settings"]
+    runtime_config = application.bot_data.get("runtime_config", {})
+    config = resolve_okpay_settings(runtime_config, settings)
+    if not okpay_enabled(config):
+        return
+    if application.bot_data.get("okpay_callback_server") is not None:
+        return
+    try:
+        server = ThreadingHTTPServer((settings.okpay_callback_host, settings.okpay_callback_port), OkpayCallbackHandler)
+        setattr(server, "apibot_application", application)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        application.bot_data["okpay_callback_server"] = server
+        logger.info("OKPay callback server started at %s:%s", settings.okpay_callback_host, settings.okpay_callback_port)
+    except Exception:
+        logger.exception("启动 OKPay 回调服务失败")
+
+
 async def reply_help(update: Update, context: ContextTypes.DEFAULT_TYPE | None = None) -> None:
     text = (
         "可用命令:\n"
@@ -1450,31 +1813,198 @@ async def show_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await reply_inline(update, "\n".join(lines), keyboard)
 
 
-async def show_recharge(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+def build_recharge_keyboard(okpay_config: dict[str, str], pending_order: dict[str, Any] | None) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    if okpay_enabled(okpay_config):
+        rows.extend(
+            [
+                [
+                    InlineKeyboardButton("10 USDT", callback_data="rchg:create:10"),
+                    InlineKeyboardButton("20 USDT", callback_data="rchg:create:20"),
+                    InlineKeyboardButton("50 USDT", callback_data="rchg:create:50"),
+                ],
+                [
+                    InlineKeyboardButton("100 USDT", callback_data="rchg:create:100"),
+                    InlineKeyboardButton("自定义金额", callback_data="rchg:custom"),
+                ],
+            ]
+        )
+    if pending_order is not None:
+        pay_url = str(pending_order.get("pay_url") or "").strip()
+        order_id = str(pending_order.get("order_id") or "").strip()
+        row: list[InlineKeyboardButton] = []
+        if pay_url:
+            row.append(InlineKeyboardButton("继续支付", url=pay_url))
+        row.append(InlineKeyboardButton("我已支付", callback_data=f"rchg:paid:{order_id}"))
+        rows.append(row)
+        rows.append([InlineKeyboardButton("取消订单", callback_data=f"rchg:cancel:{order_id}")])
+    rows.append([premium_inline_button(BUTTON_MAIN_MENU, "nav:menu", HOME_EMOJI_ID)])
+    return InlineKeyboardMarkup(rows)
+
+
+async def create_okpay_topup_order(update: Update, context: ContextTypes.DEFAULT_TYPE, amount: float) -> None:
     settings, store, _ = get_services(context)
     user = update.effective_user
-    balance = 0.0
-    if user is not None:
-        await call_blocking(store.ensure_user, user.id, user.username or "", user.full_name or "")
-        balance = await call_blocking(store.get_balance, user.id)
-    recharge_address = effective_recharge_address(context)
-    okpay_config = effective_okpay_config(context)
-    lines = [
-        "💰 充值中心",
-        "",
-        f"当前余额：{format_money(balance)} USDT",
-    ]
-    if recharge_address:
-        lines.extend(["", f"充值地址：{recharge_address}"])
-    if okpay_config:
-        lines.extend(["", f"OKPAY 配置：{okpay_config}"])
-    text = "\n".join(lines)
+    if user is None:
+        return
+    okpay_config = effective_okpay_settings(context, settings)
+    if not okpay_enabled(okpay_config):
+        await reply_inline(update, "OKPay 还没有配置完成，请先联系管理员。")
+        return
+    if amount <= 0:
+        await reply_inline(update, "充值金额必须大于 0。")
+        return
+
+    await call_blocking(store.ensure_user, user.id, user.username or "", user.full_name or "")
+    await call_blocking(store.cancel_pending_topup_orders, user.id, "okpay", "recreated")
+    order_id = build_topup_order_id("OKPAY", user.id)
+    bot_username = str(getattr(context.bot, "username", "") or "").strip().lstrip("@")
+    try:
+        result = await call_blocking(okpay_pay_link, okpay_config, order_id, amount, bot_username, True)
+    except Exception as exc:
+        await reply_inline(update, f"创建 OKPay 充值订单失败：{exc}")
+        return
+
+    if isinstance(result, dict) and str(result.get("status") or "").lower() == "error":
+        msg = str(result.get("msg") or "")
+        if "callback_url" in msg and ("验证失败" in msg or "安全风险" in msg):
+            try:
+                result = await call_blocking(okpay_pay_link, okpay_config, order_id, amount, bot_username, False)
+            except Exception as exc:
+                await reply_inline(update, f"创建 OKPay 充值订单失败：{exc}")
+                return
+
+    data = result.get("data") if isinstance(result, dict) and isinstance(result.get("data"), dict) else {}
+    pay_url = str(data.get("pay_url") or result.get("pay_url") or "").strip()
+    upstream_order_id = str(data.get("order_id") or result.get("order_id") or "").strip()
+    if not pay_url:
+        await reply_inline(update, f"创建 OKPay 充值订单失败：{result}")
+        return
+
+    expire_at = build_topup_expire_at(10)
+    await call_blocking(
+        store.create_topup_order,
+        order_id,
+        user.id,
+        "okpay",
+        amount,
+        "USDT",
+        pay_url=pay_url,
+        upstream_order_id=upstream_order_id,
+        note="okpay",
+        expire_at=expire_at,
+    )
+
+    text = (
+        "OKPay 充值订单已创建\n\n"
+        f"订单号：{order_id}\n"
+        f"充值金额：{format_money(amount)} USDT\n"
+        "请点击下面按钮完成支付，支付成功后系统会自动到账。"
+    )
     keyboard = InlineKeyboardMarkup(
         [
+            [InlineKeyboardButton("打开 OKPay 支付", url=pay_url)],
+            [
+                InlineKeyboardButton("我已支付", callback_data=f"rchg:paid:{order_id}"),
+                InlineKeyboardButton("取消订单", callback_data=f"rchg:cancel:{order_id}"),
+            ],
             [premium_inline_button(BUTTON_MAIN_MENU, "nav:menu", HOME_EMOJI_ID)],
         ]
     )
     await reply_inline(update, text, keyboard)
+    if update.callback_query is not None and update.callback_query.message is not None:
+        await call_blocking(store.set_topup_order_message_id, order_id, update.callback_query.message.message_id)
+
+
+async def check_okpay_topup_order(update: Update, context: ContextTypes.DEFAULT_TYPE, order_id: str) -> None:
+    settings, store, _ = get_services(context)
+    user = update.effective_user
+    if user is None:
+        return
+    order = await call_blocking(store.get_topup_order, order_id)
+    if order is None or str(order.get("channel") or "") != "okpay":
+        await reply_inline(update, "未找到对应的 OKPay 充值订单。")
+        return
+    if safe_int(order.get("user_id")) != user.id:
+        await reply_inline(update, "这笔充值订单不属于你。")
+        return
+    if str(order.get("state") or "") == "paid":
+        await reply_inline(update, "这笔订单已经到账，无需重复检查。")
+        return
+    if str(order.get("state") or "") != "pending":
+        await reply_inline(update, "这笔订单已失效，请重新创建新的充值订单。")
+        return
+
+    okpay_config = effective_okpay_settings(context, settings)
+    if not okpay_enabled(okpay_config):
+        await reply_inline(update, "OKPay 还没有配置完成，请先联系管理员。")
+        return
+
+    try:
+        result = await call_blocking(okpay_check_deposit, okpay_config, order_id)
+    except Exception as exc:
+        await reply_inline(update, f"查询 OKPay 订单失败：{exc}")
+        return
+
+    payload = okpay_normalize_check_result(result)
+    ok, status, fresh_order = process_okpay_topup(context.application, payload, source="manual_check")
+    if ok and fresh_order is not None:
+        await reply_inline(update, "✅ OKPay 订单已确认支付，余额已经自动到账。")
+        return
+    if status == "already_paid":
+        await reply_inline(update, "这笔订单已经到账，无需重复检查。")
+        return
+    if status in {"expired", "canceled"}:
+        await reply_inline(update, "这笔订单已经失效，请重新创建新的充值订单。")
+        return
+    await reply_inline(update, "暂时还没有查到支付成功，请支付后再点一次“我已支付”。")
+
+
+async def cancel_okpay_topup_order(update: Update, context: ContextTypes.DEFAULT_TYPE, order_id: str) -> None:
+    _, store, _ = get_services(context)
+    user = update.effective_user
+    if user is None:
+        return
+    changed, order = await call_blocking(store.cancel_topup_order, order_id, user_id=user.id, reason="user_canceled")
+    if order is None:
+        await reply_inline(update, "未找到这笔充值订单。")
+        return
+    if safe_int(order.get("user_id")) != user.id:
+        await reply_inline(update, "这笔充值订单不属于你。")
+        return
+    if changed:
+        await reply_inline(update, "充值订单已取消。")
+        return
+    await reply_inline(update, "这笔订单当前不能取消。")
+
+
+async def show_recharge(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    settings, store, _ = get_services(context)
+    user = update.effective_user
+    balance = 0.0
+    pending_order: dict[str, Any] | None = None
+    if user is not None:
+        await call_blocking(store.ensure_user, user.id, user.username or "", user.full_name or "")
+        balance = await call_blocking(store.get_balance, user.id)
+        pending_order = await call_blocking(store.get_latest_pending_topup_order, user.id, "okpay")
+    recharge_address = effective_recharge_address(context)
+    okpay_config = effective_okpay_settings(context, settings)
+    lines = ["💰 充值中心", "", f"当前余额：{format_money(balance)} USDT"]
+    if okpay_enabled(okpay_config):
+        lines.extend(["", "请选择下方金额创建 OKPay 充值订单。"])
+    elif recharge_address:
+        lines.extend(["", f"充值地址：{recharge_address}"])
+    else:
+        lines.extend(["", "当前暂未开启在线充值，请联系客服。"])
+    if pending_order is not None:
+        lines.extend(
+            [
+                "",
+                f"待支付订单：{pending_order.get('order_id')}",
+                f"待支付金额：{format_money(safe_float(pending_order.get('amount')))} USDT",
+            ]
+        )
+    await reply_inline(update, "\n".join(lines), build_recharge_keyboard(okpay_config, pending_order))
 
 
 async def show_customer_service(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1662,10 +2192,11 @@ async def show_admin_config_page(update: Update, context: ContextTypes.DEFAULT_T
             ]
         )
     elif section == "okpay":
+        okpay_config = effective_okpay_settings(context, settings)
         text = (
             "OKPAY 配置\n\n"
-            f"当前配置：{effective_okpay_config(context) or '未配置'}\n"
-            "后面接 OKPAY API 时，先从这里取配置。"
+            f"{summarize_okpay_config(okpay_config)}\n\n"
+            "支持两种填写方式：JSON，或多行 key=value。"
         )
         keyboard = InlineKeyboardMarkup(
             [
@@ -1711,6 +2242,15 @@ async def prompt_admin_broadcast_button(update: Update, context: ContextTypes.DE
 
 async def prompt_admin_setting_edit(update: Update, context: ContextTypes.DEFAULT_TYPE, key: str, title: str) -> None:
     set_pending_admin_action(context, {"kind": "setting_edit", "setting_key": key, "setting_title": title})
+    if key == RUNTIME_KEY_OKPAY_CONFIG:
+        await send_menu_message(
+            update,
+            "请发送新的 OKPAY 配置。\n"
+            "支持 JSON，或者多行 key=value：\n"
+            "shop_id=xxx\nshop_token=xxx\nname=号铺\ncallback_url=https://你的域名/okpay/callback\n"
+            "如果要清空，直接发：-",
+        )
+        return
     await send_menu_message(update, f"请发送新的 {title}。\n如果要清空，直接发：-")
 
 
@@ -1804,6 +2344,8 @@ async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_
         get_runtime_config(context)[setting_key] = value
         await call_blocking(store.log_admin_action, user.id, "admin_setting_update", setting_key, value)
         clear_pending_admin_action(context)
+        if setting_key == RUNTIME_KEY_OKPAY_CONFIG:
+            await ensure_okpay_callback_server(context.application)
         await send_menu_message(update, f"{setting_title} 已更新。")
         return True
     if kind == "broadcast_wait_content":
@@ -2032,11 +2574,13 @@ async def show_orders(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     clear_pending_purchase(context)
+    clear_pending_recharge(context)
     await show_start_menu(update, context)
 
 
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     clear_pending_purchase(context)
+    clear_pending_recharge(context)
     await show_start_menu(update, context)
 
 
@@ -2476,30 +3020,37 @@ async def route_menu_text(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     text = update.message.text.strip()
     if text == BUTTON_PRODUCTS or text == BUTTON_ACCOUNT_LIST:
         clear_pending_purchase(context)
+        clear_pending_recharge(context)
         await show_categories(update, context)
         return
     if text in {BUTTON_MAIN_MENU, BOTTOM_BUTTON_MAIN_MENU, LEGACY_BOTTOM_BUTTON_MAIN_MENU}:
         clear_pending_purchase(context)
+        clear_pending_recharge(context)
         await show_start_menu(update, context)
         return
     if text in {BUTTON_PROFILE, BUTTON_RECHARGE_BALANCE, BOTTOM_BUTTON_RECHARGE_BALANCE, LEGACY_BOTTOM_BUTTON_RECHARGE_BALANCE}:
         clear_pending_purchase(context)
+        clear_pending_recharge(context)
         await show_recharge(update, context)
         return
     if text in {BOTTOM_BUTTON_CUSTOMER_SERVICE, LEGACY_BOTTOM_BUTTON_CUSTOMER_SERVICE}:
         clear_pending_purchase(context)
+        clear_pending_recharge(context)
         await show_customer_service(update, context)
         return
     if text == BUTTON_PURCHASE_NOTICE:
         clear_pending_purchase(context)
+        clear_pending_recharge(context)
         await show_notice(update, context)
         return
     if text == BUTTON_ORDER_HISTORY:
         clear_pending_purchase(context)
+        clear_pending_recharge(context)
         await show_orders(update, context)
         return
     if text == BUTTON_SWITCH_LANGUAGE:
         clear_pending_purchase(context)
+        clear_pending_recharge(context)
         await show_language(update, context)
 
 
@@ -2543,6 +3094,19 @@ async def search_text_rich(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return
     keyword = normalize_search_keyword(update.message.text)
     if await handle_admin_text_input(update, context, keyword):
+        return
+    pending_recharge = get_pending_recharge(context)
+    if pending_recharge is not None:
+        try:
+            amount = round(float(keyword), 2)
+        except ValueError:
+            await update.message.reply_text("请输入充值金额，直接发数字即可，例如：10 或 25.5", reply_markup=MENU_KEYBOARD)
+            return
+        if amount <= 0:
+            await update.message.reply_text("充值金额必须大于 0。", reply_markup=MENU_KEYBOARD)
+            return
+        clear_pending_recharge(context)
+        await create_okpay_topup_order(update, context, amount)
         return
     pending_purchase = get_pending_purchase(context)
     if pending_purchase is not None:
@@ -2606,6 +3170,8 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     parts = query.data.split(":")
     action = parts[0]
+    if action != "rchg":
+        clear_pending_recharge(context)
 
     if action == "adm":
         await handle_admin_callback(update, context, parts)
@@ -2613,6 +3179,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     if action == "nav":
         clear_pending_purchase(context)
+        clear_pending_recharge(context)
         target = parts[1] if len(parts) > 1 else ""
         if target == "cats":
             await show_categories(update, context)
@@ -2631,6 +3198,29 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             return
         if target == "close":
             await reply_inline(update, "已关闭。")
+            return
+
+    if action == "rchg" and len(parts) >= 2:
+        if parts[1] == "custom":
+            clear_pending_purchase(context)
+            set_pending_recharge(context, "okpay")
+            await reply_inline(update, "请直接发送充值金额，支持整数或两位小数，例如：10 或 25.5")
+            return
+        if parts[1] == "create" and len(parts) >= 3:
+            clear_pending_purchase(context)
+            clear_pending_recharge(context)
+            amount = safe_float(parts[2], 0.0)
+            await create_okpay_topup_order(update, context, amount)
+            return
+        if parts[1] == "paid" and len(parts) >= 3:
+            clear_pending_purchase(context)
+            clear_pending_recharge(context)
+            await check_okpay_topup_order(update, context, parts[2])
+            return
+        if parts[1] == "cancel" and len(parts) >= 3:
+            clear_pending_purchase(context)
+            clear_pending_recharge(context)
+            await cancel_okpay_topup_order(update, context, parts[2])
             return
 
     if action == "cat" and len(parts) == 3:
@@ -2751,11 +3341,16 @@ async def poll_processing_orders(context: ContextTypes.DEFAULT_TYPE) -> None:
         await asyncio.gather(*tasks)
 
 
+async def on_application_post_init(application: Application) -> None:
+    application.bot_data["main_loop"] = asyncio.get_running_loop()
+    await ensure_okpay_callback_server(application)
+
+
 def build_application(settings: Settings) -> Application:
     store = Store(settings.database_path)
     supplier = SupplierClient(settings)
 
-    application = ApplicationBuilder().token(settings.bot_token).build()
+    application = ApplicationBuilder().token(settings.bot_token).post_init(on_application_post_init).build()
     application.bot_data["settings"] = settings
     application.bot_data["store"] = store
     application.bot_data["supplier"] = supplier

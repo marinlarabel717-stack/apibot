@@ -2070,38 +2070,70 @@ async def show_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await reply_inline(update, "\n".join(lines), keyboard)
 
 
+def normalize_recharge_channel(value: str | None) -> str | None:
+    channel = str(value or "").strip().lower()
+    if channel in {"okpay", "trc20"}:
+        return channel
+    return None
+
+
+def recharge_channel_label(channel: str) -> str:
+    normalized = normalize_recharge_channel(channel)
+    if normalized == "trc20":
+        return "USDT直充 | 链上转账"
+    if normalized == "okpay":
+        return "OKPay支付 | 极速到账"
+    return "在线充值"
+
+
 def build_recharge_keyboard(
     okpay_config: dict[str, str],
     recharge_address: str,
     pending_orders: list[dict[str, Any]],
+    selected_channel: str | None = None,
 ) -> InlineKeyboardMarkup:
+    trc20_available = trc20_enabled(recharge_address)
+    okpay_available = okpay_enabled(okpay_config)
+    selected_channel = normalize_recharge_channel(selected_channel)
+    if selected_channel == "trc20" and not trc20_available:
+        selected_channel = None
+    if selected_channel == "okpay" and not okpay_available:
+        selected_channel = None
+    if selected_channel is None:
+        if trc20_available and not okpay_available:
+            selected_channel = "trc20"
+        elif okpay_available and not trc20_available:
+            selected_channel = "okpay"
+
     rows: list[list[InlineKeyboardButton]] = []
-    if trc20_enabled(recharge_address):
+    channel_buttons: list[InlineKeyboardButton] = []
+    if trc20_available:
+        trc20_text = recharge_channel_label("trc20")
+        if selected_channel == "trc20":
+            trc20_text = f"• {trc20_text}"
+        channel_buttons.append(InlineKeyboardButton(trc20_text, callback_data="rchg:select:trc20"))
+    if okpay_available:
+        okpay_text = recharge_channel_label("okpay")
+        if selected_channel == "okpay":
+            okpay_text = f"• {okpay_text}"
+        channel_buttons.append(InlineKeyboardButton(okpay_text, callback_data="rchg:select:okpay"))
+    if channel_buttons:
+        rows.append(channel_buttons)
+
+    if selected_channel is not None:
         rows.extend(
             [
                 [
-                    InlineKeyboardButton("TRC20 10", callback_data="rchg:trc20:create:10"),
-                    InlineKeyboardButton("TRC20 20", callback_data="rchg:trc20:create:20"),
-                    InlineKeyboardButton("TRC20 50", callback_data="rchg:trc20:create:50"),
+                    InlineKeyboardButton("10", callback_data=f"rchg:{selected_channel}:create:10"),
+                    InlineKeyboardButton("30", callback_data=f"rchg:{selected_channel}:create:30"),
+                    InlineKeyboardButton("50", callback_data=f"rchg:{selected_channel}:create:50"),
                 ],
                 [
-                    InlineKeyboardButton("TRC20 100", callback_data="rchg:trc20:create:100"),
-                    InlineKeyboardButton("TRC20 自定义", callback_data="rchg:trc20:custom"),
+                    InlineKeyboardButton("100", callback_data=f"rchg:{selected_channel}:create:100"),
+                    InlineKeyboardButton("200", callback_data=f"rchg:{selected_channel}:create:200"),
+                    InlineKeyboardButton("500", callback_data=f"rchg:{selected_channel}:create:500"),
                 ],
-            ]
-        )
-    if okpay_enabled(okpay_config):
-        rows.extend(
-            [
-                [
-                    InlineKeyboardButton("OKPay 10", callback_data="rchg:okpay:create:10"),
-                    InlineKeyboardButton("OKPay 20", callback_data="rchg:okpay:create:20"),
-                    InlineKeyboardButton("OKPay 50", callback_data="rchg:okpay:create:50"),
-                ],
-                [
-                    InlineKeyboardButton("OKPay 100", callback_data="rchg:okpay:create:100"),
-                    InlineKeyboardButton("OKPay 自定义", callback_data="rchg:okpay:custom"),
-                ],
+                [InlineKeyboardButton("自定义金额", callback_data=f"rchg:{selected_channel}:custom")],
             ]
         )
     for pending_order in pending_orders:
@@ -2385,7 +2417,11 @@ async def cancel_trc20_topup_order(update: Update, context: ContextTypes.DEFAULT
     await reply_inline(update, "这笔订单当前不能取消。")
 
 
-async def show_recharge(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def show_recharge(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    selected_channel: str | None = None,
+) -> None:
     settings, store, _ = get_services(context)
     user = update.effective_user
     balance = 0.0
@@ -2397,13 +2433,27 @@ async def show_recharge(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         pending_orders = await call_blocking(store.list_pending_topup_orders, user.id)
     recharge_address = effective_recharge_address(context)
     okpay_config = effective_okpay_settings(context, settings)
+    trc20_available = trc20_enabled(recharge_address)
+    okpay_available = okpay_enabled(okpay_config)
+    selected_channel = normalize_recharge_channel(selected_channel)
+    if selected_channel == "trc20" and not trc20_available:
+        selected_channel = None
+    if selected_channel == "okpay" and not okpay_available:
+        selected_channel = None
+    if selected_channel is None:
+        if trc20_available and not okpay_available:
+            selected_channel = "trc20"
+        elif okpay_available and not trc20_available:
+            selected_channel = "okpay"
+
     lines = ["💰 充值中心", "", f"当前余额：{format_money(balance)} USDT"]
-    if trc20_enabled(recharge_address):
+    if trc20_available and selected_channel == "trc20":
         lines.extend(["", f"TRC20 地址：`{recharge_address}`"])
-    if okpay_enabled(okpay_config):
-        lines.extend(["", "下方可直接创建 OKPay 或 TRC20 充值订单。"])
-    elif trc20_enabled(recharge_address):
-        lines.extend(["", "下方可直接创建 TRC20 充值订单。"])
+    if selected_channel is not None:
+        lines.extend(["", f"当前方式：{recharge_channel_label(selected_channel)}"])
+        lines.extend(["", "请选择充值金额：10 / 30 / 50 / 100 / 200 / 500，或点自定义金额。"])
+    elif trc20_available or okpay_available:
+        lines.extend(["", "请先选择充值方式，再选择金额。"])
     else:
         lines.extend(["", "当前暂未开启在线充值，请联系客服。"])
     if pending_orders:
@@ -2417,7 +2467,12 @@ async def show_recharge(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             if str(pending_order.get("channel") or "") == "trc20":
                 row += f" | 实付 {format_trc20_amount(actual_amount)}"
             lines.append(row)
-    await reply_inline(update, "\n".join(lines), build_recharge_keyboard(okpay_config, recharge_address, pending_orders), parse_mode="Markdown")
+    await reply_inline(
+        update,
+        "\n".join(lines),
+        build_recharge_keyboard(okpay_config, recharge_address, pending_orders, selected_channel),
+        parse_mode="Markdown",
+    )
 
 
 async def show_customer_service(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -3621,6 +3676,11 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         if parts[1] in {"custom", "create", "paid", "cancel"}:
             legacy_parts = ["rchg", "okpay", *parts[1:]]
             parts = legacy_parts
+        if parts[1] == "select" and len(parts) >= 3:
+            clear_pending_purchase(context)
+            clear_pending_recharge(context)
+            await show_recharge(update, context, parts[2])
+            return
         channel = parts[1] if len(parts) > 1 else "okpay"
         if channel not in {"okpay", "trc20"}:
             channel = "okpay"
@@ -3628,7 +3688,10 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         if subaction == "custom":
             clear_pending_purchase(context)
             set_pending_recharge(context, channel)
-            await reply_inline(update, "请直接发送充值金额，支持整数或两位小数，例如：10 或 25.5")
+            await reply_inline(
+                update,
+                f"当前方式：{recharge_channel_label(channel)}\n请直接发送充值金额，支持整数或两位小数，例如：10 或 25.5",
+            )
             return
         if subaction == "create" and len(parts) >= 4:
             clear_pending_purchase(context)

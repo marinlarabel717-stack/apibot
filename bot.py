@@ -354,6 +354,8 @@ def parse_okpay_config_text(raw: str) -> dict[str, str]:
     alias_map = {
         "shop_id": "shop_id",
         "shopid": "shop_id",
+        "app id": "shop_id",
+        "appid": "shop_id",
         "id": "shop_id",
         "merchant_id": "shop_id",
         "merchantid": "shop_id",
@@ -363,10 +365,14 @@ def parse_okpay_config_text(raw: str) -> dict[str, str]:
         "shop_token": "shop_token",
         "shoptoken": "shop_token",
         "token": "shop_token",
+        "key": "shop_token",
+        "secret": "shop_token",
+        "app secret": "shop_token",
         "okpay_token": "shop_token",
         "okpay_shop_token": "shop_token",
         "商户token": "shop_token",
         "token值": "shop_token",
+        "密钥": "shop_token",
         "name": "name",
         "okpay_name": "name",
         "名称": "name",
@@ -378,16 +384,55 @@ def parse_okpay_config_text(raw: str) -> dict[str, str]:
         "okpay_api_url": "api_url",
         "接口地址": "api_url",
     }
-    for line in text.splitlines():
-        line = line.strip()
-        if not line or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        normalized = alias_map.get(key.strip().lower())
-        if normalized and value.strip():
-            result[normalized] = value.strip()
-    return result
 
+    def clean_cell(value: str) -> str:
+        cleaned = str(value or "").strip()
+        cleaned = cleaned.replace("**", "").replace("__", "")
+        cleaned = cleaned.strip("`").strip()
+        return cleaned
+
+    pending_key: str | None = None
+    in_code_block = False
+    for raw_line in text.splitlines():
+        if str(raw_line).strip().startswith("```"):
+            in_code_block = not in_code_block
+            continue
+        line = clean_cell(raw_line)
+        if not line:
+            continue
+        if pending_key and in_code_block:
+            result[pending_key] = line
+            pending_key = None
+            continue
+        if in_code_block and "shop_token" not in result and re.fullmatch(r"[A-Za-z0-9_-]{16,}", line):
+            result["shop_token"] = line
+            continue
+        if pending_key and line:
+            result[pending_key] = line
+            pending_key = None
+            continue
+
+        delimiter = None
+        if "=" in line:
+            delimiter = "="
+        elif "：" in line:
+            delimiter = "："
+        elif ":" in line:
+            delimiter = ":"
+        if delimiter is None:
+            continue
+
+        key, value = line.split(delimiter, 1)
+        normalized = alias_map.get(clean_cell(key).lower())
+        if not normalized:
+            continue
+        normalized_value = clean_cell(value)
+        if not normalized_value or normalized_value.lower() in {"未设置", "none", "null", "-"}:
+            if normalized == "shop_token":
+                pending_key = normalized
+            continue
+        result[normalized] = normalized_value
+    return result
 
 def summarize_okpay_config(config: dict[str, str]) -> str:
     shop_id = config.get("shop_id", "")

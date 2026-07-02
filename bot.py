@@ -555,6 +555,47 @@ def format_user_created_at(value: Any) -> str:
         return raw
 
 
+def format_topup_timestamp(value: Any) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return "-"
+    try:
+        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        return dt.strftime("%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return raw
+
+
+def build_topup_detail_text(
+    *,
+    title: str,
+    amount_label: str,
+    amount_value: str,
+    address: str = "",
+    pay_hint: str = "",
+    created_at: str = "",
+    expire_at: str = "",
+    extra_tips: list[str] | None = None,
+) -> str:
+    lines = [title, "", f"{amount_label}：{amount_value}"]
+    if address:
+        lines.extend(["", "收款地址（TRC20）", f"`{address}`"])
+    if pay_hint:
+        lines.extend(["", pay_hint])
+    lines.extend(["", "⚠️ 重要提示"])
+    tips = extra_tips or []
+    for tip in tips:
+        lines.append(f"• {tip}")
+    lines.extend(
+        [
+            "",
+            f"创建时间：{format_topup_timestamp(created_at)}",
+            f"过期时间：{format_topup_timestamp(expire_at)}",
+        ]
+    )
+    return "\n".join(lines)
+
+
 def admin_send_button_markup(payload: dict[str, Any]) -> InlineKeyboardMarkup | None:
     button_text = str(payload.get("button_text") or "").strip()
     button_url = str(payload.get("button_url") or "").strip()
@@ -2245,21 +2286,26 @@ async def create_trc20_topup_order(update: Update, context: ContextTypes.DEFAULT
         expire_at=expire_at,
     )
 
-    text = (
-        "TRC20 充值订单已创建\n\n"
-        f"订单号：{order_id}\n"
-        f"充值地址：`{recharge_address}`\n"
-        f"下单金额：{format_money(requested_amount)} USDT\n"
-        f"实际转账：{pay_amount_text} USDT\n"
-        "请务必按上面的实际转账金额付款，到账后系统会自动入账。"
+    created_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    text = build_topup_detail_text(
+        title="TRC20 充值订单",
+        amount_label="付款金额",
+        amount_value=f"{pay_amount_text} USDT",
+        address=recharge_address,
+        created_at=created_at,
+        expire_at=expire_at,
+        extra_tips=[
+            f"下单金额为 {format_money(requested_amount)} USDT，请按金额后小数点准确转账",
+            "充值后，经过 3 次网络确认，系统会自动到账",
+            "请耐心等待，充值成功后 Bot 会通知您",
+        ],
     )
     keyboard = InlineKeyboardMarkup(
         [
             [
                 InlineKeyboardButton("TRC20 已转账", callback_data=f"rchg:trc20:paid:{order_id}"),
-                InlineKeyboardButton("取消 TRC20 订单", callback_data=f"rchg:trc20:cancel:{order_id}"),
             ],
-            [premium_inline_button(BUTTON_MAIN_MENU, "nav:menu", HOME_EMOJI_ID)],
+            [InlineKeyboardButton("取消订单", callback_data=f"rchg:trc20:cancel:{order_id}")],
         ]
     )
     await reply_inline(update, text, keyboard, parse_mode="Markdown")
@@ -2320,20 +2366,27 @@ async def create_okpay_topup_order(update: Update, context: ContextTypes.DEFAULT
         expire_at=expire_at,
     )
 
-    text = (
-        "OKPay 充值订单已创建\n\n"
-        f"订单号：{order_id}\n"
-        f"充值金额：{format_money(amount)} USDT\n"
-        "请点击下面按钮完成支付，支付成功后系统会自动到账。"
+    created_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    text = build_topup_detail_text(
+        title="OKPay 充值订单",
+        amount_label="充值金额",
+        amount_value=f"{format_money(amount)} USDT",
+        pay_hint="使用 OKPay 进行付款，点击下方按钮即可跳转支付",
+        created_at=created_at,
+        expire_at=expire_at,
+        extra_tips=[
+            "请按订单金额完成支付，不要少付或多付",
+            "支付成功后系统会自动补查并到账",
+            "如未及时到账，可点“我已支付”手动补查一次",
+        ],
     )
     keyboard = InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton("打开 OKPay 支付", url=pay_url)],
+            [InlineKeyboardButton("点击付款", url=pay_url)],
             [
                 InlineKeyboardButton("我已支付", callback_data=f"rchg:okpay:paid:{order_id}"),
-                InlineKeyboardButton("取消订单", callback_data=f"rchg:okpay:cancel:{order_id}"),
             ],
-            [premium_inline_button(BUTTON_MAIN_MENU, "nav:menu", HOME_EMOJI_ID)],
+            [InlineKeyboardButton("取消订单", callback_data=f"rchg:okpay:cancel:{order_id}")],
         ]
     )
     await reply_inline(update, text, keyboard)

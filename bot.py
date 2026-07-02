@@ -10,6 +10,7 @@ import threading
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal, ROUND_DOWN
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
@@ -407,6 +408,102 @@ def okpay_enabled(config: dict[str, str]) -> bool:
     return bool(config.get("shop_id") and config.get("shop_token"))
 
 
+def build_trongrid_headers(api_key: str = "") -> dict[str, str]:
+    headers = {"Accept": "application/json"}
+    if api_key:
+        headers["TRON-PRO-API-KEY"] = api_key
+    return headers
+
+
+def fetch_trongrid_transactions(
+    settings: Settings,
+    recharge_address: str,
+    min_timestamp: int,
+    api_keys: list[str],
+) -> list[dict[str, Any]]:
+    url = f"{settings.trongrid_api_base}/accounts/{recharge_address}/transactions/trc20"
+    params = {
+        "only_confirmed": "true",
+        "only_to": "true",
+        "limit": str(settings.trongrid_page_limit),
+        "order_by": "block_timestamp,desc",
+        "min_timestamp": str(max(0, int(min_timestamp))),
+    }
+    if settings.trc20_usdt_contract:
+        params["contract_address"] = settings.trc20_usdt_contract
+
+    candidates = api_keys or [""]
+    for api_key in candidates:
+        items: list[dict[str, Any]] = []
+        fingerprint = ""
+        page_count = 0
+        seen_fingerprints: set[str] = set()
+        while True:
+            page_count += 1
+            if page_count > settings.trongrid_max_pages:
+                break
+            request_params = dict(params)
+            if fingerprint:
+                if fingerprint in seen_fingerprints:
+                    break
+                seen_fingerprints.add(fingerprint)
+                request_params["fingerprint"] = fingerprint
+            response = requests.get(
+                url,
+                params=request_params,
+                headers=build_trongrid_headers(api_key),
+                timeout=settings.trongrid_request_timeout,
+            )
+            if response.status_code in {403, 429}:
+                items = []
+                break
+            response.raise_for_status()
+            payload = response.json()
+            data = payload.get("data") or []
+            if not isinstance(data, list):
+                data = []
+            items.extend(item for item in data if isinstance(item, dict))
+            fingerprint = str(((payload.get("meta") or {}).get("fingerprint")) or "").strip()
+            if not fingerprint or not data:
+                return items
+        if items:
+            return items
+    return []
+
+
+def normalize_trc20_transfer(item: dict[str, Any], recharge_address: str, contract_address: str) -> dict[str, Any] | None:
+    txid = str(item.get("transaction_id") or item.get("transactionId") or item.get("id") or "").strip()
+    if not txid or item.get("confirmed") is False:
+        return None
+    result = str(item.get("result") or item.get("transaction_result") or "").strip().upper()
+    if result and result not in {"SUCCESS", "SUCESS"}:
+        return None
+    token_info = item.get("token_info") if isinstance(item.get("token_info"), dict) else {}
+    to_address = str(item.get("to") or item.get("to_address") or "").strip()
+    from_address = str(item.get("from") or item.get("from_address") or "").strip()
+    token_address = str(token_info.get("address") or item.get("contract_address") or "").strip()
+    if contract_address and token_address and token_address != contract_address:
+        return None
+    if to_address != recharge_address or not from_address:
+        return None
+    decimals = safe_int(token_info.get("decimals"), 6)
+    raw_value = Decimal(str(item.get("value") or "0"))
+    amount = raw_value / (Decimal(10) ** max(0, decimals))
+    amount = amount.quantize(Decimal("0.0001"))
+    if amount <= 0:
+        return None
+    return {
+        "txid": txid,
+        "to_address": to_address,
+        "from_address": from_address,
+        "amount": float(amount),
+        "amount_text": format_trc20_amount(float(amount)),
+        "currency": str(token_info.get("symbol") or "USDT").strip().upper() or "USDT",
+        "block_timestamp": safe_int(item.get("block_timestamp") or item.get("block_ts")),
+        "payload": item,
+    }
+
+
 def user_label(row: dict[str, Any]) -> str:
     display_name = " ".join(str(row.get("display_name") or "").split()).strip()
     username = str(row.get("username") or "").strip()
@@ -520,6 +617,60 @@ def set_pending_recharge(context: ContextTypes.DEFAULT_TYPE, channel: str = "okp
 
 def clear_pending_recharge(context: ContextTypes.DEFAULT_TYPE) -> None:
     context.user_data.pop(PENDING_RECHARGE_KEY, None)
+
+
+def is_valid_trc20_address(address: str) -> bool:
+    address = str(address or "").strip()
+    if len(address) != 34 or not address.startswith("T"):
+        return False
+    allowed = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+    return all(ch in allowed for ch in address)
+
+
+def trc20_enabled(recharge_address: str) -> bool:
+    return is_valid_trc20_address(recharge_address)
+
+
+def format_trc20_amount(value: float) -> str:
+    text = f"{float(value):.4f}"
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    return text
+
+
+def quantize_recharge_amount(value: float) -> float:
+    amount = Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+    return float(amount)
+
+
+def allocate_trc20_amount(store: Store, recharge_address: str, requested_amount: float, user_id: int) -> tuple[float, str]:
+    base = Decimal(str(quantize_recharge_amount(requested_amount)))
+    if base <= 0:
+        raise ValueError("充值金额必须大于 0")
+    used = {
+        format_trc20_amount(amount)
+        for amount in store.list_pending_topup_amounts("trc20", recharge_address)
+    }
+    start = abs(int(user_id)) % 100
+    for offset in range(1, 100):
+        step = ((start + offset - 1) % 99) + 1
+        candidate = (base + (Decimal(step) / Decimal("10000"))).quantize(Decimal("0.0001"))
+        text = format_trc20_amount(float(candidate))
+        if text not in used:
+            return float(candidate), text
+    raise RuntimeError("当前 TRC20 待支付订单较多，请稍后再试")
+
+
+def parse_trongrid_api_keys(settings: Settings) -> list[str]:
+    keys: list[str] = []
+    for raw in (settings.trongrid_api_keys, settings.trongrid_api_key):
+        if not raw:
+            continue
+        for item in str(raw).replace("\n", ",").split(","):
+            key = item.strip()
+            if key and key not in keys:
+                keys.append(key)
+    return keys
 
 
 def build_price_match_text(row: dict[str, Any]) -> str:
@@ -1334,6 +1485,46 @@ async def send_okpay_topup_notifications(
             logger.exception("发送管理员到账通知失败: %s", admin_user_id)
 
 
+async def send_trc20_topup_notifications(
+    application: Application,
+    order: dict[str, Any],
+    paid_amount: float,
+    txid: str,
+    from_address: str,
+) -> None:
+    settings = application.bot_data["settings"]
+    store = application.bot_data["store"]
+    user_id = safe_int(order.get("user_id"))
+    user_row = await call_blocking(store.get_user, user_id) or {}
+    balance = safe_float(user_row.get("balance"))
+    username = str(user_row.get("username") or "").strip()
+    user_text = (
+        "✅ TRC20 充值到账\n\n"
+        f"金额：{format_trc20_amount(paid_amount)} USDT\n"
+        f"交易哈希：`{txid}`\n"
+        f"当前余额：{format_money(balance)} USDT"
+    )
+    try:
+        await application.bot.send_message(chat_id=user_id, text=user_text, reply_markup=MENU_KEYBOARD, parse_mode="Markdown")
+    except Exception:
+        logger.exception("发送 TRC20 到账通知失败: %s", user_id)
+
+    admin_lines = ["用户 TRC20 充值到账", "", f"用户ID：{user_id}"]
+    if username:
+        admin_lines.append(f"用户名：@{username}")
+    admin_lines.append(f"订单号：{order.get('order_id')}")
+    admin_lines.append(f"金额：{format_trc20_amount(paid_amount)} USDT")
+    admin_lines.append(f"来源地址：{from_address}")
+    admin_lines.append(f"TxID：{txid}")
+    admin_lines.append(f"余额：{format_money(balance)} USDT")
+    admin_text = "\n".join(admin_lines)
+    for admin_user_id in sorted(settings.admin_user_ids):
+        try:
+            await application.bot.send_message(chat_id=int(admin_user_id), text=admin_text)
+        except Exception:
+            logger.exception("发送管理员 TRC20 到账通知失败: %s", admin_user_id)
+
+
 def process_okpay_topup(application: Application, payload: dict[str, Any], source: str = "callback") -> tuple[bool, str, dict[str, Any] | None]:
     settings = application.bot_data["settings"]
     store = application.bot_data["store"]
@@ -1366,6 +1557,72 @@ def process_okpay_topup(application: Application, payload: dict[str, Any], sourc
             )
         return True, status, order
     return status == "already_paid", status, order
+
+
+async def poll_trc20_topups_once(application: Application) -> None:
+    settings = application.bot_data["settings"]
+    store = application.bot_data["store"]
+    runtime_config = application.bot_data.get("runtime_config", {})
+    recharge_address = str(runtime_config.get(RUNTIME_KEY_RECHARGE_ADDRESS) or "").strip()
+    if not trc20_enabled(recharge_address):
+        return
+
+    api_keys = parse_trongrid_api_keys(settings)
+    state = application.bot_data.setdefault("trc20_listener_state", {})
+    last_ts = safe_int(state.get(recharge_address))
+    lookback_ms = settings.trongrid_lookback_minutes * 60 * 1000
+    min_timestamp = max(0, last_ts - 60 * 1000) if last_ts > 0 else int(datetime.now(timezone.utc).timestamp() * 1000) - lookback_ms
+    await call_blocking(store.expire_topup_orders, "trc20")
+    try:
+        items = await call_blocking(fetch_trongrid_transactions, settings, recharge_address, min_timestamp, api_keys)
+    except Exception:
+        logger.exception("拉取 TronGrid 转账失败")
+        return
+
+    max_ts = last_ts
+    for item in sorted(items, key=lambda row: safe_int(row.get("block_timestamp") or row.get("block_ts"))):
+        normalized = normalize_trc20_transfer(item, recharge_address, settings.trc20_usdt_contract)
+        if normalized is None:
+            continue
+        max_ts = max(max_ts, safe_int(normalized.get("block_timestamp")))
+        status, order = await call_blocking(
+            store.complete_trc20_topup,
+            txid=str(normalized["txid"]),
+            to_address=str(normalized["to_address"]),
+            from_address=str(normalized["from_address"]),
+            paid_amount=safe_float(normalized["amount"]),
+            currency=str(normalized["currency"]),
+            block_timestamp=safe_int(normalized["block_timestamp"]),
+            payload={
+                "txid": normalized["txid"],
+                "to_address": normalized["to_address"],
+                "from_address": normalized["from_address"],
+                "amount": normalized["amount_text"],
+                "currency": normalized["currency"],
+                "block_timestamp": normalized["block_timestamp"],
+            },
+        )
+        if status == "paid" and order is not None:
+            await send_trc20_topup_notifications(
+                application,
+                order,
+                safe_float(normalized["amount"]),
+                str(normalized["txid"]),
+                str(normalized["from_address"]),
+            )
+    if max_ts > 0:
+        state[recharge_address] = max_ts
+
+
+async def poll_trc20_topups(context: ContextTypes.DEFAULT_TYPE) -> None:
+    application = getattr(context, "application", None)
+    if application is None:
+        return
+    poll_lock = application.bot_data.setdefault("trc20_poll_lock", asyncio.Lock())
+    if poll_lock.locked():
+        return
+    async with poll_lock:
+        await poll_trc20_topups_once(application)
 
 
 class OkpayCallbackHandler(BaseHTTPRequestHandler):
@@ -1813,33 +2070,131 @@ async def show_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await reply_inline(update, "\n".join(lines), keyboard)
 
 
-def build_recharge_keyboard(okpay_config: dict[str, str], pending_order: dict[str, Any] | None) -> InlineKeyboardMarkup:
+def build_recharge_keyboard(
+    okpay_config: dict[str, str],
+    recharge_address: str,
+    pending_orders: list[dict[str, Any]],
+) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
+    if trc20_enabled(recharge_address):
+        rows.extend(
+            [
+                [
+                    InlineKeyboardButton("TRC20 10", callback_data="rchg:trc20:create:10"),
+                    InlineKeyboardButton("TRC20 20", callback_data="rchg:trc20:create:20"),
+                    InlineKeyboardButton("TRC20 50", callback_data="rchg:trc20:create:50"),
+                ],
+                [
+                    InlineKeyboardButton("TRC20 100", callback_data="rchg:trc20:create:100"),
+                    InlineKeyboardButton("TRC20 自定义", callback_data="rchg:trc20:custom"),
+                ],
+            ]
+        )
     if okpay_enabled(okpay_config):
         rows.extend(
             [
                 [
-                    InlineKeyboardButton("10 USDT", callback_data="rchg:create:10"),
-                    InlineKeyboardButton("20 USDT", callback_data="rchg:create:20"),
-                    InlineKeyboardButton("50 USDT", callback_data="rchg:create:50"),
+                    InlineKeyboardButton("OKPay 10", callback_data="rchg:okpay:create:10"),
+                    InlineKeyboardButton("OKPay 20", callback_data="rchg:okpay:create:20"),
+                    InlineKeyboardButton("OKPay 50", callback_data="rchg:okpay:create:50"),
                 ],
                 [
-                    InlineKeyboardButton("100 USDT", callback_data="rchg:create:100"),
-                    InlineKeyboardButton("自定义金额", callback_data="rchg:custom"),
+                    InlineKeyboardButton("OKPay 100", callback_data="rchg:okpay:create:100"),
+                    InlineKeyboardButton("OKPay 自定义", callback_data="rchg:okpay:custom"),
                 ],
             ]
         )
-    if pending_order is not None:
-        pay_url = str(pending_order.get("pay_url") or "").strip()
+    for pending_order in pending_orders:
         order_id = str(pending_order.get("order_id") or "").strip()
-        row: list[InlineKeyboardButton] = []
-        if pay_url:
-            row.append(InlineKeyboardButton("继续支付", url=pay_url))
-        row.append(InlineKeyboardButton("我已支付", callback_data=f"rchg:paid:{order_id}"))
-        rows.append(row)
-        rows.append([InlineKeyboardButton("取消订单", callback_data=f"rchg:cancel:{order_id}")])
+        channel = str(pending_order.get("channel") or "").strip().lower()
+        if not order_id or not channel:
+            continue
+        if channel == "okpay":
+            pay_url = str(pending_order.get("pay_url") or "").strip()
+            row: list[InlineKeyboardButton] = []
+            if pay_url:
+                row.append(InlineKeyboardButton("继续支付", url=pay_url))
+            row.append(InlineKeyboardButton("我已支付", callback_data=f"rchg:okpay:paid:{order_id}"))
+            rows.append(row)
+            rows.append([InlineKeyboardButton("取消 OKPay 订单", callback_data=f"rchg:okpay:cancel:{order_id}")])
+        elif channel == "trc20":
+            rows.append(
+                [
+                    InlineKeyboardButton("TRC20 已转账", callback_data=f"rchg:trc20:paid:{order_id}"),
+                    InlineKeyboardButton("取消 TRC20 订单", callback_data=f"rchg:trc20:cancel:{order_id}"),
+                ]
+            )
     rows.append([premium_inline_button(BUTTON_MAIN_MENU, "nav:menu", HOME_EMOJI_ID)])
     return InlineKeyboardMarkup(rows)
+
+
+async def create_trc20_topup_order(update: Update, context: ContextTypes.DEFAULT_TYPE, amount: float) -> None:
+    _, store, _ = get_services(context)
+    user = update.effective_user
+    if user is None:
+        return
+    recharge_address = effective_recharge_address(context)
+    if not trc20_enabled(recharge_address):
+        await reply_inline(update, "TRC20 充值地址还没有配置好，请先联系管理员。")
+        return
+    if amount <= 0:
+        await reply_inline(update, "充值金额必须大于 0。")
+        return
+
+    requested_amount = quantize_recharge_amount(amount)
+    if requested_amount <= 0:
+        await reply_inline(update, "充值金额必须大于 0。")
+        return
+
+    await call_blocking(store.ensure_user, user.id, user.username or "", user.full_name or "")
+    await call_blocking(store.cancel_pending_topup_orders, user.id, "trc20", "recreated")
+    try:
+        pay_amount, pay_amount_text = await call_blocking(
+            allocate_trc20_amount,
+            store,
+            recharge_address,
+            requested_amount,
+            user.id,
+        )
+    except Exception as exc:
+        await reply_inline(update, f"创建 TRC20 充值订单失败：{exc}")
+        return
+
+    order_id = build_topup_order_id("TRC20", user.id)
+    expire_at = build_topup_expire_at(10)
+    await call_blocking(
+        store.create_topup_order,
+        order_id,
+        user.id,
+        "trc20",
+        pay_amount,
+        "USDT",
+        requested_amount=requested_amount,
+        pay_address=recharge_address,
+        note="trc20",
+        expire_at=expire_at,
+    )
+
+    text = (
+        "TRC20 充值订单已创建\n\n"
+        f"订单号：{order_id}\n"
+        f"充值地址：`{recharge_address}`\n"
+        f"下单金额：{format_money(requested_amount)} USDT\n"
+        f"实际转账：{pay_amount_text} USDT\n"
+        "请务必按上面的实际转账金额付款，到账后系统会自动入账。"
+    )
+    keyboard = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("TRC20 已转账", callback_data=f"rchg:trc20:paid:{order_id}"),
+                InlineKeyboardButton("取消 TRC20 订单", callback_data=f"rchg:trc20:cancel:{order_id}"),
+            ],
+            [premium_inline_button(BUTTON_MAIN_MENU, "nav:menu", HOME_EMOJI_ID)],
+        ]
+    )
+    await reply_inline(update, text, keyboard, parse_mode="Markdown")
+    if update.callback_query is not None and update.callback_query.message is not None:
+        await call_blocking(store.set_topup_order_message_id, order_id, update.callback_query.message.message_id)
 
 
 async def create_okpay_topup_order(update: Update, context: ContextTypes.DEFAULT_TYPE, amount: float) -> None:
@@ -1905,8 +2260,8 @@ async def create_okpay_topup_order(update: Update, context: ContextTypes.DEFAULT
         [
             [InlineKeyboardButton("打开 OKPay 支付", url=pay_url)],
             [
-                InlineKeyboardButton("我已支付", callback_data=f"rchg:paid:{order_id}"),
-                InlineKeyboardButton("取消订单", callback_data=f"rchg:cancel:{order_id}"),
+                InlineKeyboardButton("我已支付", callback_data=f"rchg:okpay:paid:{order_id}"),
+                InlineKeyboardButton("取消订单", callback_data=f"rchg:okpay:cancel:{order_id}"),
             ],
             [premium_inline_button(BUTTON_MAIN_MENU, "nav:menu", HOME_EMOJI_ID)],
         ]
@@ -1978,33 +2333,91 @@ async def cancel_okpay_topup_order(update: Update, context: ContextTypes.DEFAULT
     await reply_inline(update, "这笔订单当前不能取消。")
 
 
+async def check_trc20_topup_order(update: Update, context: ContextTypes.DEFAULT_TYPE, order_id: str) -> None:
+    _, store, _ = get_services(context)
+    user = update.effective_user
+    if user is None:
+        return
+    await call_blocking(store.expire_topup_orders, "trc20")
+    order = await call_blocking(store.get_topup_order, order_id)
+    if order is None or str(order.get("channel") or "") != "trc20":
+        await reply_inline(update, "未找到对应的 TRC20 充值订单。")
+        return
+    if safe_int(order.get("user_id")) != user.id:
+        await reply_inline(update, "这笔充值订单不属于你。")
+        return
+    if str(order.get("state") or "") == "paid":
+        await reply_inline(update, "这笔订单已经到账，无需重复检查。")
+        return
+    if str(order.get("state") or "") != "pending":
+        await reply_inline(update, "这笔订单已经失效，请重新创建新的充值订单。")
+        return
+
+    await poll_trc20_topups_once(context.application)
+    fresh_order = await call_blocking(store.get_topup_order, order_id)
+    if fresh_order is None:
+        await reply_inline(update, "未找到对应的 TRC20 充值订单。")
+        return
+    if str(fresh_order.get("state") or "") == "paid":
+        await reply_inline(update, "✅ TRC20 充值已确认到账，余额已经自动增加。")
+        return
+    if str(fresh_order.get("state") or "") != "pending":
+        await reply_inline(update, "这笔订单已经失效，请重新创建新的充值订单。")
+        return
+    await reply_inline(update, "暂时还没有检测到这笔 TRC20 转账，请付款后稍等几秒再点一次。")
+
+
+async def cancel_trc20_topup_order(update: Update, context: ContextTypes.DEFAULT_TYPE, order_id: str) -> None:
+    _, store, _ = get_services(context)
+    user = update.effective_user
+    if user is None:
+        return
+    changed, order = await call_blocking(store.cancel_topup_order, order_id, user_id=user.id, reason="user_canceled")
+    if order is None:
+        await reply_inline(update, "未找到这笔 TRC20 充值订单。")
+        return
+    if safe_int(order.get("user_id")) != user.id:
+        await reply_inline(update, "这笔充值订单不属于你。")
+        return
+    if changed:
+        await reply_inline(update, "TRC20 充值订单已取消。")
+        return
+    await reply_inline(update, "这笔订单当前不能取消。")
+
+
 async def show_recharge(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     settings, store, _ = get_services(context)
     user = update.effective_user
     balance = 0.0
-    pending_order: dict[str, Any] | None = None
+    pending_orders: list[dict[str, Any]] = []
     if user is not None:
         await call_blocking(store.ensure_user, user.id, user.username or "", user.full_name or "")
         balance = await call_blocking(store.get_balance, user.id)
-        pending_order = await call_blocking(store.get_latest_pending_topup_order, user.id, "okpay")
+        await call_blocking(store.expire_topup_orders)
+        pending_orders = await call_blocking(store.list_pending_topup_orders, user.id)
     recharge_address = effective_recharge_address(context)
     okpay_config = effective_okpay_settings(context, settings)
     lines = ["💰 充值中心", "", f"当前余额：{format_money(balance)} USDT"]
+    if trc20_enabled(recharge_address):
+        lines.extend(["", f"TRC20 地址：`{recharge_address}`"])
     if okpay_enabled(okpay_config):
-        lines.extend(["", "请选择下方金额创建 OKPay 充值订单。"])
-    elif recharge_address:
-        lines.extend(["", f"充值地址：{recharge_address}"])
+        lines.extend(["", "下方可直接创建 OKPay 或 TRC20 充值订单。"])
+    elif trc20_enabled(recharge_address):
+        lines.extend(["", "下方可直接创建 TRC20 充值订单。"])
     else:
         lines.extend(["", "当前暂未开启在线充值，请联系客服。"])
-    if pending_order is not None:
-        lines.extend(
-            [
-                "",
-                f"待支付订单：{pending_order.get('order_id')}",
-                f"待支付金额：{format_money(safe_float(pending_order.get('amount')))} USDT",
-            ]
-        )
-    await reply_inline(update, "\n".join(lines), build_recharge_keyboard(okpay_config, pending_order))
+    if pending_orders:
+        lines.append("")
+        lines.append("待支付订单：")
+        for pending_order in pending_orders[:3]:
+            channel = str(pending_order.get("channel") or "").upper()
+            requested_amount = safe_float(pending_order.get("requested_amount") or pending_order.get("amount"))
+            actual_amount = safe_float(pending_order.get("amount"))
+            row = f"- {channel} | {pending_order.get('order_id')} | {format_money(requested_amount)} USDT"
+            if str(pending_order.get("channel") or "") == "trc20":
+                row += f" | 实付 {format_trc20_amount(actual_amount)}"
+            lines.append(row)
+    await reply_inline(update, "\n".join(lines), build_recharge_keyboard(okpay_config, recharge_address, pending_orders), parse_mode="Markdown")
 
 
 async def show_customer_service(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -3098,15 +3511,19 @@ async def search_text_rich(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     pending_recharge = get_pending_recharge(context)
     if pending_recharge is not None:
         try:
-            amount = round(float(keyword), 2)
+            amount = quantize_recharge_amount(float(keyword))
         except ValueError:
             await update.message.reply_text("请输入充值金额，直接发数字即可，例如：10 或 25.5", reply_markup=MENU_KEYBOARD)
             return
         if amount <= 0:
             await update.message.reply_text("充值金额必须大于 0。", reply_markup=MENU_KEYBOARD)
             return
+        channel = str(pending_recharge.get("channel") or "okpay").strip().lower()
         clear_pending_recharge(context)
-        await create_okpay_topup_order(update, context, amount)
+        if channel == "trc20":
+            await create_trc20_topup_order(update, context, amount)
+        else:
+            await create_okpay_topup_order(update, context, amount)
         return
     pending_purchase = get_pending_purchase(context)
     if pending_purchase is not None:
@@ -3201,26 +3618,42 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             return
 
     if action == "rchg" and len(parts) >= 2:
-        if parts[1] == "custom":
+        if parts[1] in {"custom", "create", "paid", "cancel"}:
+            legacy_parts = ["rchg", "okpay", *parts[1:]]
+            parts = legacy_parts
+        channel = parts[1] if len(parts) > 1 else "okpay"
+        if channel not in {"okpay", "trc20"}:
+            channel = "okpay"
+        subaction = parts[2] if len(parts) > 2 else ""
+        if subaction == "custom":
             clear_pending_purchase(context)
-            set_pending_recharge(context, "okpay")
+            set_pending_recharge(context, channel)
             await reply_inline(update, "请直接发送充值金额，支持整数或两位小数，例如：10 或 25.5")
             return
-        if parts[1] == "create" and len(parts) >= 3:
+        if subaction == "create" and len(parts) >= 4:
             clear_pending_purchase(context)
             clear_pending_recharge(context)
-            amount = safe_float(parts[2], 0.0)
-            await create_okpay_topup_order(update, context, amount)
+            amount = safe_float(parts[3], 0.0)
+            if channel == "trc20":
+                await create_trc20_topup_order(update, context, amount)
+            else:
+                await create_okpay_topup_order(update, context, amount)
             return
-        if parts[1] == "paid" and len(parts) >= 3:
+        if subaction == "paid" and len(parts) >= 4:
             clear_pending_purchase(context)
             clear_pending_recharge(context)
-            await check_okpay_topup_order(update, context, parts[2])
+            if channel == "trc20":
+                await check_trc20_topup_order(update, context, parts[3])
+            else:
+                await check_okpay_topup_order(update, context, parts[3])
             return
-        if parts[1] == "cancel" and len(parts) >= 3:
+        if subaction == "cancel" and len(parts) >= 4:
             clear_pending_purchase(context)
             clear_pending_recharge(context)
-            await cancel_okpay_topup_order(update, context, parts[2])
+            if channel == "trc20":
+                await cancel_trc20_topup_order(update, context, parts[3])
+            else:
+                await cancel_okpay_topup_order(update, context, parts[3])
             return
 
     if action == "cat" and len(parts) == 3:
@@ -3384,6 +3817,12 @@ def build_application(settings: Settings) -> Application:
             interval=settings.order_poll_seconds,
             first=settings.order_poll_first_seconds,
             name="poll_processing_orders",
+        )
+        application.job_queue.run_repeating(
+            poll_trc20_topups,
+            interval=settings.trongrid_poll_seconds,
+            first=5,
+            name="poll_trc20_topups",
         )
     return application
 

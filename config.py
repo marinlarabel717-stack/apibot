@@ -74,6 +74,15 @@ class Settings:
     okpay_api_url: str
     okpay_callback_host: str
     okpay_callback_port: int
+    trongrid_api_base: str
+    trongrid_api_key: str
+    trongrid_api_keys: str
+    trongrid_request_timeout: int
+    trongrid_poll_seconds: int
+    trongrid_page_limit: int
+    trongrid_max_pages: int
+    trongrid_lookback_minutes: int
+    trc20_usdt_contract: str
     sell_price_add: float
     sell_price_rules: list[dict[str, Any]]
     inline_button_custom_emoji_enabled: bool
@@ -126,6 +135,15 @@ def load_settings() -> Settings:
         okpay_api_url=os.getenv("OKPAY_API_URL", "https://api.okaypay.me/shop").strip().rstrip("/"),
         okpay_callback_host=os.getenv("OKPAY_CALLBACK_HOST", "0.0.0.0").strip() or "0.0.0.0",
         okpay_callback_port=int(os.getenv("OKPAY_CALLBACK_PORT", "8088")),
+        trongrid_api_base=os.getenv("TRONGRID_API_BASE", "https://api.trongrid.io/v1").strip().rstrip("/"),
+        trongrid_api_key=os.getenv("TRONGRID_API_KEY", "").strip(),
+        trongrid_api_keys=os.getenv("TRONGRID_API_KEYS", "").strip(),
+        trongrid_request_timeout=max(5, int(os.getenv("TRONGRID_REQUEST_TIMEOUT", "20"))),
+        trongrid_poll_seconds=max(3, int(os.getenv("TRONGRID_POLL_SECONDS", "6"))),
+        trongrid_page_limit=max(1, min(int(os.getenv("TRONGRID_PAGE_LIMIT", "100")), 200)),
+        trongrid_max_pages=max(1, int(os.getenv("TRONGRID_MAX_PAGES", "20"))),
+        trongrid_lookback_minutes=max(1, int(os.getenv("TRONGRID_LOOKBACK_MINUTES", "30"))),
+        trc20_usdt_contract=os.getenv("TRC20_USDT_CONTRACT", "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t").strip(),
         sell_price_add=_parse_float(os.getenv("SELL_PRICE_ADD", "0"), "SELL_PRICE_ADD", 0.0),
         sell_price_rules=_parse_price_rules(os.getenv("SELL_PRICE_RULES_JSON", "{}"), "SELL_PRICE_RULES_JSON"),
         inline_button_custom_emoji_enabled=os.getenv("INLINE_BUTTON_CUSTOM_EMOJI_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"},

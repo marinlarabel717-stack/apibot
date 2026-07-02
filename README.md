@@ -46,6 +46,11 @@
   - 支付回调自动到账
   - 手动“我已支付”补查
   - 防重复加款
+- TRC20 USDT 充值
+  - 创建唯一金额充值订单
+  - TronGrid 轮询自动匹配到账
+  - 手动“TRC20 已转账”补查
+  - 防重复加款
 
 ## 交互风格
 
@@ -112,6 +117,8 @@ OKPAY_SHOP_TOKEN=
 OKPAY_NAME=号铺
 OKPAY_CALLBACK_URL=
 OKPAY_CALLBACK_PORT=8088
+TRONGRID_API_KEY=
+TRONGRID_POLL_SECONDS=6
 SELL_PRICE_ADD=0.2
 API_AUTH_HEADER_NAME=Authorization
 API_AUTH_HEADER_VALUE=
@@ -129,6 +136,7 @@ API_AUTH_TRY_BEARER_VARIANTS=true
 - `OKPAY_SHOP_TOKEN`
 - `OKPAY_NAME`
 - `OKPAY_CALLBACK_URL`
+- `TRONGRID_API_KEY`
 - 如果要微调利润，再改 `SELL_PRICE_ADD` 和 `SELL_PRICE_RULES_JSON`
 
 ### 3. 启动
@@ -172,6 +180,12 @@ API_EXTRA_QUERY_JSON={"uid":"10001"}
   - 公网可访问的回调地址，支付成功后用来自动到账
 - `OKPAY_CALLBACK_HOST` / `OKPAY_CALLBACK_PORT`
   - 本地回调监听地址，默认 `0.0.0.0:8088`
+- `TRONGRID_API_KEY` / `TRONGRID_API_KEYS`
+  - TronGrid 监听 TRC20 入账时使用的 API Key，多个可用逗号分隔
+- `TRONGRID_POLL_SECONDS`
+  - TRC20 充值轮询间隔，默认 `6`
+- `TRC20_USDT_CONTRACT`
+  - USDT TRC20 合约地址，默认主网 `TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t`
 - `SELL_PRICE_RULES_JSON`
   - 按关键字单独覆盖固定差价
   - 示例：`{"VIP":{"add":0.5},"Spam":{"add":0.1},"7年":{"add":0.8}}`
@@ -195,3 +209,4 @@ API_EXTRA_QUERY_JSON={"uid":"10001"}
 - 按钮购买现在会先弹“确认购买”图片卡片，订单完成后不再发下载链接，而是直接给用户发 zip 文件。
 - 亚洲 / 欧美 / 非洲 / 年龄段这类分类按钮已经内置固定图标规则；如果打开 custom emoji，会优先显示你在 `.env` 里配置的会员图标。
 - 现在已经接入 OKPay 充值订单和自动到账；如果要正式收款，记得把 `OKPAY_CALLBACK_URL` 反代到本机监听端口。
+- TRC20 自动到账依赖你在后台先配置有效的 `充值地址`，并在 `.env` 里至少配置一个可用的 `TRONGRID_API_KEY`。

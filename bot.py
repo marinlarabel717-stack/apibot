@@ -171,6 +171,7 @@ RUNTIME_KEY_OKPAY_SHOP_ID = "okpay_shop_id"
 RUNTIME_KEY_OKPAY_SHOP_TOKEN = "okpay_shop_token"
 RUNTIME_KEY_OKPAY_NAME = "okpay_name"
 RUNTIME_KEY_OKPAY_CALLBACK_URL = "okpay_callback_url"
+RUNTIME_KEY_OKPAY_API_URL = "okpay_api_url"
 RUNTIME_KEY_CUSTOMER_SERVICE = "customer_service_contact"
 RUNTIME_KEY_RESTOCK_CHANNEL = "restock_channel"
 START_MENU_EMOJI_USDT_ID = "6334575946938451719"
@@ -440,13 +441,66 @@ def summarize_okpay_config(config: dict[str, str]) -> str:
     callback_url = config.get("callback_url", "")
     api_url = config.get("api_url", "")
     name = config.get("name", "")
+    enabled = "已开启" if shop_id and token else "未开启"
+    masked_token = token[:6] + "******" + token[-4:] if len(token) >= 12 else ("已配置" if token else "未配置")
     return (
         f"商户ID：{shop_id or '未配置'}\n"
-        f"Token：{'已配置' if token else '未配置'}\n"
+        f"Token：{masked_token}\n"
         f"名称：{name or '未配置'}\n"
         f"回调地址：{callback_url or '未配置'}\n"
-        f"API地址：{api_url or '未配置'}"
+        f"API地址：{api_url or '未配置'}\n"
+        f"充值入口：{enabled}"
     )
+
+
+def build_okpay_config_text(config: dict[str, str]) -> str:
+    return (
+        "OKPAY 配置\n\n"
+        f"{summarize_okpay_config(config)}\n\n"
+        "后台改这里就行，不需要每次再去改 env。"
+    )
+
+
+def build_okpay_config_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("设置商户ID", callback_data="adm:set:okid"),
+                InlineKeyboardButton("设置Token", callback_data="adm:set:oktoken"),
+            ],
+            [
+                InlineKeyboardButton("设置名称", callback_data="adm:set:okname"),
+                InlineKeyboardButton("设置回调地址", callback_data="adm:set:okcallback"),
+            ],
+            [
+                InlineKeyboardButton("设置API地址", callback_data="adm:set:okapi"),
+                InlineKeyboardButton("整段配置", callback_data="adm:set:okpay"),
+            ],
+            [InlineKeyboardButton("返回后台", callback_data="adm:home")],
+        ]
+    )
+
+
+def dump_okpay_config_text(config: dict[str, str]) -> str:
+    lines: list[str] = []
+    for key in ("shop_id", "shop_token", "name", "callback_url", "api_url"):
+        value = str(config.get(key) or "").strip()
+        if value:
+            lines.append(f"{key}={value}")
+    return "\n".join(lines)
+
+
+def update_okpay_runtime_config(existing_raw: str, settings: Settings, field: str, value: str) -> str:
+    config = resolve_okpay_settings({RUNTIME_KEY_OKPAY_CONFIG: existing_raw}, settings)
+    updated = {
+        "shop_id": str(config.get("shop_id") or "").strip(),
+        "shop_token": str(config.get("shop_token") or "").strip(),
+        "name": str(config.get("name") or "").strip(),
+        "callback_url": str(config.get("callback_url") or "").strip(),
+        "api_url": str(config.get("api_url") or "").strip(),
+    }
+    updated[field] = str(value or "").strip()
+    return dump_okpay_config_text(updated)
 
 
 def resolve_okpay_settings(runtime_config: dict[str, str], settings: Settings) -> dict[str, str]:
@@ -2781,17 +2835,8 @@ async def show_admin_config_page(update: Update, context: ContextTypes.DEFAULT_T
         )
     elif section == "okpay":
         okpay_config = effective_okpay_settings(context, settings)
-        text = (
-            "OKPAY 配置\n\n"
-            f"{summarize_okpay_config(okpay_config)}\n\n"
-            "支持两种填写方式：JSON，或多行 key=value。"
-        )
-        keyboard = InlineKeyboardMarkup(
-            [
-                [InlineKeyboardButton("修改 OKPAY 配置", callback_data="adm:set:okpay")],
-                [InlineKeyboardButton("返回后台", callback_data="adm:home")],
-            ]
-        )
+        text = build_okpay_config_text(okpay_config)
+        keyboard = build_okpay_config_keyboard()
     else:
         text = (
             "客服 / 补货配置\n\n"
@@ -2838,6 +2883,21 @@ async def prompt_admin_setting_edit(update: Update, context: ContextTypes.DEFAUL
             "shop_id=xxx\nshop_token=xxx\nname=号铺\ncallback_url=https://你的域名/okpay/callback\n"
             "如果要清空，直接发：-",
         )
+        return
+    if key == RUNTIME_KEY_OKPAY_SHOP_ID:
+        await send_menu_message(update, "请输入 OKPay 商户ID。\n如果要清空，直接发：-")
+        return
+    if key == RUNTIME_KEY_OKPAY_SHOP_TOKEN:
+        await send_menu_message(update, "请输入 OKPay Token。\n如果要清空，直接发：-")
+        return
+    if key == RUNTIME_KEY_OKPAY_NAME:
+        await send_menu_message(update, "请输入 OKPay 名称，例如：号铺。\n如果要清空，直接发：-")
+        return
+    if key == RUNTIME_KEY_OKPAY_CALLBACK_URL:
+        await send_menu_message(update, "请输入 OKPay 回调地址，例如：https://你的域名/okpay/callback\n如果要清空，直接发：-")
+        return
+    if key == RUNTIME_KEY_OKPAY_API_URL:
+        await send_menu_message(update, "请输入 OKPay API 地址，例如：https://api.okaypay.me/shop\n如果要清空，直接发：-")
         return
     await send_menu_message(update, f"请发送新的 {title}。\n如果要清空，直接发：-")
 
@@ -2928,20 +2988,48 @@ async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_
         setting_key = str(pending.get("setting_key") or "")
         setting_title = str(pending.get("setting_title") or "配置")
         value = "" if text.strip() == "-" else text.strip()
-        await call_blocking(store.set_runtime_setting, setting_key, value, user.id)
-        get_runtime_config(context)[setting_key] = value
-        if setting_key == RUNTIME_KEY_OKPAY_CONFIG:
+        runtime_config = get_runtime_config(context)
+        okpay_field_map = {
+            RUNTIME_KEY_OKPAY_SHOP_ID: "shop_id",
+            RUNTIME_KEY_OKPAY_SHOP_TOKEN: "shop_token",
+            RUNTIME_KEY_OKPAY_NAME: "name",
+            RUNTIME_KEY_OKPAY_CALLBACK_URL: "callback_url",
+            RUNTIME_KEY_OKPAY_API_URL: "api_url",
+        }
+        if setting_key in okpay_field_map:
+            merged_value = update_okpay_runtime_config(
+                str(runtime_config.get(RUNTIME_KEY_OKPAY_CONFIG) or ""),
+                settings,
+                okpay_field_map[setting_key],
+                value,
+            )
+            await call_blocking(store.set_runtime_setting, RUNTIME_KEY_OKPAY_CONFIG, merged_value, user.id)
+            runtime_config[RUNTIME_KEY_OKPAY_CONFIG] = merged_value
             for legacy_key in (
                 RUNTIME_KEY_OKPAY_SHOP_ID,
                 RUNTIME_KEY_OKPAY_SHOP_TOKEN,
                 RUNTIME_KEY_OKPAY_NAME,
                 RUNTIME_KEY_OKPAY_CALLBACK_URL,
+                RUNTIME_KEY_OKPAY_API_URL,
             ):
                 await call_blocking(store.set_runtime_setting, legacy_key, "", user.id)
-                get_runtime_config(context).pop(legacy_key, None)
+                runtime_config.pop(legacy_key, None)
+        else:
+            await call_blocking(store.set_runtime_setting, setting_key, value, user.id)
+            runtime_config[setting_key] = value
+            if setting_key == RUNTIME_KEY_OKPAY_CONFIG:
+                for legacy_key in (
+                    RUNTIME_KEY_OKPAY_SHOP_ID,
+                    RUNTIME_KEY_OKPAY_SHOP_TOKEN,
+                    RUNTIME_KEY_OKPAY_NAME,
+                    RUNTIME_KEY_OKPAY_CALLBACK_URL,
+                    RUNTIME_KEY_OKPAY_API_URL,
+                ):
+                    await call_blocking(store.set_runtime_setting, legacy_key, "", user.id)
+                    runtime_config.pop(legacy_key, None)
         await call_blocking(store.log_admin_action, user.id, "admin_setting_update", setting_key, value)
         clear_pending_admin_action(context)
-        if setting_key == RUNTIME_KEY_OKPAY_CONFIG:
+        if setting_key == RUNTIME_KEY_OKPAY_CONFIG or setting_key in okpay_field_map:
             await ensure_okpay_callback_server(context.application)
         await send_menu_message(update, f"{setting_title} 已更新。")
         return True
@@ -3148,6 +3236,11 @@ async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
         mapping = {
             "raddr": (RUNTIME_KEY_RECHARGE_ADDRESS, "充值地址"),
             "okpay": (RUNTIME_KEY_OKPAY_CONFIG, "OKPAY 配置"),
+            "okid": (RUNTIME_KEY_OKPAY_SHOP_ID, "OKPay 商户ID"),
+            "oktoken": (RUNTIME_KEY_OKPAY_SHOP_TOKEN, "OKPay Token"),
+            "okname": (RUNTIME_KEY_OKPAY_NAME, "OKPay 名称"),
+            "okcallback": (RUNTIME_KEY_OKPAY_CALLBACK_URL, "OKPay 回调地址"),
+            "okapi": (RUNTIME_KEY_OKPAY_API_URL, "OKPay API 地址"),
             "cs": (RUNTIME_KEY_CUSTOMER_SERVICE, "客服联系方式"),
             "restock": (RUNTIME_KEY_RESTOCK_CHANNEL, "补货频道"),
         }

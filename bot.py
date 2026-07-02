@@ -348,13 +348,30 @@ def parse_okpay_config_text(raw: str) -> dict[str, str]:
     result: dict[str, str] = {}
     alias_map = {
         "shop_id": "shop_id",
+        "shopid": "shop_id",
         "id": "shop_id",
         "merchant_id": "shop_id",
+        "merchantid": "shop_id",
+        "okpay_shop_id": "shop_id",
+        "商户id": "shop_id",
+        "商户号": "shop_id",
         "shop_token": "shop_token",
+        "shoptoken": "shop_token",
         "token": "shop_token",
+        "okpay_token": "shop_token",
+        "okpay_shop_token": "shop_token",
+        "商户token": "shop_token",
+        "token值": "shop_token",
         "name": "name",
+        "okpay_name": "name",
+        "名称": "name",
         "callback_url": "callback_url",
+        "callback": "callback_url",
+        "okpay_callback_url": "callback_url",
+        "回调地址": "callback_url",
         "api_url": "api_url",
+        "okpay_api_url": "api_url",
+        "接口地址": "api_url",
     }
     for line in text.splitlines():
         line = line.strip()
@@ -384,10 +401,23 @@ def summarize_okpay_config(config: dict[str, str]) -> str:
 
 def resolve_okpay_settings(runtime_config: dict[str, str], settings: Settings) -> dict[str, str]:
     parsed = parse_okpay_config_text(str(runtime_config.get(RUNTIME_KEY_OKPAY_CONFIG) or ""))
-    shop_id = str(runtime_config.get(RUNTIME_KEY_OKPAY_SHOP_ID) or "").strip() or parsed.get("shop_id", "") or settings.okpay_shop_id
-    shop_token = str(runtime_config.get(RUNTIME_KEY_OKPAY_SHOP_TOKEN) or "").strip() or parsed.get("shop_token", "") or settings.okpay_shop_token
-    name = str(runtime_config.get(RUNTIME_KEY_OKPAY_NAME) or "").strip() or parsed.get("name", "") or settings.okpay_name
-    callback_url = str(runtime_config.get(RUNTIME_KEY_OKPAY_CALLBACK_URL) or "").strip() or parsed.get("callback_url", "") or settings.okpay_callback_url
+    legacy_shop_id = str(runtime_config.get(RUNTIME_KEY_OKPAY_SHOP_ID) or "").strip()
+    legacy_shop_token = str(runtime_config.get(RUNTIME_KEY_OKPAY_SHOP_TOKEN) or "").strip()
+    legacy_name = str(runtime_config.get(RUNTIME_KEY_OKPAY_NAME) or "").strip()
+    legacy_callback_url = str(runtime_config.get(RUNTIME_KEY_OKPAY_CALLBACK_URL) or "").strip()
+
+    # Prefer the unified OKPAY config block when present so stale legacy fields
+    # do not silently override newly saved shop credentials.
+    if parsed:
+        shop_id = parsed.get("shop_id", "") or settings.okpay_shop_id
+        shop_token = parsed.get("shop_token", "") or settings.okpay_shop_token
+        name = parsed.get("name", "") or settings.okpay_name
+        callback_url = parsed.get("callback_url", "") or settings.okpay_callback_url
+    else:
+        shop_id = legacy_shop_id or settings.okpay_shop_id
+        shop_token = legacy_shop_token or settings.okpay_shop_token
+        name = legacy_name or settings.okpay_name
+        callback_url = legacy_callback_url or settings.okpay_callback_url
     api_url = parsed.get("api_url", "") or settings.okpay_api_url
     return {
         "shop_id": str(shop_id or "").strip(),
@@ -2810,6 +2840,15 @@ async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_
         value = "" if text.strip() == "-" else text.strip()
         await call_blocking(store.set_runtime_setting, setting_key, value, user.id)
         get_runtime_config(context)[setting_key] = value
+        if setting_key == RUNTIME_KEY_OKPAY_CONFIG:
+            for legacy_key in (
+                RUNTIME_KEY_OKPAY_SHOP_ID,
+                RUNTIME_KEY_OKPAY_SHOP_TOKEN,
+                RUNTIME_KEY_OKPAY_NAME,
+                RUNTIME_KEY_OKPAY_CALLBACK_URL,
+            ):
+                await call_blocking(store.set_runtime_setting, legacy_key, "", user.id)
+                get_runtime_config(context).pop(legacy_key, None)
         await call_blocking(store.log_admin_action, user.id, "admin_setting_update", setting_key, value)
         clear_pending_admin_action(context)
         if setting_key == RUNTIME_KEY_OKPAY_CONFIG:

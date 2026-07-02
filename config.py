@@ -67,7 +67,6 @@ class Settings:
     admin_user_ids: set[int]
     restock_channel: str
     customer_service_contact: str
-    recharge_text: str
     sell_price_add: float
     sell_price_rules: list[dict[str, Any]]
     inline_button_custom_emoji_enabled: bool
@@ -113,10 +112,6 @@ def load_settings() -> Settings:
         admin_user_ids=admin_user_ids,
         restock_channel=os.getenv("RESTOCK_CHANNEL", "@xxx").strip() or "@xxx",
         customer_service_contact=os.getenv("CUSTOMER_SERVICE_CONTACT", "@id2uu").strip() or "@id2uu",
-        recharge_text=os.getenv(
-            "RECHARGE_TEXT",
-            "请联系管理员充值，或者让管理员使用 /add 给你调整余额。",
-        ).strip(),
         sell_price_add=_parse_float(os.getenv("SELL_PRICE_ADD", "0"), "SELL_PRICE_ADD", 0.0),
         sell_price_rules=_parse_price_rules(os.getenv("SELL_PRICE_RULES_JSON", "{}"), "SELL_PRICE_RULES_JSON"),
         inline_button_custom_emoji_enabled=os.getenv("INLINE_BUTTON_CUSTOM_EMOJI_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"},

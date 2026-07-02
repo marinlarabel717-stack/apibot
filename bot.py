@@ -1459,17 +1459,16 @@ async def show_recharge(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         balance = await call_blocking(store.get_balance, user.id)
     recharge_address = effective_recharge_address(context)
     okpay_config = effective_okpay_config(context)
-    extra_lines: list[str] = []
+    lines = [
+        "💰 充值中心",
+        "",
+        f"当前余额：{format_money(balance)} USDT",
+    ]
     if recharge_address:
-        extra_lines.extend(["", f"充值地址：{recharge_address}"])
+        lines.extend(["", f"充值地址：{recharge_address}"])
     if okpay_config:
-        extra_lines.extend(["", f"OKPAY 配置：{okpay_config}"])
-    text = (
-        "💰 充值中心\n\n"
-        f"当前余额：{format_money(balance)} USDT\n\n"
-        f"{settings.recharge_text}"
-        + "\n".join(extra_lines)
-    )
+        lines.extend(["", f"OKPAY 配置：{okpay_config}"])
+    text = "\n".join(lines)
     keyboard = InlineKeyboardMarkup(
         [
             [premium_inline_button(BUTTON_MAIN_MENU, "nav:menu", HOME_EMOJI_ID)],
@@ -1654,8 +1653,7 @@ async def show_admin_config_page(update: Update, context: ContextTypes.DEFAULT_T
     if section == "recharge":
         text = (
             "充值地址配置\n\n"
-            f"当前充值地址：{effective_recharge_address(context) or '未配置'}\n"
-            f"当前充值说明：{settings.recharge_text}"
+            f"当前充值地址：{effective_recharge_address(context) or '未配置'}"
         )
         keyboard = InlineKeyboardMarkup(
             [

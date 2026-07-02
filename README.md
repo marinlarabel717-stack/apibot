@@ -50,7 +50,7 @@
 - 商品按钮列表
 - 商品详情页按钮
 - 个人中心页
-- 充值说明页
+- 充值页
 
 用户既可以用命令，也可以直接点按钮操作。
 
@@ -101,7 +101,6 @@ BOT_TOKEN=
 ADMIN_USER_IDS=
 RESTOCK_CHANNEL=@xxx
 CUSTOMER_SERVICE_CONTACT=@id2uu
-RECHARGE_TEXT=请联系管理员充值，或者让管理员使用 /add 给你调整余额。
 SELL_PRICE_ADD=0.2
 API_AUTH_HEADER_NAME=Authorization
 API_AUTH_HEADER_VALUE=
@@ -149,8 +148,6 @@ API_EXTRA_QUERY_JSON={"uid":"10001"}
 
 ## 可配置项
 
-- `RECHARGE_TEXT`
-  - “我要充值”页面展示的充值说明
 - `SELL_PRICE_ADD`
   - 全局固定差价，最终售价 = 上游价格 + 这里的金额
   - 例如 `SELL_PRICE_ADD=0.2`，上游 `1.3` 会卖 `1.5`

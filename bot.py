@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import html
+import io
 import json
 import logging
 import re
@@ -15,6 +16,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 
+import qrcode
 import requests
 
 from telegram import (
@@ -2151,91 +2153,54 @@ def normalize_recharge_channel(value: str | None) -> str | None:
 def recharge_channel_label(channel: str) -> str:
     normalized = normalize_recharge_channel(channel)
     if normalized == "trc20":
-        return "USDT直充 | 链上转账"
+        return "USDT 充值 | TRC20"
     if normalized == "okpay":
-        return "OKPay支付 | 极速到账"
-    return "在线充值"
+        return "OKPay充值 | 秒到账"
+    return "充值"
 
 
 RECHARGE_PRESET_AMOUNTS: tuple[tuple[int, ...], ...] = (
-    (10, 50, 100),
-    (200, 500, 1000),
-    (2000, 5000),
+    (10, 30, 50),
+    (100, 200, 500),
+    (1000, 1500, 2000),
 )
 
 
 def build_recharge_keyboard(
     okpay_config: dict[str, str],
     recharge_address: str,
-    pending_orders: list[dict[str, Any]],
     selected_channel: str | None = None,
 ) -> InlineKeyboardMarkup:
     trc20_available = trc20_enabled(recharge_address)
     okpay_available = okpay_enabled(okpay_config)
     selected_channel = normalize_recharge_channel(selected_channel)
+    rows: list[list[InlineKeyboardButton]] = []
+    if selected_channel is None:
+        if trc20_available:
+            rows.append([InlineKeyboardButton(recharge_channel_label("trc20"), callback_data="rchg:select:trc20")])
+        if okpay_available:
+            rows.append([InlineKeyboardButton(recharge_channel_label("okpay"), callback_data="rchg:select:okpay")])
+        rows.append([InlineKeyboardButton("取消充值", callback_data="rchg:close")])
+        return InlineKeyboardMarkup(rows)
+
     if selected_channel == "trc20" and not trc20_available:
         selected_channel = None
     if selected_channel == "okpay" and not okpay_available:
         selected_channel = None
-    if selected_channel is None:
-        if trc20_available and not okpay_available:
-            selected_channel = "trc20"
-        elif okpay_available and not trc20_available:
-            selected_channel = "okpay"
-
-    rows: list[list[InlineKeyboardButton]] = []
-    channel_buttons: list[InlineKeyboardButton] = []
-    if trc20_available:
-        trc20_text = recharge_channel_label("trc20")
-        if selected_channel == "trc20":
-            trc20_text = f"• {trc20_text}"
-        channel_buttons.append(InlineKeyboardButton(trc20_text, callback_data="rchg:select:trc20"))
-    if okpay_available:
-        okpay_text = recharge_channel_label("okpay")
-        if selected_channel == "okpay":
-            okpay_text = f"• {okpay_text}"
-        channel_buttons.append(InlineKeyboardButton(okpay_text, callback_data="rchg:select:okpay"))
-    if channel_buttons:
-        rows.append(channel_buttons)
-
     if selected_channel is not None:
         for amount_row in RECHARGE_PRESET_AMOUNTS:
             rows.append(
                 [
                     InlineKeyboardButton(
-                        f"{amount} USDT",
+                        f"{amount}USDT",
                         callback_data=f"rchg:{selected_channel}:create:{amount}",
                     )
                     for amount in amount_row
                 ]
             )
-        rows.append(
-            [
-                InlineKeyboardButton("🏦 自定义金额", callback_data=f"rchg:{selected_channel}:custom"),
-                premium_inline_button("返回", "rchg:back", BACK_EMOJI_ID),
-            ]
-        )
-    for pending_order in pending_orders:
-        order_id = str(pending_order.get("order_id") or "").strip()
-        channel = str(pending_order.get("channel") or "").strip().lower()
-        if not order_id or not channel:
-            continue
-        if channel == "okpay":
-            pay_url = str(pending_order.get("pay_url") or "").strip()
-            row: list[InlineKeyboardButton] = []
-            if pay_url:
-                row.append(InlineKeyboardButton("继续支付", url=pay_url))
-            row.append(InlineKeyboardButton("我已支付", callback_data=f"rchg:okpay:paid:{order_id}"))
-            rows.append(row)
-            rows.append([InlineKeyboardButton("取消 OKPay 订单", callback_data=f"rchg:okpay:cancel:{order_id}")])
-        elif channel == "trc20":
-            rows.append(
-                [
-                    InlineKeyboardButton("TRC20 已转账", callback_data=f"rchg:trc20:paid:{order_id}"),
-                    InlineKeyboardButton("取消 TRC20 订单", callback_data=f"rchg:trc20:cancel:{order_id}"),
-                ]
-            )
-    rows.append([premium_inline_button(BUTTON_MAIN_MENU, "nav:menu", HOME_EMOJI_ID)])
+        rows.append([InlineKeyboardButton("自定义充值金额", callback_data=f"rchg:{selected_channel}:custom")])
+        rows.append([InlineKeyboardButton("返回支付方式", callback_data="rchg:back")])
+        rows.append([InlineKeyboardButton("取消充值", callback_data="rchg:close")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -2286,31 +2251,46 @@ async def create_trc20_topup_order(update: Update, context: ContextTypes.DEFAULT
         expire_at=expire_at,
     )
 
-    created_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
-    text = build_topup_detail_text(
-        title="TRC20 充值订单",
-        amount_label="付款金额",
-        amount_value=f"{pay_amount_text} USDT",
-        address=recharge_address,
-        created_at=created_at,
-        expire_at=expire_at,
-        extra_tips=[
-            f"下单金额为 {format_money(requested_amount)} USDT，请按金额后小数点准确转账",
-            "充值后，经过 3 次网络确认，系统会自动到账",
-            "请耐心等待，充值成功后 Bot 会通知您",
-        ],
+    created_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    deadline_time = (datetime.now() + timedelta(minutes=10)).strftime("%Y-%m-%d %H:%M:%S")
+    caption = (
+        "<b>充值详情</b>\n\n"
+        f"唯一收款地址：<code>{html.escape(recharge_address)}</code>\n"
+        "（推荐使用扫码转账更加安全 点击上方地址即可快速复制粘贴）\n\n"
+        f"实际支付金额：<code>{html.escape(pay_amount_text)} USDT</code>\n"
+        "（点击上方金额可快速复制粘贴）\n\n"
+        f"充值订单创建时间：{created_time}\n"
+        f"转账最后截止时间：{deadline_time}\n\n"
+        "❗️请一定按照金额后面小数点转账，否则无法自动到账\n"
+        "❗️付款前请再次核对地址与金额，避免转错"
     )
     keyboard = InlineKeyboardMarkup(
         [
-            [
-                InlineKeyboardButton("TRC20 已转账", callback_data=f"rchg:trc20:paid:{order_id}"),
-            ],
             [InlineKeyboardButton("取消订单", callback_data=f"rchg:trc20:cancel:{order_id}")],
         ]
     )
-    await reply_inline(update, text, keyboard, parse_mode="Markdown")
+    qr_image = await call_blocking(qrcode.make, recharge_address)
+    qr_buffer = io.BytesIO()
+    await call_blocking(qr_image.save, qr_buffer, "PNG")
+    qr_buffer.seek(0)
+    qr_buffer.name = f"{order_id}.png"
+    sent_message = None
     if update.callback_query is not None and update.callback_query.message is not None:
-        await call_blocking(store.set_topup_order_message_id, order_id, update.callback_query.message.message_id)
+        sent_message = await update.callback_query.message.reply_photo(
+            photo=qr_buffer,
+            caption=caption,
+            parse_mode="HTML",
+            reply_markup=keyboard,
+        )
+    elif update.message is not None:
+        sent_message = await update.message.reply_photo(
+            photo=qr_buffer,
+            caption=caption,
+            parse_mode="HTML",
+            reply_markup=keyboard,
+        )
+    if sent_message is not None:
+        await call_blocking(store.set_topup_order_message_id, order_id, sent_message.message_id)
 
 
 async def create_okpay_topup_order(update: Update, context: ContextTypes.DEFAULT_TYPE, amount: float) -> None:
@@ -2366,32 +2346,26 @@ async def create_okpay_topup_order(update: Update, context: ContextTypes.DEFAULT
         expire_at=expire_at,
     )
 
-    created_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
-    text = build_topup_detail_text(
-        title="OKPay 充值订单",
-        amount_label="充值金额",
-        amount_value=f"{format_money(amount)} USDT",
-        pay_hint="使用 OKPay 进行付款，点击下方按钮即可跳转支付",
-        created_at=created_at,
-        expire_at=expire_at,
-        extra_tips=[
-            "请按订单金额完成支付，不要少付或多付",
-            "支付成功后系统会自动补查并到账",
-            "如未及时到账，可点“我已支付”手动补查一次",
-        ],
+    text = (
+        "<b>OKPay充值订单已创建</b>\n\n"
+        f"订单号：<code>{html.escape(order_id)}</code>\n"
+        f"充值金额：<code>{html.escape(format_money(amount))} USDT</code>\n\n"
+        "请点击下面按钮完成支付，支付成功后系统会自动加余额。"
     )
     keyboard = InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton("点击付款", url=pay_url)],
-            [
-                InlineKeyboardButton("我已支付", callback_data=f"rchg:okpay:paid:{order_id}"),
-            ],
+            [InlineKeyboardButton("💳 打开OKPay支付", url=pay_url)],
+            [InlineKeyboardButton("✅ 我已支付", callback_data=f"rchg:okpay:paid:{order_id}")],
             [InlineKeyboardButton("取消订单", callback_data=f"rchg:okpay:cancel:{order_id}")],
         ]
     )
-    await reply_inline(update, text, keyboard)
+    sent_message = None
     if update.callback_query is not None and update.callback_query.message is not None:
-        await call_blocking(store.set_topup_order_message_id, order_id, update.callback_query.message.message_id)
+        sent_message = await update.callback_query.message.reply_text(text, reply_markup=keyboard, parse_mode="HTML")
+    elif update.message is not None:
+        sent_message = await update.message.reply_text(text, reply_markup=keyboard, parse_mode="HTML")
+    if sent_message is not None:
+        await call_blocking(store.set_topup_order_message_id, order_id, sent_message.message_id)
 
 
 async def check_okpay_topup_order(update: Update, context: ContextTypes.DEFAULT_TYPE, order_id: str) -> None:
@@ -2451,6 +2425,12 @@ async def cancel_okpay_topup_order(update: Update, context: ContextTypes.DEFAULT
         await reply_inline(update, "这笔充值订单不属于你。")
         return
     if changed:
+        if update.callback_query is not None and update.callback_query.message is not None:
+            try:
+                await update.callback_query.message.delete()
+                return
+            except BadRequest:
+                pass
         await reply_inline(update, "充值订单已取消。")
         return
     await reply_inline(update, "这笔订单当前不能取消。")
@@ -2503,6 +2483,12 @@ async def cancel_trc20_topup_order(update: Update, context: ContextTypes.DEFAULT
         await reply_inline(update, "这笔充值订单不属于你。")
         return
     if changed:
+        if update.callback_query is not None and update.callback_query.message is not None:
+            try:
+                await update.callback_query.message.delete()
+                return
+            except BadRequest:
+                pass
         await reply_inline(update, "TRC20 充值订单已取消。")
         return
     await reply_inline(update, "这笔订单当前不能取消。")
@@ -2515,13 +2501,8 @@ async def show_recharge(
 ) -> None:
     settings, store, _ = get_services(context)
     user = update.effective_user
-    balance = 0.0
-    pending_orders: list[dict[str, Any]] = []
     if user is not None:
         await call_blocking(store.ensure_user, user.id, user.username or "", user.full_name or "")
-        balance = await call_blocking(store.get_balance, user.id)
-        await call_blocking(store.expire_topup_orders)
-        pending_orders = await call_blocking(store.list_pending_topup_orders, user.id)
     recharge_address = effective_recharge_address(context)
     okpay_config = effective_okpay_settings(context, settings)
     trc20_available = trc20_enabled(recharge_address)
@@ -2532,37 +2513,22 @@ async def show_recharge(
     if selected_channel == "okpay" and not okpay_available:
         selected_channel = None
     if selected_channel is None:
-        if trc20_available and not okpay_available:
-            selected_channel = "trc20"
-        elif okpay_available and not trc20_available:
-            selected_channel = "okpay"
-
-    lines = ["💰 充值中心", "", f"当前余额：{format_money(balance)} USDT"]
-    if trc20_available and selected_channel == "trc20":
-        lines.extend(["", f"TRC20 地址：`{recharge_address}`"])
-    if selected_channel is not None:
-        lines.extend(["", f"当前方式：{recharge_channel_label(selected_channel)}"])
-        lines.extend(["", "请选择充值金额：10 / 50 / 100 / 200 / 500 / 1000 / 2000 / 5000，或点自定义金额。"])
-    elif trc20_available or okpay_available:
-        lines.extend(["", "请先选择充值方式，再选择金额。"])
+        if not trc20_available and not okpay_available:
+            await reply_inline(update, "当前未开启充值方式，请联系管理员")
+            return
+        text = "💳 请选择充值方式"
+        parse_mode = None
+    elif selected_channel == "trc20":
+        text = "<b>请选择下面 USDT(TRC20) 充值金额</b>"
+        parse_mode = "HTML"
     else:
-        lines.extend(["", "当前暂未开启在线充值，请联系客服。"])
-    if pending_orders:
-        lines.append("")
-        lines.append("待支付订单：")
-        for pending_order in pending_orders[:3]:
-            channel = str(pending_order.get("channel") or "").upper()
-            requested_amount = safe_float(pending_order.get("requested_amount") or pending_order.get("amount"))
-            actual_amount = safe_float(pending_order.get("amount"))
-            row = f"- {channel} | {pending_order.get('order_id')} | {format_money(requested_amount)} USDT"
-            if str(pending_order.get("channel") or "") == "trc20":
-                row += f" | 实付 {format_trc20_amount(actual_amount)}"
-            lines.append(row)
+        text = "<b>请选择下面 OKPay 充值金额</b>"
+        parse_mode = "HTML"
     await reply_inline(
         update,
-        "\n".join(lines),
-        build_recharge_keyboard(okpay_config, recharge_address, pending_orders, selected_channel),
-        parse_mode="Markdown",
+        text,
+        build_recharge_keyboard(okpay_config, recharge_address, selected_channel),
+        parse_mode=parse_mode,
     )
 
 
@@ -3668,7 +3634,7 @@ async def search_text_rich(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         try:
             amount = quantize_recharge_amount(float(keyword))
         except ValueError:
-            await update.message.reply_text("请输入充值金额，直接发数字即可，例如：10 或 25.5", reply_markup=MENU_KEYBOARD)
+            await update.message.reply_text("请输入数字", reply_markup=MENU_KEYBOARD)
             return
         if amount <= 0:
             await update.message.reply_text("充值金额必须大于 0。", reply_markup=MENU_KEYBOARD)
@@ -3778,6 +3744,17 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             clear_pending_recharge(context)
             await show_recharge(update, context, None)
             return
+        if parts[1] == "close":
+            clear_pending_purchase(context)
+            clear_pending_recharge(context)
+            if update.callback_query is not None and update.callback_query.message is not None:
+                try:
+                    await update.callback_query.message.delete()
+                    return
+                except BadRequest:
+                    pass
+            await reply_inline(update, "已取消充值。")
+            return
         if parts[1] in {"custom", "create", "paid", "cancel"}:
             legacy_parts = ["rchg", "okpay", *parts[1:]]
             parts = legacy_parts
@@ -3793,10 +3770,8 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         if subaction == "custom":
             clear_pending_purchase(context)
             set_pending_recharge(context, channel)
-            await reply_inline(
-                update,
-                f"当前方式：{recharge_channel_label(channel)}\n请直接发送充值金额，支持整数或两位小数，例如：10 或 100.5",
-            )
+            prompt = "请输入充值金额" if channel == "trc20" else "请输入OKPay充值金额"
+            await reply_inline(update, prompt)
             return
         if subaction == "create" and len(parts) >= 4:
             clear_pending_purchase(context)

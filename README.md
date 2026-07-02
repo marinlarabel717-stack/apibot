@@ -99,7 +99,6 @@ copy .env.example .env
 ```text
 BOT_TOKEN=
 ADMIN_USER_IDS=
-SHOP_TITLE=TG-Matrix 账号商城
 RESTOCK_CHANNEL=@xxx
 CUSTOMER_SERVICE_CONTACT=@id2uu
 RECHARGE_TEXT=请联系管理员充值，或者让管理员使用 /add 给你调整余额。
@@ -150,8 +149,6 @@ API_EXTRA_QUERY_JSON={"uid":"10001"}
 
 ## 可配置项
 
-- `SHOP_TITLE`
-  - 商城标题，显示在主菜单、个人中心、充值页
 - `RECHARGE_TEXT`
   - “我要充值”页面展示的充值说明
 - `SELL_PRICE_ADD`

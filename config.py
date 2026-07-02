@@ -65,7 +65,6 @@ def _parse_price_rules(raw: str, field_name: str) -> list[dict[str, Any]]:
 class Settings:
     bot_token: str
     admin_user_ids: set[int]
-    shop_title: str
     restock_channel: str
     customer_service_contact: str
     recharge_text: str
@@ -112,7 +111,6 @@ def load_settings() -> Settings:
     return Settings(
         bot_token=bot_token,
         admin_user_ids=admin_user_ids,
-        shop_title=os.getenv("SHOP_TITLE", "TG-Matrix 账号商城").strip() or "TG-Matrix 账号商城",
         restock_channel=os.getenv("RESTOCK_CHANNEL", "@xxx").strip() or "@xxx",
         customer_service_contact=os.getenv("CUSTOMER_SERVICE_CONTACT", "@id2uu").strip() or "@id2uu",
         recharge_text=os.getenv(

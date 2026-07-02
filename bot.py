@@ -1421,7 +1421,7 @@ async def show_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     balance = await call_blocking(store.get_balance, user.id)
     rows = await call_blocking(store.list_user_orders, user.id, 5)
     lines = [
-        f"👤 {settings.shop_title} - 个人中心",
+        "👤 个人中心",
         "",
         f"🆔 用户ID：{user.id}",
         f"👤 用户名：@{user.username}" if user.username else "👤 用户名：未设置",
@@ -1465,7 +1465,7 @@ async def show_recharge(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     if okpay_config:
         extra_lines.extend(["", f"OKPAY 配置：{okpay_config}"])
     text = (
-        f"💰 {settings.shop_title} - 充值中心\n\n"
+        "💰 充值中心\n\n"
         f"当前余额：{format_money(balance)} USDT\n\n"
         f"{settings.recharge_text}"
         + "\n".join(extra_lines)

@@ -204,6 +204,20 @@ PRODUCT_LIST_EMOJI_ID = "6334767047213319650"
 PRODUCT_LIST_ALERT_EMOJI_ID = "6323546926188857158"
 SEARCH_RESULTS_EMOJI_ID = "6332075107741075109"
 CLOSE_EMOJI_ID = "6323186419518932861"
+RECHARGE_CHANNEL_TRC20_EMOJI_ID = "6321111297479941978"
+RECHARGE_CHANNEL_OKPAY_EMOJI_ID = "6321339712430676611"
+RECHARGE_METHOD_TITLE_EMOJI_ID = "6334829912649631269"
+RECHARGE_TRC20_TITLE_EMOJI_ID = "6321148483306790585"
+RECHARGE_OKPAY_TITLE_EMOJI_ID = "6323372022235667141"
+RECHARGE_BACK_EMOJI_ID = "5875082500023258804"
+RECHARGE_CANCEL_EMOJI_ID = "5872829476143894491"
+OKPAY_MANUAL_CONFIRM_EMOJI_ID = "5879813604068298387"
+OKPAY_TOPUP_SUCCESS_EMOJI_ID = "5352825278672412291"
+TOPUP_AMOUNT_EMOJI_ID = "5992430854909989581"
+TOPUP_BALANCE_EMOJI_ID = "5985630530111020079"
+TOPUP_ADMIN_USER_ID_EMOJI_ID = "5886412370347036129"
+TOPUP_ADMIN_USERNAME_EMOJI_ID = "5771887475421090729"
+TOPUP_ADMIN_ORDER_ID_EMOJI_ID = "5985433648810171091"
 RECENT_ORDERS_EMOJI_ID = "5278660453419996132"
 ORDER_CREATED_EMOJI_ID = "6323523703300688017"
 CUSTOMER_SERVICE_EMOJI_ID = "6334344946417404152"
@@ -946,6 +960,18 @@ def premium_inline_button(label: str, callback_data: str, custom_emoji_id: str) 
         callback_data=callback_data,
         icon_custom_emoji_id=custom_emoji_id,
     )
+
+
+def premium_inline_button_with_fallback(
+    settings: Settings,
+    label: str,
+    callback_data: str,
+    custom_emoji_id: str,
+    fallback_icon: str,
+) -> InlineKeyboardButton:
+    if settings.inline_button_custom_emoji_enabled:
+        return premium_inline_button(label, callback_data, custom_emoji_id)
+    return InlineKeyboardButton(text=f"{fallback_icon} {label}", callback_data=callback_data)
 
 
 def build_text_with_custom_emoji(parts: list[tuple[str, str | None]], code_spans: list[tuple[int, int]] | None = None) -> tuple[str, tuple[MessageEntity, ...]]:
@@ -1748,27 +1774,31 @@ async def send_okpay_topup_notifications(
     balance = safe_float(user_row.get("balance"))
     username = str(user_row.get("username") or "").strip()
     user_text = (
-        f"✅ OKPay充值到账\n\n"
-        f"金额：{format_money(paid_amount)} {paid_coin}\n"
-        f"当前余额：{format_money(balance)} USDT"
+        f"{tg_custom_emoji(OKPAY_TOPUP_SUCCESS_EMOJI_ID, '✅')} OKPay充值到账\n\n"
+        f"{tg_custom_emoji(TOPUP_AMOUNT_EMOJI_ID, '🪙')} 金额：{format_money(paid_amount)} {paid_coin}\n"
+        f"{tg_custom_emoji(TOPUP_BALANCE_EMOJI_ID, '💬')} 当前余额：{format_money(balance)} USDT"
     )
     try:
-        await application.bot.send_message(chat_id=user_id, text=user_text, reply_markup=MENU_KEYBOARD)
+        await application.bot.send_message(chat_id=user_id, text=user_text, reply_markup=MENU_KEYBOARD, parse_mode="HTML")
     except Exception:
         logger.exception("发送 OKPay 到账通知失败: %s", user_id)
 
-    admin_lines = ["用户充值到账", "", f"用户ID：{user_id}"]
+    admin_lines = [
+        f"{tg_custom_emoji(OKPAY_TOPUP_SUCCESS_EMOJI_ID, '✅')} 用户 okpay 充值到账",
+        "",
+        f"{tg_custom_emoji(TOPUP_ADMIN_USER_ID_EMOJI_ID, '👤')} 用户ID：{user_id}",
+    ]
     if username:
-        admin_lines.append(f"用户名：@{username}")
+        admin_lines.append(f"{tg_custom_emoji(TOPUP_ADMIN_USERNAME_EMOJI_ID, '👤')} 用户名：@{html.escape(username)}")
     admin_text = "\n".join(admin_lines)
     admin_text += (
-        f"\n订单号：{order.get('order_id')}\n"
-        f"金额：{format_money(paid_amount)} {paid_coin}\n"
-        f"余额：{format_money(balance)} USDT"
+        f"\n{tg_custom_emoji(TOPUP_ADMIN_ORDER_ID_EMOJI_ID, '🏷')} 订单号：{html.escape(str(order.get('order_id') or ''))}\n"
+        f"{tg_custom_emoji(TOPUP_AMOUNT_EMOJI_ID, '🪙')} 金额：{format_money(paid_amount)} {paid_coin}\n"
+        f"{tg_custom_emoji(TOPUP_BALANCE_EMOJI_ID, '💬')} 余额：{format_money(balance)} USDT"
     )
     for admin_user_id in sorted(settings.admin_user_ids):
         try:
-            await application.bot.send_message(chat_id=int(admin_user_id), text=admin_text)
+            await application.bot.send_message(chat_id=int(admin_user_id), text=admin_text, parse_mode="HTML")
         except Exception:
             logger.exception("发送管理员到账通知失败: %s", admin_user_id)
 
@@ -2452,10 +2482,18 @@ def normalize_recharge_channel(value: str | None) -> str | None:
 def recharge_channel_label(channel: str) -> str:
     normalized = normalize_recharge_channel(channel)
     if normalized == "trc20":
-        return "USDT 充值 | TRC20"
+        return "USDT充值|TRC20"
     if normalized == "okpay":
-        return "OKPay充值 | 秒到账"
+        return "OKpay充值|秒到账"
     return "充值"
+
+
+def recharge_menu_text(selected_channel: str | None) -> str:
+    if selected_channel == "trc20":
+        return f"<b>{tg_custom_emoji(RECHARGE_TRC20_TITLE_EMOJI_ID, '😃')} 请选择下面 USDT(TRC20) 充值金额</b>"
+    if selected_channel == "okpay":
+        return f"<b>{tg_custom_emoji(RECHARGE_OKPAY_TITLE_EMOJI_ID, '😃')} 请选择下面 OKPay 充值金额</b>"
+    return f"{tg_custom_emoji(RECHARGE_METHOD_TITLE_EMOJI_ID, '💳')} 请选择充值方式"
 
 
 RECHARGE_PRESET_AMOUNTS: tuple[tuple[int, ...], ...] = (
@@ -2466,6 +2504,7 @@ RECHARGE_PRESET_AMOUNTS: tuple[tuple[int, ...], ...] = (
 
 
 def build_recharge_keyboard(
+    settings: Settings,
     okpay_config: dict[str, str],
     recharge_address: str,
     selected_channel: str | None = None,
@@ -2476,10 +2515,40 @@ def build_recharge_keyboard(
     rows: list[list[InlineKeyboardButton]] = []
     if selected_channel is None:
         if trc20_available:
-            rows.append([InlineKeyboardButton(recharge_channel_label("trc20"), callback_data="rchg:select:trc20")])
+            rows.append(
+                [
+                    premium_inline_button_with_fallback(
+                        settings,
+                        recharge_channel_label("trc20"),
+                        "rchg:select:trc20",
+                        RECHARGE_CHANNEL_TRC20_EMOJI_ID,
+                        "😄",
+                    )
+                ]
+            )
         if okpay_available:
-            rows.append([InlineKeyboardButton(recharge_channel_label("okpay"), callback_data="rchg:select:okpay")])
-        rows.append([InlineKeyboardButton("取消充值", callback_data="rchg:close")])
+            rows.append(
+                [
+                    premium_inline_button_with_fallback(
+                        settings,
+                        recharge_channel_label("okpay"),
+                        "rchg:select:okpay",
+                        RECHARGE_CHANNEL_OKPAY_EMOJI_ID,
+                        "😄",
+                    )
+                ]
+            )
+        rows.append(
+            [
+                premium_inline_button_with_fallback(
+                    settings,
+                    "取消充值",
+                    "rchg:close",
+                    RECHARGE_CANCEL_EMOJI_ID,
+                    "🚫",
+                )
+            ]
+        )
         return InlineKeyboardMarkup(rows)
 
     if selected_channel == "trc20" and not trc20_available:
@@ -2498,8 +2567,28 @@ def build_recharge_keyboard(
                 ]
             )
         rows.append([InlineKeyboardButton("自定义充值金额", callback_data=f"rchg:{selected_channel}:custom")])
-        rows.append([InlineKeyboardButton("返回支付方式", callback_data="rchg:back")])
-        rows.append([InlineKeyboardButton("取消充值", callback_data="rchg:close")])
+        rows.append(
+            [
+                premium_inline_button_with_fallback(
+                    settings,
+                    "返回支付方式",
+                    "rchg:back",
+                    RECHARGE_BACK_EMOJI_ID,
+                    "⬅️",
+                )
+            ]
+        )
+        rows.append(
+            [
+                premium_inline_button_with_fallback(
+                    settings,
+                    "取消充值",
+                    "rchg:close",
+                    RECHARGE_CANCEL_EMOJI_ID,
+                    "🚫",
+                )
+            ]
+        )
     return InlineKeyboardMarkup(rows)
 
 
@@ -2666,8 +2755,8 @@ async def create_okpay_topup_order(update: Update, context: ContextTypes.DEFAULT
         f"订单号：<code>{html.escape(order_id)}</code>\n"
         f"充值金额：<code>{html.escape(format_money(amount))} USDT</code>\n\n"
         "请点击下面按钮完成支付。\n"
-        "支付完成后，请回到机器人点击“我已支付”手动核验真实到账；"
-        "未点击前不会自动到账。"
+        f"{tg_custom_emoji(OKPAY_MANUAL_CONFIRM_EMOJI_ID, '❗️')} "
+        "支付完成后，请回到机器人点击“我已支付”手动核验真实到账；OKPay 不会自动到账。"
     )
     keyboard = InlineKeyboardMarkup(
         [
@@ -2729,7 +2818,7 @@ async def check_okpay_topup_order(update: Update, context: ContextTypes.DEFAULT_
     if status in {"expired", "canceled"}:
         await reply_inline(update, "这笔订单已经失效，请重新创建新的充值订单。")
         return
-    await notify_inline(update, "暂时还没有查到支付成功，请支付后再点一次“我已支付”。")
+    await notify_inline(update, "❗️ 暂时还没有查到支付成功，请支付后再点一次“我已支付”。")
 
 
 async def cancel_okpay_topup_order(update: Update, context: ContextTypes.DEFAULT_TYPE, order_id: str) -> None:
@@ -2836,18 +2925,18 @@ async def show_recharge(
         if not trc20_available and not okpay_available:
             await reply_inline(update, "当前未开启充值方式，请联系管理员")
             return
-        text = "💳 请选择充值方式"
-        parse_mode = None
+        text = recharge_menu_text(None)
+        parse_mode = "HTML"
     elif selected_channel == "trc20":
-        text = "<b>请选择下面 USDT(TRC20) 充值金额</b>"
+        text = recharge_menu_text("trc20")
         parse_mode = "HTML"
     else:
-        text = "<b>请选择下面 OKPay 充值金额</b>"
+        text = recharge_menu_text("okpay")
         parse_mode = "HTML"
     await reply_inline(
         update,
         text,
-        build_recharge_keyboard(okpay_config, recharge_address, selected_channel),
+        build_recharge_keyboard(settings, okpay_config, recharge_address, selected_channel),
         parse_mode=parse_mode,
     )
 

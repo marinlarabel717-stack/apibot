@@ -75,6 +75,7 @@ class Settings:
     okpay_callback_host: str
     okpay_callback_port: int
     okpay_request_timeout: int
+    okpay_create_timeout: int
     okpay_poll_seconds: int
     okpay_poll_limit: int
     okpay_poll_concurrency: int
@@ -140,6 +141,7 @@ def load_settings() -> Settings:
         okpay_callback_host=os.getenv("OKPAY_CALLBACK_HOST", "0.0.0.0").strip() or "0.0.0.0",
         okpay_callback_port=int(os.getenv("OKPAY_CALLBACK_PORT", "8088")),
         okpay_request_timeout=max(5, int(os.getenv("OKPAY_REQUEST_TIMEOUT", "12"))),
+        okpay_create_timeout=max(3, int(os.getenv("OKPAY_CREATE_TIMEOUT", "8"))),
         okpay_poll_seconds=max(3, int(os.getenv("OKPAY_POLL_SECONDS", "4"))),
         okpay_poll_limit=max(10, int(os.getenv("OKPAY_POLL_LIMIT", "50"))),
         okpay_poll_concurrency=max(1, int(os.getenv("OKPAY_POLL_CONCURRENCY", "4"))),

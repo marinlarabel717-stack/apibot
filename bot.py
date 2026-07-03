@@ -17,6 +17,7 @@ from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 
 import requests
+from requests.adapters import HTTPAdapter
 try:
     import qrcode
 except ModuleNotFoundError:
@@ -52,6 +53,7 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
 logger = logging.getLogger("apibot")
+OKPAY_HTTP_LOCAL = threading.local()
 
 
 PRODUCTS_PER_PAGE = 8
@@ -545,6 +547,7 @@ def resolve_okpay_settings(runtime_config: dict[str, str], settings: Settings) -
         "callback_host": str(settings.okpay_callback_host or "").strip(),
         "callback_port": str(settings.okpay_callback_port),
         "request_timeout": str(settings.okpay_request_timeout),
+        "create_timeout": str(settings.okpay_create_timeout),
     }
 
 
@@ -742,6 +745,17 @@ def is_delivery_failure(exc: Exception) -> bool:
 
 async def call_blocking(func, *args, **kwargs):
     return await asyncio.to_thread(func, *args, **kwargs)
+
+
+def get_okpay_http_session() -> requests.Session:
+    session = getattr(OKPAY_HTTP_LOCAL, "session", None)
+    if session is None:
+        session = requests.Session()
+        adapter = HTTPAdapter(pool_connections=4, pool_maxsize=8)
+        session.mount("https://", adapter)
+        session.mount("http://", adapter)
+        OKPAY_HTTP_LOCAL.session = session
+    return session
 
 
 def tg_custom_emoji(emoji_id: str, fallback: str) -> str:
@@ -1522,6 +1536,53 @@ async def reply_inline(
         await update.message.reply_text(text, reply_markup=reply_markup, parse_mode=parse_mode, entities=entities)
 
 
+async def send_progress_reply(update: Update, text: str) -> Any | None:
+    if update.callback_query is not None:
+        query = update.callback_query
+        await query.answer()
+        message = query.message
+        if message is not None and not (
+            message.photo
+            or message.video
+            or message.animation
+            or message.document
+        ):
+            try:
+                await message.edit_text(text=text)
+                return message
+            except BadRequest:
+                pass
+        if message is not None:
+            return await message.reply_text(text)
+        return None
+    if update.message is not None:
+        return await update.message.reply_text(text)
+    return None
+
+
+async def update_progress_reply(
+    progress_message: Any | None,
+    text: str,
+    reply_markup: InlineKeyboardMarkup | None = None,
+    parse_mode: str | None = None,
+    entities: tuple[MessageEntity, ...] | None = None,
+) -> bool:
+    if progress_message is None:
+        return False
+    try:
+        await progress_message.edit_text(
+            text=text,
+            reply_markup=reply_markup,
+            parse_mode=parse_mode,
+            entities=entities,
+        )
+        return True
+    except BadRequest as exc:
+        if "message is not modified" in str(exc).lower():
+            return True
+        return False
+
+
 async def send_menu_message(update: Update, text: str) -> None:
     if update.message is not None:
         await update.message.reply_text(text, reply_markup=MENU_KEYBOARD)
@@ -1555,7 +1616,7 @@ def okpay_sign_payload(config: dict[str, str], data: dict[str, Any]) -> dict[str
 def okpay_post(config: dict[str, str], api_name: str, data: dict[str, Any]) -> dict[str, Any]:
     url = str(config.get("api_url") or "https://api.okaypay.me/shop").rstrip("/") + "/" + str(api_name).lstrip("/")
     timeout = max(5, safe_int(config.get("request_timeout"), 12))
-    response = requests.post(url, data=okpay_sign_payload(config, data), timeout=timeout)
+    response = get_okpay_http_session().post(url, data=okpay_sign_payload(config, data), timeout=timeout)
     response.raise_for_status()
     payload = response.json()
     if not isinstance(payload, dict):
@@ -1573,7 +1634,12 @@ def okpay_pay_link(config: dict[str, str], order_id: str, amount: float, bot_use
     }
     if include_callback and config.get("callback_url"):
         data["callback_url"] = str(config.get("callback_url") or "")
-    return okpay_post(config, "payLink", data)
+    request_config = dict(config)
+    request_config["request_timeout"] = safe_int(
+        config.get("create_timeout"),
+        safe_int(config.get("request_timeout"), 12),
+    )
+    return okpay_post(request_config, "payLink", data)
 
 
 def okpay_check_deposit(config: dict[str, str], order_id: str) -> dict[str, Any]:
@@ -2538,25 +2604,37 @@ async def create_okpay_topup_order(update: Update, context: ContextTypes.DEFAULT
         await reply_inline(update, "充值金额必须大于 0。")
         return
 
+    progress_message = await send_progress_reply(update, "正在创建 OKPay 充值订单，请稍等…")
     await call_blocking(store.ensure_user, user.id, user.username or "", user.full_name or "")
     await call_blocking(store.cancel_pending_topup_orders, user.id, "okpay", "recreated")
     order_id = build_topup_order_id("OKPAY", user.id)
     bot_username = str(getattr(context.bot, "username", "") or "").strip().lstrip("@")
+    started_at = datetime.now(timezone.utc)
     try:
         result = await call_blocking(okpay_pay_link, okpay_config, order_id, amount, bot_username, False)
     except Exception as exc:
-        await reply_inline(update, f"创建 OKPay 充值订单失败：{exc}")
+        elapsed_ms = int((datetime.now(timezone.utc) - started_at).total_seconds() * 1000)
+        logger.warning("OKPay payLink failed after %sms for order %s: %s", elapsed_ms, order_id, exc)
+        message = f"创建 OKPay 充值订单失败：{exc}"
+        if not await update_progress_reply(progress_message, message):
+            await reply_inline(update, message)
         return
+    elapsed_ms = int((datetime.now(timezone.utc) - started_at).total_seconds() * 1000)
+    logger.info("OKPay payLink created in %sms for order %s", elapsed_ms, order_id)
 
     if isinstance(result, dict) and str(result.get("status") or "").lower() == "error":
-        await reply_inline(update, f"创建 OKPay 充值订单失败：{result}")
+        message = f"创建 OKPay 充值订单失败：{result}"
+        if not await update_progress_reply(progress_message, message):
+            await reply_inline(update, message)
         return
 
     data = result.get("data") if isinstance(result, dict) and isinstance(result.get("data"), dict) else {}
     pay_url = str(data.get("pay_url") or result.get("pay_url") or "").strip()
     upstream_order_id = str(data.get("order_id") or result.get("order_id") or "").strip()
     if not pay_url:
-        await reply_inline(update, f"创建 OKPay 充值订单失败：{result}")
+        message = f"创建 OKPay 充值订单失败：{result}"
+        if not await update_progress_reply(progress_message, message):
+            await reply_inline(update, message)
         return
 
     expire_at = build_topup_expire_at(10)
@@ -2577,7 +2655,9 @@ async def create_okpay_topup_order(update: Update, context: ContextTypes.DEFAULT
         "<b>OKPay充值订单已创建</b>\n\n"
         f"订单号：<code>{html.escape(order_id)}</code>\n"
         f"充值金额：<code>{html.escape(format_money(amount))} USDT</code>\n\n"
-        "请点击下面按钮完成支付，支付成功后系统会自动加余额。"
+        "请点击下面按钮完成支付。\n"
+        "支付完成后，请回到机器人点击“我已支付”手动核验真实到账；"
+        "未点击前不会自动到账。"
     )
     keyboard = InlineKeyboardMarkup(
         [
@@ -2586,14 +2666,16 @@ async def create_okpay_topup_order(update: Update, context: ContextTypes.DEFAULT
             [InlineKeyboardButton("取消订单", callback_data=f"rchg:okpay:cancel:{order_id}")],
         ]
     )
-    sent_message = None
-    if update.callback_query is not None and update.callback_query.message is not None:
-        sent_message = await update.callback_query.message.reply_text(text, reply_markup=keyboard, parse_mode="HTML")
-    elif update.message is not None:
-        sent_message = await update.message.reply_text(text, reply_markup=keyboard, parse_mode="HTML")
+    sent_message = progress_message
+    if not await update_progress_reply(sent_message, text, reply_markup=keyboard, parse_mode="HTML"):
+        if update.callback_query is not None and update.callback_query.message is not None:
+            sent_message = await update.callback_query.message.reply_text(text, reply_markup=keyboard, parse_mode="HTML")
+        elif update.message is not None:
+            sent_message = await update.message.reply_text(text, reply_markup=keyboard, parse_mode="HTML")
+        else:
+            sent_message = None
     if sent_message is not None:
         await call_blocking(store.set_topup_order_message_id, order_id, sent_message.message_id)
-        await sent_message.reply_text("支付完成后，请回到机器人点击“我已支付”手动核验真实到账；OKPay 不会自动到账。")
 
 
 async def check_okpay_topup_order(update: Update, context: ContextTypes.DEFAULT_TYPE, order_id: str) -> None:

@@ -213,6 +213,9 @@ RECHARGE_BACK_EMOJI_ID = "5875082500023258804"
 RECHARGE_CANCEL_EMOJI_ID = "5872829476143894491"
 OKPAY_MANUAL_CONFIRM_EMOJI_ID = "5879813604068298387"
 OKPAY_TOPUP_SUCCESS_EMOJI_ID = "5352825278672412291"
+OKPAY_OPEN_PAY_BUTTON_EMOJI_ID = "5886455371559604605"
+OKPAY_PAID_BUTTON_EMOJI_ID = "5890944389773005080"
+OKPAY_CANCEL_ORDER_BUTTON_EMOJI_ID = "5872829476143894491"
 TOPUP_AMOUNT_EMOJI_ID = "5992430854909989581"
 TOPUP_BALANCE_EMOJI_ID = "5985630530111020079"
 TOPUP_ADMIN_USER_ID_EMOJI_ID = "5886412370347036129"
@@ -972,6 +975,22 @@ def premium_inline_button_with_fallback(
     if settings.inline_button_custom_emoji_enabled:
         return premium_inline_button(label, callback_data, custom_emoji_id)
     return InlineKeyboardButton(text=f"{fallback_icon} {label}", callback_data=callback_data)
+
+
+def premium_url_button_with_fallback(
+    settings: Settings,
+    label: str,
+    url: str,
+    custom_emoji_id: str,
+    fallback_icon: str,
+) -> InlineKeyboardButton:
+    kwargs: dict[str, Any] = {
+        "text": label if settings.inline_button_custom_emoji_enabled else f"{fallback_icon} {label}",
+        "url": url,
+    }
+    if settings.inline_button_custom_emoji_enabled:
+        kwargs["icon_custom_emoji_id"] = custom_emoji_id
+    return InlineKeyboardButton(**kwargs)
 
 
 def build_text_with_custom_emoji(parts: list[tuple[str, str | None]], code_spans: list[tuple[int, int]] | None = None) -> tuple[str, tuple[MessageEntity, ...]]:
@@ -2786,9 +2805,33 @@ async def create_okpay_topup_order(update: Update, context: ContextTypes.DEFAULT
     )
     keyboard = InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton("💳 打开OKPay支付", url=pay_url)],
-            [InlineKeyboardButton("✅ 我已支付", callback_data=f"rchg:okpay:paid:{order_id}")],
-            [InlineKeyboardButton("取消订单", callback_data=f"rchg:okpay:cancel:{order_id}")],
+            [
+                premium_url_button_with_fallback(
+                    settings,
+                    "打开okpay支付",
+                    pay_url,
+                    OKPAY_OPEN_PAY_BUTTON_EMOJI_ID,
+                    "➡️",
+                )
+            ],
+            [
+                premium_inline_button_with_fallback(
+                    settings,
+                    "我已支付",
+                    f"rchg:okpay:paid:{order_id}",
+                    OKPAY_PAID_BUTTON_EMOJI_ID,
+                    "💬",
+                )
+            ],
+            [
+                premium_inline_button_with_fallback(
+                    settings,
+                    "取消订单",
+                    f"rchg:okpay:cancel:{order_id}",
+                    OKPAY_CANCEL_ORDER_BUTTON_EMOJI_ID,
+                    "🚫",
+                )
+            ],
         ]
     )
     sent_message = progress_message

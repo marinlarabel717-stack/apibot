@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import random
 import sqlite3
 import threading
 from datetime import datetime, timezone
@@ -36,6 +37,16 @@ class Store:
     def _quantize_recharge_amount(value: float) -> float:
         amount = Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
         return float(amount)
+
+    @staticmethod
+    def _is_future_or_equal(timestamp_text: str, now: datetime) -> bool:
+        text = str(timestamp_text or "").strip()
+        if not text:
+            return False
+        try:
+            return datetime.fromisoformat(text.replace("Z", "+00:00")) >= now
+        except ValueError:
+            return False
 
     def _init_db(self) -> None:
         with self._connect() as conn:
@@ -461,6 +472,7 @@ class Store:
         with self._lock, self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             ts = now_iso()
+            now_dt = datetime.now(timezone.utc)
             conn.execute(
                 """
                 UPDATE topup_orders
@@ -474,20 +486,22 @@ class Store:
             )
             rows = conn.execute(
                 """
-                SELECT amount
+                SELECT amount, state, expire_at
                 FROM topup_orders
-                WHERE channel = 'trc20' AND state = 'pending' AND pay_address = ?
+                WHERE channel = 'trc20' AND pay_address = ?
                 """,
                 (recharge_address,),
             ).fetchall()
             used = {
                 self._format_trc20_amount(float(row["amount"]))
                 for row in rows
+                if str(row["state"] or "") in {"pending", "processing"}
+                or self._is_future_or_equal(str(row["expire_at"] or ""), now_dt)
             }
-            start = abs(int(user_id)) % 100
+            steps = list(range(1, 100))
+            random.SystemRandom().shuffle(steps)
             pay_amount: float | None = None
-            for offset in range(1, 100):
-                step = ((start + offset - 1) % 99) + 1
+            for step in steps:
                 candidate = (base + (Decimal(step) / Decimal("10000"))).quantize(Decimal("0.0001"))
                 text = self._format_trc20_amount(float(candidate))
                 if text not in used:

@@ -1539,7 +1539,7 @@ async def reply_inline(
 ) -> None:
     if update.callback_query is not None:
         query = update.callback_query
-        await query.answer()
+        await answer_callback_query_safely(query)
         message = query.message
         if message is not None and (
             message.photo
@@ -1562,12 +1562,41 @@ async def reply_inline(
         await update.message.reply_text(text, reply_markup=reply_markup, parse_mode=parse_mode, entities=entities)
 
 
+def is_callback_query_answer_expired(exc: BadRequest) -> bool:
+    text = str(exc).lower()
+    return any(
+        token in text
+        for token in (
+            "query is too old",
+            "response timeout expired",
+            "query id is invalid",
+        )
+    )
+
+
+async def answer_callback_query_safely(
+    query: Any | None,
+    text: str | None = None,
+    *,
+    show_alert: bool = False,
+) -> bool:
+    if query is None:
+        return False
+    try:
+        await query.answer(text=text, show_alert=show_alert)
+        return True
+    except BadRequest as exc:
+        if is_callback_query_answer_expired(exc):
+            logger.info("跳过已过期的 callback answer: %s", exc)
+            return False
+        raise
+
+
 async def notify_inline(update: Update, text: str, *, show_alert: bool = False) -> None:
     if update.callback_query is not None:
-        try:
-            await update.callback_query.answer(text=text, show_alert=show_alert)
-        except BadRequest:
-            await update.callback_query.answer()
+        answered = await answer_callback_query_safely(update.callback_query, text=text, show_alert=show_alert)
+        if not answered and update.callback_query.message is not None:
+            await update.callback_query.message.reply_text(text)
         return
     await reply_inline(update, text)
 
@@ -1575,7 +1604,7 @@ async def notify_inline(update: Update, text: str, *, show_alert: bool = False) 
 async def send_progress_reply(update: Update, text: str) -> Any | None:
     if update.callback_query is not None:
         query = update.callback_query
-        await query.answer()
+        await answer_callback_query_safely(query)
         message = query.message
         if message is not None and not (
             message.photo
@@ -2100,10 +2129,7 @@ async def should_ignore_for_closed_business(update: Update, context: ContextType
     if user is None or is_admin(settings, user.id) or effective_business_open(context):
         return False
     if update.callback_query is not None:
-        try:
-            await update.callback_query.answer()
-        except BadRequest:
-            pass
+        await answer_callback_query_safely(update.callback_query)
     return True
 
 
@@ -2365,7 +2391,7 @@ async def show_start_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
     text, text_entities, main_menu_inline = await build_main_menu_message(context, user)
     if update.callback_query is not None:
-        await update.callback_query.answer()
+        await answer_callback_query_safely(update.callback_query)
     await refresh_bottom_menu_keyboard(update)
     start_menu_image_path = START_MENU_IMAGE_PATH if START_MENU_IMAGE_PATH.exists() else LEGACY_START_MENU_IMAGE_PATH
     if start_menu_image_path.exists():
@@ -3469,7 +3495,7 @@ async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
     if query is None or user is None:
         return
     if not is_admin(settings, user.id):
-        await query.answer("只有管理员可以操作", show_alert=True)
+        await answer_callback_query_safely(query, "只有管理员可以操作", show_alert=True)
         return
     sub = parts[1] if len(parts) > 1 else ""
     if sub == "home":
@@ -3518,7 +3544,7 @@ async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
     if sub == "sendopt" and len(parts) > 2:
         pending = get_pending_admin_action(context)
         if pending is None:
-            await query.answer("没有待发送内容", show_alert=True)
+            await answer_callback_query_safely(query, "没有待发送内容", show_alert=True)
             return
         if parts[2] == "none":
             await send_admin_preview(update, context, pending.get("payload") or {})
@@ -3549,7 +3575,7 @@ async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
             key, title = mapping[parts[2]]
             await prompt_admin_setting_edit(update, context, key, title)
             return
-    await query.answer("暂不支持这个后台按钮", show_alert=False)
+    await answer_callback_query_safely(query, "暂不支持这个后台按钮", show_alert=False)
 
 
 async def show_orders(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -4333,7 +4359,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         if user is None or product_id <= 0 or quantity <= 0:
             await reply_inline(update, "快捷购买参数不合法。")
             return
-        await query.answer("正在创建订单...")
+        await answer_callback_query_safely(query, "正在创建订单...")
         try:
             await query.edit_message_reply_markup(reply_markup=None)
         except BadRequest:
@@ -4360,7 +4386,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             )
         return
 
-    await query.answer("暂不支持这个按钮", show_alert=False)
+    await answer_callback_query_safely(query, "暂不支持这个按钮", show_alert=False)
 
 
 async def poll_processing_orders(context: ContextTypes.DEFAULT_TYPE) -> None:

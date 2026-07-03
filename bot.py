@@ -216,6 +216,10 @@ OKPAY_TOPUP_SUCCESS_EMOJI_ID = "5352825278672412291"
 OKPAY_OPEN_PAY_BUTTON_EMOJI_ID = "5886455371559604605"
 OKPAY_PAID_BUTTON_EMOJI_ID = "5890944389773005080"
 OKPAY_CANCEL_ORDER_BUTTON_EMOJI_ID = "5872829476143894491"
+OKPAY_ORDER_CREATED_TITLE_EMOJI_ID = "5877465816030515018"
+OKPAY_ORDER_CREATED_PROMPT_EMOJI_ID = "5875008416132370818"
+OKPAY_PAID_CONFIRMED_EMOJI_ID = "5260341314095947411"
+OKPAY_UNPAID_ALERT_EMOJI_ID = "5775887550262546277"
 TOPUP_AMOUNT_EMOJI_ID = "5992430854909989581"
 TOPUP_BALANCE_EMOJI_ID = "5985630530111020079"
 TOPUP_ADMIN_USER_ID_EMOJI_ID = "5886412370347036129"
@@ -1072,7 +1076,8 @@ def build_okpay_order_created_text(order_id: str, amount: float) -> tuple[str, t
             code_spans.append((offset, length))
         offset += length
 
-    add_text("OKPay充值订单已创建\n\n")
+    add_text("🔗", OKPAY_ORDER_CREATED_TITLE_EMOJI_ID)
+    add_text(" OKPay充值订单已创建\n\n")
     add_text("🏷", TOPUP_ADMIN_ORDER_ID_EMOJI_ID)
     add_text(" 订单号：")
     add_text(str(order_id), code=True)
@@ -1080,7 +1085,9 @@ def build_okpay_order_created_text(order_id: str, amount: float) -> tuple[str, t
     add_text("🪙", TOPUP_AMOUNT_EMOJI_ID)
     add_text(" 金额：")
     add_text(f"{format_money(amount)} USDT", code=True)
-    add_text("\n\n请点击下面按钮完成支付。\n")
+    add_text("\n\n")
+    add_text("🔽", OKPAY_ORDER_CREATED_PROMPT_EMOJI_ID)
+    add_text(" 请点击下面按钮完成支付。\n")
     add_text("❗️", OKPAY_MANUAL_CONFIRM_EMOJI_ID)
     add_text(" 支付完成后，请回到机器人点击“我已支付”手动核验真实到账；OKPay 不会自动到账。")
     return build_text_with_custom_emoji(parts, code_spans)
@@ -1089,8 +1096,17 @@ def build_okpay_order_created_text(order_id: str, amount: float) -> tuple[str, t
 def build_okpay_unpaid_notice_text() -> tuple[str, tuple[MessageEntity, ...]]:
     return build_text_with_custom_emoji(
         [
-            ("❗️", OKPAY_MANUAL_CONFIRM_EMOJI_ID),
+            ("❗️", OKPAY_UNPAID_ALERT_EMOJI_ID),
             (" 暂时还没有查到支付成功，请支付后再点一次“我已支付”。", None),
+        ]
+    )
+
+
+def build_okpay_paid_confirmed_text() -> tuple[str, tuple[MessageEntity, ...]]:
+    return build_text_with_custom_emoji(
+        [
+            ("👀", OKPAY_PAID_CONFIRMED_EMOJI_ID),
+            (" OKPay 订单已确认支付，余额已经自动到账。", None),
         ]
     )
 
@@ -2961,6 +2977,12 @@ async def check_okpay_topup_order(update: Update, context: ContextTypes.DEFAULT_
         await notify_inline(update, "OKPay 还没有配置完成，请先联系管理员。", show_alert=True)
         return
 
+    await notify_inline_with_fallback_message(
+        update,
+        "正在检查支付状态...",
+        "正在检查支付状态...",
+    )
+
     try:
         result = await call_blocking(okpay_check_deposit, okpay_config, order_id)
     except Exception as exc:
@@ -2970,7 +2992,8 @@ async def check_okpay_topup_order(update: Update, context: ContextTypes.DEFAULT_
     payload = okpay_normalize_check_result(result)
     ok, status, fresh_order = process_okpay_topup(context.application, payload, source="manual_check")
     if ok and fresh_order is not None:
-        await reply_inline(update, "✅ OKPay 订单已确认支付，余额已经自动到账。")
+        paid_text, paid_entities = build_okpay_paid_confirmed_text()
+        await reply_inline(update, paid_text, entities=paid_entities)
         return
     if status == "already_paid":
         await notify_inline(update, "这笔订单已经到账，无需重复检查。")

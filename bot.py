@@ -1944,6 +1944,8 @@ async def ensure_okpay_callback_server(application: Application) -> None:
     config = resolve_okpay_settings(runtime_config, settings)
     if not okpay_enabled(config):
         return
+    if not str(config.get("callback_url") or "").strip():
+        return
     if application.bot_data.get("okpay_callback_server") is not None:
         return
     try:
@@ -2540,21 +2542,15 @@ async def create_okpay_topup_order(update: Update, context: ContextTypes.DEFAULT
     await call_blocking(store.cancel_pending_topup_orders, user.id, "okpay", "recreated")
     order_id = build_topup_order_id("OKPAY", user.id)
     bot_username = str(getattr(context.bot, "username", "") or "").strip().lstrip("@")
-    include_callback = not okpay_callback_fallback_active(context.application)
     try:
-        result = await call_blocking(okpay_pay_link, okpay_config, order_id, amount, bot_username, include_callback)
+        result = await call_blocking(okpay_pay_link, okpay_config, order_id, amount, bot_username, False)
     except Exception as exc:
         await reply_inline(update, f"创建 OKPay 充值订单失败：{exc}")
         return
 
     if isinstance(result, dict) and str(result.get("status") or "").lower() == "error":
-        msg = str(result.get("msg") or "")
-        if "callback_url" in msg and ("验证失败" in msg or "安全风险" in msg):
-            try:
-                result = await call_blocking(okpay_pay_link, okpay_config, order_id, amount, bot_username, False)
-            except Exception as exc:
-                await reply_inline(update, f"创建 OKPay 充值订单失败：{exc}")
-                return
+        await reply_inline(update, f"创建 OKPay 充值订单失败：{result}")
+        return
 
     data = result.get("data") if isinstance(result, dict) and isinstance(result.get("data"), dict) else {}
     pay_url = str(data.get("pay_url") or result.get("pay_url") or "").strip()
@@ -2597,6 +2593,7 @@ async def create_okpay_topup_order(update: Update, context: ContextTypes.DEFAULT
         sent_message = await update.message.reply_text(text, reply_markup=keyboard, parse_mode="HTML")
     if sent_message is not None:
         await call_blocking(store.set_topup_order_message_id, order_id, sent_message.message_id)
+        await sent_message.reply_text("支付完成后，请回到机器人点击“我已支付”手动核验真实到账；OKPay 不会自动到账。")
 
 
 async def check_okpay_topup_order(update: Update, context: ContextTypes.DEFAULT_TYPE, order_id: str) -> None:
@@ -4269,12 +4266,6 @@ def build_application(settings: Settings) -> Application:
             interval=settings.order_poll_seconds,
             first=settings.order_poll_first_seconds,
             name="poll_processing_orders",
-        )
-        application.job_queue.run_repeating(
-            poll_okpay_topups,
-            interval=settings.okpay_poll_seconds,
-            first=3,
-            name="poll_okpay_topups",
         )
         application.job_queue.run_repeating(
             poll_trc20_topups,

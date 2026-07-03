@@ -1536,6 +1536,16 @@ async def reply_inline(
         await update.message.reply_text(text, reply_markup=reply_markup, parse_mode=parse_mode, entities=entities)
 
 
+async def notify_inline(update: Update, text: str, *, show_alert: bool = False) -> None:
+    if update.callback_query is not None:
+        try:
+            await update.callback_query.answer(text=text, show_alert=show_alert)
+        except BadRequest:
+            await update.callback_query.answer()
+        return
+    await reply_inline(update, text)
+
+
 async def send_progress_reply(update: Update, text: str) -> Any | None:
     if update.callback_query is not None:
         query = update.callback_query
@@ -2699,13 +2709,13 @@ async def check_okpay_topup_order(update: Update, context: ContextTypes.DEFAULT_
 
     okpay_config = effective_okpay_settings(context, settings)
     if not okpay_enabled(okpay_config):
-        await reply_inline(update, "OKPay 还没有配置完成，请先联系管理员。")
+        await notify_inline(update, "OKPay 还没有配置完成，请先联系管理员。", show_alert=True)
         return
 
     try:
         result = await call_blocking(okpay_check_deposit, okpay_config, order_id)
     except Exception as exc:
-        await reply_inline(update, f"查询 OKPay 订单失败：{exc}")
+        await notify_inline(update, f"查询 OKPay 订单失败：{exc}", show_alert=True)
         return
 
     payload = okpay_normalize_check_result(result)
@@ -2714,12 +2724,12 @@ async def check_okpay_topup_order(update: Update, context: ContextTypes.DEFAULT_
         await reply_inline(update, "✅ OKPay 订单已确认支付，余额已经自动到账。")
         return
     if status == "already_paid":
-        await reply_inline(update, "这笔订单已经到账，无需重复检查。")
+        await notify_inline(update, "这笔订单已经到账，无需重复检查。")
         return
     if status in {"expired", "canceled"}:
         await reply_inline(update, "这笔订单已经失效，请重新创建新的充值订单。")
         return
-    await reply_inline(update, "暂时还没有查到支付成功，请支付后再点一次“我已支付”。")
+    await notify_inline(update, "暂时还没有查到支付成功，请支付后再点一次“我已支付”。")
 
 
 async def cancel_okpay_topup_order(update: Update, context: ContextTypes.DEFAULT_TYPE, order_id: str) -> None:

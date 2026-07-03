@@ -222,19 +222,12 @@ class Store:
                 """,
                 (int(user_id), ts, ts),
             )
-            cur = conn.execute(
-                """
-                UPDATE users
-                SET balance = balance - ?, updated_at = ?
-                WHERE user_id = ? AND balance >= ?
-                """,
-                (float(amount), ts, int(user_id), float(amount)),
+            conn.execute(
+                "UPDATE users SET balance = balance - ?, updated_at = ? WHERE user_id = ?",
+                (float(amount), ts, int(user_id)),
             )
             row = conn.execute("SELECT balance FROM users WHERE user_id = ?", (int(user_id),)).fetchone()
             balance = float(row["balance"]) if row else 0.0
-            if cur.rowcount != 1:
-                conn.rollback()
-                return False, balance
             conn.execute(
                 """
                 INSERT INTO wallet_ledger (user_id, amount, direction, reason, ref_id, note, created_at)

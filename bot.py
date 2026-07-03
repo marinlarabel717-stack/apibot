@@ -544,6 +544,7 @@ def resolve_okpay_settings(runtime_config: dict[str, str], settings: Settings) -
         "api_url": str(api_url or "").strip().rstrip("/"),
         "callback_host": str(settings.okpay_callback_host or "").strip(),
         "callback_port": str(settings.okpay_callback_port),
+        "request_timeout": str(settings.okpay_request_timeout),
     }
 
 
@@ -1553,7 +1554,8 @@ def okpay_sign_payload(config: dict[str, str], data: dict[str, Any]) -> dict[str
 
 def okpay_post(config: dict[str, str], api_name: str, data: dict[str, Any]) -> dict[str, Any]:
     url = str(config.get("api_url") or "https://api.okaypay.me/shop").rstrip("/") + "/" + str(api_name).lstrip("/")
-    response = requests.post(url, data=okpay_sign_payload(config, data), timeout=20)
+    timeout = max(5, safe_int(config.get("request_timeout"), 12))
+    response = requests.post(url, data=okpay_sign_payload(config, data), timeout=timeout)
     response.raise_for_status()
     payload = response.json()
     if not isinstance(payload, dict):
@@ -1576,6 +1578,17 @@ def okpay_pay_link(config: dict[str, str], order_id: str, amount: float, bot_use
 
 def okpay_check_deposit(config: dict[str, str], order_id: str) -> dict[str, Any]:
     return okpay_post(config, "checkDeposit", {"unique_id": str(order_id)})
+
+
+def okpay_callback_fallback_active(application: Application) -> bool:
+    until_ts = float(application.bot_data.get("okpay_skip_callback_url_until") or 0.0)
+    return until_ts > datetime.now(timezone.utc).timestamp()
+
+
+def mark_okpay_callback_fallback(application: Application, cooldown_seconds: int = 900) -> None:
+    application.bot_data["okpay_skip_callback_url_until"] = (
+        datetime.now(timezone.utc).timestamp() + max(60, int(cooldown_seconds))
+    )
 
 
 def okpay_build_query(data: dict[str, Any]) -> str:
@@ -1756,6 +1769,54 @@ def process_okpay_topup(application: Application, payload: dict[str, Any], sourc
             )
         return True, status, order
     return status == "already_paid", status, order
+
+
+async def poll_okpay_topups_once(application: Application) -> None:
+    settings = application.bot_data["settings"]
+    store = application.bot_data["store"]
+    runtime_config = application.bot_data.get("runtime_config", {})
+    config = resolve_okpay_settings(runtime_config, settings)
+    if not okpay_enabled(config):
+        return
+
+    await call_blocking(store.expire_topup_orders, "okpay")
+    pending_orders = await call_blocking(
+        store.list_pending_topup_orders,
+        None,
+        "okpay",
+        settings.okpay_poll_limit,
+    )
+    if not pending_orders:
+        return
+
+    semaphore = asyncio.Semaphore(settings.okpay_poll_concurrency)
+
+    async def run_order(order: dict[str, Any]) -> None:
+        order_id = str(order.get("order_id") or "").strip()
+        if not order_id:
+            return
+        async with semaphore:
+            try:
+                result = await call_blocking(okpay_check_deposit, config, order_id)
+            except Exception:
+                logger.exception("OKPay poll check failed: %s", order_id)
+                return
+            payload = okpay_normalize_check_result(result)
+            process_okpay_topup(application, payload, source="poll_check")
+
+    await asyncio.gather(*(run_order(order) for order in pending_orders))
+
+
+async def poll_okpay_topups(context: ContextTypes.DEFAULT_TYPE) -> None:
+    application = getattr(context, "application", None)
+    if application is None:
+        return
+    poll_lock = application.bot_data.setdefault("okpay_poll_lock", asyncio.Lock())
+    if poll_lock.locked():
+        logger.info("OKPay poll is still running, skip this round")
+        return
+    async with poll_lock:
+        await poll_okpay_topups_once(application)
 
 
 async def poll_trc20_topups_once(application: Application) -> None:
@@ -2479,8 +2540,9 @@ async def create_okpay_topup_order(update: Update, context: ContextTypes.DEFAULT
     await call_blocking(store.cancel_pending_topup_orders, user.id, "okpay", "recreated")
     order_id = build_topup_order_id("OKPAY", user.id)
     bot_username = str(getattr(context.bot, "username", "") or "").strip().lstrip("@")
+    include_callback = not okpay_callback_fallback_active(context.application)
     try:
-        result = await call_blocking(okpay_pay_link, okpay_config, order_id, amount, bot_username, True)
+        result = await call_blocking(okpay_pay_link, okpay_config, order_id, amount, bot_username, include_callback)
     except Exception as exc:
         await reply_inline(update, f"创建 OKPay 充值订单失败：{exc}")
         return
@@ -4207,6 +4269,12 @@ def build_application(settings: Settings) -> Application:
             interval=settings.order_poll_seconds,
             first=settings.order_poll_first_seconds,
             name="poll_processing_orders",
+        )
+        application.job_queue.run_repeating(
+            poll_okpay_topups,
+            interval=settings.okpay_poll_seconds,
+            first=3,
+            name="poll_okpay_topups",
         )
         application.job_queue.run_repeating(
             poll_trc20_topups,

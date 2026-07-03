@@ -74,6 +74,10 @@ class Settings:
     okpay_api_url: str
     okpay_callback_host: str
     okpay_callback_port: int
+    okpay_request_timeout: int
+    okpay_poll_seconds: int
+    okpay_poll_limit: int
+    okpay_poll_concurrency: int
     trongrid_api_base: str
     trongrid_api_key: str
     trongrid_api_keys: str
@@ -135,6 +139,10 @@ def load_settings() -> Settings:
         okpay_api_url=os.getenv("OKPAY_API_URL", "https://api.okaypay.me/shop").strip().rstrip("/"),
         okpay_callback_host=os.getenv("OKPAY_CALLBACK_HOST", "0.0.0.0").strip() or "0.0.0.0",
         okpay_callback_port=int(os.getenv("OKPAY_CALLBACK_PORT", "8088")),
+        okpay_request_timeout=max(5, int(os.getenv("OKPAY_REQUEST_TIMEOUT", "12"))),
+        okpay_poll_seconds=max(3, int(os.getenv("OKPAY_POLL_SECONDS", "4"))),
+        okpay_poll_limit=max(10, int(os.getenv("OKPAY_POLL_LIMIT", "50"))),
+        okpay_poll_concurrency=max(1, int(os.getenv("OKPAY_POLL_CONCURRENCY", "4"))),
         trongrid_api_base=os.getenv("TRONGRID_API_BASE", "https://api.trongrid.io/v1").strip().rstrip("/"),
         trongrid_api_key=os.getenv("TRONGRID_API_KEY", "").strip(),
         trongrid_api_keys=os.getenv("TRONGRID_API_KEYS", "").strip(),

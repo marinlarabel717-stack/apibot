@@ -559,17 +559,30 @@ class Store:
             row = conn.execute(query, tuple(params)).fetchone()
             return dict(row) if row else None
 
-    def list_pending_topup_orders(self, user_id: int) -> list[dict[str, Any]]:
+    def list_pending_topup_orders(
+        self,
+        user_id: int | None = None,
+        channel: str = "",
+        limit: int = 0,
+    ) -> list[dict[str, Any]]:
+        query = """
+            SELECT *
+            FROM topup_orders
+            WHERE state = 'pending'
+        """
+        params: list[Any] = []
+        if user_id is not None:
+            query += " AND user_id = ?"
+            params.append(int(user_id))
+        if channel:
+            query += " AND channel = ?"
+            params.append(str(channel))
+        query += " ORDER BY created_at DESC"
+        if limit > 0:
+            query += " LIMIT ?"
+            params.append(int(limit))
         with self._connect() as conn:
-            rows = conn.execute(
-                """
-                SELECT *
-                FROM topup_orders
-                WHERE user_id = ? AND state = 'pending'
-                ORDER BY created_at DESC
-                """,
-                (int(user_id),),
-            ).fetchall()
+            rows = conn.execute(query, tuple(params)).fetchall()
             return [dict(row) for row in rows]
 
     def list_pending_topup_amounts(self, channel: str, pay_address: str = "") -> list[float]:

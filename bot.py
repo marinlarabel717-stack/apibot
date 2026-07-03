@@ -23,7 +23,6 @@ except ModuleNotFoundError:
     qrcode = None
 
 from telegram import (
-    CopyTextButton,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     KeyboardButton,
@@ -175,6 +174,7 @@ RUNTIME_KEY_OKPAY_CALLBACK_URL = "okpay_callback_url"
 RUNTIME_KEY_OKPAY_API_URL = "okpay_api_url"
 RUNTIME_KEY_CUSTOMER_SERVICE = "customer_service_contact"
 RUNTIME_KEY_RESTOCK_CHANNEL = "restock_channel"
+RUNTIME_KEY_BUSINESS_STATUS = "business_status"
 START_MENU_EMOJI_USDT_ID = "6334575946938451719"
 START_MENU_EMOJI_SPENT_ID = "6334456344984159861"
 START_MENU_EMOJI_QUANTITY_ID = "6334602442591700514"
@@ -330,6 +330,18 @@ def effective_restock_channel(context: ContextTypes.DEFAULT_TYPE, settings: Sett
 
 def effective_recharge_address(context: ContextTypes.DEFAULT_TYPE) -> str:
     return runtime_value(context, RUNTIME_KEY_RECHARGE_ADDRESS, "")
+
+
+def business_status_is_open(raw_value: str) -> bool:
+    return str(raw_value or "1").strip().lower() not in {"0", "false", "off", "closed", "stop"}
+
+
+def effective_business_open(context: ContextTypes.DEFAULT_TYPE) -> bool:
+    return business_status_is_open(runtime_value(context, RUNTIME_KEY_BUSINESS_STATUS, "1"))
+
+
+def business_status_label(context: ContextTypes.DEFAULT_TYPE) -> str:
+    return "营业中" if effective_business_open(context) else "已停止"
 
 
 def effective_okpay_config(context: ContextTypes.DEFAULT_TYPE) -> str:
@@ -1885,6 +1897,8 @@ async def ensure_okpay_callback_server(application: Application) -> None:
 
 
 async def reply_help(update: Update, context: ContextTypes.DEFAULT_TYPE | None = None) -> None:
+    if context is not None and await should_ignore_for_closed_business(update, context):
+        return
     text = (
         "可用命令:\n"
         "/start - 启动说明\n"
@@ -1909,6 +1923,37 @@ def get_services(context: ContextTypes.DEFAULT_TYPE) -> tuple[Settings, Store, S
     store: Store = context.application.bot_data["store"]
     supplier: SupplierClient = context.application.bot_data["supplier"]
     return settings, store, supplier
+
+
+async def should_ignore_for_closed_business(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    settings, _, _ = get_services(context)
+    user = update.effective_user
+    if user is None or is_admin(settings, user.id) or effective_business_open(context):
+        return False
+    if update.callback_query is not None:
+        try:
+            await update.callback_query.answer()
+        except BadRequest:
+            pass
+    return True
+
+
+async def handle_admin_business_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> bool:
+    settings, store, _ = get_services(context)
+    user = update.effective_user
+    normalized = normalize_search_keyword(text)
+    if user is None or not is_admin(settings, user.id):
+        return False
+    if normalized not in {"开始营业", "停止营业"}:
+        return False
+    value = "1" if normalized == "开始营业" else "0"
+    runtime_config = get_runtime_config(context)
+    await call_blocking(store.set_runtime_setting, RUNTIME_KEY_BUSINESS_STATUS, value, user.id)
+    runtime_config[RUNTIME_KEY_BUSINESS_STATUS] = value
+    await call_blocking(store.log_admin_action, user.id, "business_status", value, normalized)
+    clear_pending_admin_action(context)
+    await send_menu_message(update, normalized)
+    return True
 
 
 def build_main_menu_button(
@@ -2667,6 +2712,8 @@ async def show_customer_service(update: Update, context: ContextTypes.DEFAULT_TY
 
 
 async def show_notice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if await should_ignore_for_closed_business(update, context):
+        return
     text = (
         "📖 购买须知\n\n"
         "1. 首次购买建议先少量测试。\n"
@@ -2679,6 +2726,8 @@ async def show_notice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 
 async def show_language(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if await should_ignore_for_closed_business(update, context):
+        return
     await send_menu_message(update, "🌐 切换语言功能稍后补上，当前默认中文。")
 
 
@@ -2733,6 +2782,7 @@ async def show_admin_home(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         "管理员后台\n\n"
         f"活跃用户：{total_users}\n"
         f"失效用户：{inactive_users}\n"
+        f"营业状态：{business_status_label(context)}\n"
         f"充值地址：{effective_recharge_address(context) or '未配置'}\n"
         f"客服：{effective_customer_service_contact(context, settings)}\n"
         f"补货频道：{effective_restock_channel(context, settings)}"
@@ -2760,12 +2810,6 @@ async def show_admin_users(update: Update, context: ContextTypes.DEFAULT_TYPE, p
         lines.append(f"{start_index + index}. {format_user_created_at(row.get('created_at'))} | {user_label(row)} | {username_text}")
         lines.append(f"ID: <code>{user_id}</code> | 余额: {balance_text} USDT")
         lines.append("")
-        buttons.append(
-            [
-                InlineKeyboardButton(f"查看 {user_id}", callback_data=f"adm:user:{user_id}:{page}"),
-                InlineKeyboardButton("复制ID", copy_text=CopyTextButton(str(user_id))),
-            ]
-        )
     if not rows:
         lines.append("暂无活跃用户。")
     nav_row: list[InlineKeyboardButton] = []
@@ -2871,6 +2915,8 @@ async def show_admin_config_page(update: Update, context: ContextTypes.DEFAULT_T
 
 
 async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if await should_ignore_for_closed_business(update, context):
+        return
     await show_admin_home(update, context)
 
 
@@ -3278,26 +3324,36 @@ async def show_orders(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if await should_ignore_for_closed_business(update, context):
+        return
     clear_pending_purchase(context)
     clear_pending_recharge(context)
     await show_start_menu(update, context)
 
 
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if await should_ignore_for_closed_business(update, context):
+        return
     clear_pending_purchase(context)
     clear_pending_recharge(context)
     await show_start_menu(update, context)
 
 
 async def me(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if await should_ignore_for_closed_business(update, context):
+        return
     await show_profile(update, context)
 
 
 async def categories(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if await should_ignore_for_closed_business(update, context):
+        return
     await show_categories(update, context)
 
 
 async def products(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if await should_ignore_for_closed_business(update, context):
+        return
     if update.message is None:
         return
     if not context.args:
@@ -3312,6 +3368,8 @@ async def products(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def product(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if await should_ignore_for_closed_business(update, context):
+        return
     settings, _, supplier = get_services(context)
     if update.message is None:
         return
@@ -3433,6 +3491,8 @@ async def execute_purchase(
 
 
 async def buy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if await should_ignore_for_closed_business(update, context):
+        return
     user = update.effective_user
     if user is None or update.message is None:
         return
@@ -3585,6 +3645,8 @@ def schedule_fast_order_probe(context: ContextTypes.DEFAULT_TYPE, task_id: str) 
 
 
 async def order(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if await should_ignore_for_closed_business(update, context):
+        return
     _, store, supplier = get_services(context)
     if update.message is None:
         return
@@ -3625,10 +3687,14 @@ async def order(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def orders(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if await should_ignore_for_closed_business(update, context):
+        return
     await show_orders(update, context)
 
 
 async def supplier_balance(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if await should_ignore_for_closed_business(update, context):
+        return
     settings, _, supplier = get_services(context)
     user = update.effective_user
     if user is None or update.message is None:
@@ -3652,6 +3718,8 @@ async def supplier_balance(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 
 async def credit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if await should_ignore_for_closed_business(update, context):
+        return
     settings, store, _ = get_services(context)
     user = update.effective_user
     if user is None or update.message is None:
@@ -3720,6 +3788,8 @@ async def credit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def route_menu_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if await should_ignore_for_closed_business(update, context):
+        return
     if update.message is None or not update.message.text:
         return
     text = update.message.text.strip()
@@ -3794,10 +3864,14 @@ async def search_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 
 async def search_text_rich(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    settings, _, supplier = get_services(context)
     if update.message is None or not update.message.text:
         return
     keyword = normalize_search_keyword(update.message.text)
+    if await handle_admin_business_toggle(update, context, keyword):
+        return
+    if await should_ignore_for_closed_business(update, context):
+        return
+    settings, _, supplier = get_services(context)
     if await handle_admin_text_input(update, context, keyword):
         return
     pending_recharge = get_pending_recharge(context)
@@ -3872,6 +3946,8 @@ async def search_text_rich(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 
 async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if await should_ignore_for_closed_business(update, context):
+        return
     settings, _, supplier = get_services(context)
     query = update.callback_query
     if query is None or not query.data:

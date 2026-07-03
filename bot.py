@@ -23,6 +23,7 @@ except ModuleNotFoundError:
     qrcode = None
 
 from telegram import (
+    CopyTextButton,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     KeyboardButton,
@@ -2749,14 +2750,22 @@ async def show_admin_users(update: Update, context: ContextTypes.DEFAULT_TYPE, p
     total_pages = max(1, (total + ADMIN_USERS_PAGE_SIZE - 1) // ADMIN_USERS_PAGE_SIZE)
     page = max(0, min(page, total_pages - 1))
     rows = await call_blocking(store.list_users, ADMIN_USERS_PAGE_SIZE, page * ADMIN_USERS_PAGE_SIZE, True)
-    lines = [f"用户列表 {page + 1}/{total_pages}", ""]
+    lines = [f"用户列表 {page + 1}/{total_pages}", "", "排序：有余额用户按余额从高到低，无余额用户按注册先后。", ""]
     buttons: list[list[InlineKeyboardButton]] = []
     start_index = page * ADMIN_USERS_PAGE_SIZE
     for index, row in enumerate(rows, start=1):
         username_text = f"@{row.get('username')}" if row.get("username") else "未设置用户名"
+        user_id = int(row.get("user_id") or 0)
+        balance_text = format_money(safe_float(row.get("balance")))
         lines.append(f"{start_index + index}. {format_user_created_at(row.get('created_at'))} | {user_label(row)} | {username_text}")
-        lines.append(f"ID: {row.get('user_id')} | 余额: {format_money(safe_float(row.get('balance')))} USDT")
+        lines.append(f"ID: <code>{user_id}</code> | 余额: {balance_text} USDT")
         lines.append("")
+        buttons.append(
+            [
+                InlineKeyboardButton(f"查看 {user_id}", callback_data=f"adm:user:{user_id}:{page}"),
+                InlineKeyboardButton("复制ID", copy_text=CopyTextButton(str(user_id))),
+            ]
+        )
     if not rows:
         lines.append("暂无活跃用户。")
     nav_row: list[InlineKeyboardButton] = []
@@ -2767,7 +2776,7 @@ async def show_admin_users(update: Update, context: ContextTypes.DEFAULT_TYPE, p
         nav_row.append(InlineKeyboardButton("下一页", callback_data=f"adm:users:{page + 1}"))
     buttons.append(nav_row)
     buttons.append([InlineKeyboardButton("返回后台", callback_data="adm:home")])
-    await reply_inline(update, "\n".join(lines).strip(), InlineKeyboardMarkup(buttons))
+    await reply_inline(update, "\n".join(lines).strip(), InlineKeyboardMarkup(buttons), parse_mode="HTML")
 
 
 async def show_admin_user_detail(update: Update, context: ContextTypes.DEFAULT_TYPE, target_user_id: int, page: int = 0) -> None:

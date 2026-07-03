@@ -320,7 +320,11 @@ class Store:
                     SELECT *
                     FROM users
                     WHERE is_active = 1
-                    ORDER BY updated_at DESC, created_at DESC
+                    ORDER BY
+                        CASE WHEN balance > 0 THEN 0 ELSE 1 END ASC,
+                        balance DESC,
+                        created_at ASC,
+                        user_id DESC
                     LIMIT ? OFFSET ?
                     """,
                     (int(limit), int(offset)),
@@ -330,7 +334,11 @@ class Store:
                     """
                     SELECT *
                     FROM users
-                    ORDER BY updated_at DESC, created_at DESC
+                    ORDER BY
+                        CASE WHEN balance > 0 THEN 0 ELSE 1 END ASC,
+                        balance DESC,
+                        created_at ASC,
+                        user_id DESC
                     LIMIT ? OFFSET ?
                     """,
                     (int(limit), int(offset)),

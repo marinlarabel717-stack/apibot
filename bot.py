@@ -1036,6 +1036,105 @@ def build_balance_change_notice_text(action_label: str, amount: float, balance: 
     )
 
 
+def build_recharge_menu_text(selected_channel: str | None) -> tuple[str, tuple[MessageEntity, ...]]:
+    if selected_channel == "trc20":
+        return build_text_with_custom_emoji(
+            [
+                ("😃", RECHARGE_TRC20_TITLE_EMOJI_ID),
+                (" 请选择下面 USDT(TRC20) 充值金额", None),
+            ]
+        )
+    if selected_channel == "okpay":
+        return build_text_with_custom_emoji(
+            [
+                ("😃", RECHARGE_OKPAY_TITLE_EMOJI_ID),
+                (" 请选择下面 OKPay 充值金额", None),
+            ]
+        )
+    return build_text_with_custom_emoji(
+        [
+            ("💳", RECHARGE_METHOD_TITLE_EMOJI_ID),
+            (" 请选择充值方式", None),
+        ]
+    )
+
+
+def build_okpay_order_created_text(order_id: str, amount: float) -> tuple[str, tuple[MessageEntity, ...]]:
+    parts: list[tuple[str, str | None]] = []
+    code_spans: list[tuple[int, int]] = []
+    offset = 0
+
+    def add_text(value: str, custom_emoji_id: str | None = None, code: bool = False) -> None:
+        nonlocal offset
+        parts.append((value, custom_emoji_id))
+        length = len(value)
+        if code:
+            code_spans.append((offset, length))
+        offset += length
+
+    add_text("OKPay充值订单已创建\n\n")
+    add_text("🏷", TOPUP_ADMIN_ORDER_ID_EMOJI_ID)
+    add_text(" 订单号：")
+    add_text(str(order_id), code=True)
+    add_text("\n")
+    add_text("🪙", TOPUP_AMOUNT_EMOJI_ID)
+    add_text(" 金额：")
+    add_text(f"{format_money(amount)} USDT", code=True)
+    add_text("\n\n请点击下面按钮完成支付。\n")
+    add_text("❗️", OKPAY_MANUAL_CONFIRM_EMOJI_ID)
+    add_text(" 支付完成后，请回到机器人点击“我已支付”手动核验真实到账；OKPay 不会自动到账。")
+    return build_text_with_custom_emoji(parts, code_spans)
+
+
+def build_okpay_unpaid_notice_text() -> tuple[str, tuple[MessageEntity, ...]]:
+    return build_text_with_custom_emoji(
+        [
+            ("❗️", OKPAY_MANUAL_CONFIRM_EMOJI_ID),
+            (" 暂时还没有查到支付成功，请支付后再点一次“我已支付”。", None),
+        ]
+    )
+
+
+def build_okpay_topup_user_text(paid_amount: float, paid_coin: str, balance: float) -> tuple[str, tuple[MessageEntity, ...]]:
+    return build_text_with_custom_emoji(
+        [
+            ("✅", OKPAY_TOPUP_SUCCESS_EMOJI_ID),
+            (" OKPay充值到账\n\n", None),
+            ("🪙", TOPUP_AMOUNT_EMOJI_ID),
+            (f" 金额：{format_money(paid_amount)} {paid_coin}\n", None),
+            ("💬", TOPUP_BALANCE_EMOJI_ID),
+            (f" 当前余额：{format_money(balance)} USDT", None),
+        ]
+    )
+
+
+def build_okpay_topup_admin_text(
+    user_id: int,
+    username: str,
+    order_id: str,
+    paid_amount: float,
+    paid_coin: str,
+    balance: float,
+) -> tuple[str, tuple[MessageEntity, ...]]:
+    username_value = f"@{username}" if username and username != "未设置" else "未设置"
+    return build_text_with_custom_emoji(
+        [
+            ("✅", OKPAY_TOPUP_SUCCESS_EMOJI_ID),
+            (" 用户 okpay 充值到账\n\n", None),
+            ("👤", TOPUP_ADMIN_USER_ID_EMOJI_ID),
+            (f" 用户ID：{user_id}\n", None),
+            ("👤", TOPUP_ADMIN_USERNAME_EMOJI_ID),
+            (f" 用户名：{username_value}\n", None),
+            ("🏷", TOPUP_ADMIN_ORDER_ID_EMOJI_ID),
+            (f" 订单号：{order_id}\n", None),
+            ("🪙", TOPUP_AMOUNT_EMOJI_ID),
+            (f" 金额：{format_money(paid_amount)} {paid_coin}\n", None),
+            ("💬", TOPUP_BALANCE_EMOJI_ID),
+            (f" 余额：{format_money(balance)} USDT", None),
+        ]
+    )
+
+
 def build_admin_add_balance_text(target_user_id: int, amount: float, balance: float) -> tuple[str, tuple[MessageEntity, ...]]:
     return build_text_with_custom_emoji(
         [
@@ -1620,6 +1719,22 @@ async def notify_inline(update: Update, text: str, *, show_alert: bool = False) 
     await reply_inline(update, text)
 
 
+async def notify_inline_with_fallback_message(
+    update: Update,
+    toast_text: str,
+    fallback_text: str,
+    *,
+    fallback_entities: tuple[MessageEntity, ...] | None = None,
+    show_alert: bool = False,
+) -> None:
+    if update.callback_query is not None:
+        answered = await answer_callback_query_safely(update.callback_query, text=toast_text, show_alert=show_alert)
+        if not answered and update.callback_query.message is not None:
+            await update.callback_query.message.reply_text(fallback_text, entities=fallback_entities)
+        return
+    await reply_inline(update, fallback_text, entities=fallback_entities)
+
+
 async def send_progress_reply(update: Update, text: str) -> Any | None:
     if update.callback_query is not None:
         query = update.callback_query
@@ -1821,32 +1936,23 @@ async def send_okpay_topup_notifications(
     user_row = await call_blocking(store.get_user, user_id) or {}
     balance = safe_float(user_row.get("balance"))
     username = str(user_row.get("username") or "").strip()
-    user_text = (
-        f"{tg_custom_emoji(OKPAY_TOPUP_SUCCESS_EMOJI_ID, '✅')} OKPay充值到账\n\n"
-        f"{tg_custom_emoji(TOPUP_AMOUNT_EMOJI_ID, '🪙')} 金额：{format_money(paid_amount)} {paid_coin}\n"
-        f"{tg_custom_emoji(TOPUP_BALANCE_EMOJI_ID, '💬')} 当前余额：{format_money(balance)} USDT"
-    )
+    user_text, user_entities = build_okpay_topup_user_text(paid_amount, paid_coin, balance)
     try:
-        await application.bot.send_message(chat_id=user_id, text=user_text, reply_markup=MENU_KEYBOARD, parse_mode="HTML")
+        await application.bot.send_message(chat_id=user_id, text=user_text, entities=user_entities, reply_markup=MENU_KEYBOARD)
     except Exception:
         logger.exception("发送 OKPay 到账通知失败: %s", user_id)
 
-    admin_lines = [
-        f"{tg_custom_emoji(OKPAY_TOPUP_SUCCESS_EMOJI_ID, '✅')} 用户 okpay 充值到账",
-        "",
-        f"{tg_custom_emoji(TOPUP_ADMIN_USER_ID_EMOJI_ID, '👤')} 用户ID：{user_id}",
-    ]
-    if username:
-        admin_lines.append(f"{tg_custom_emoji(TOPUP_ADMIN_USERNAME_EMOJI_ID, '👤')} 用户名：@{html.escape(username)}")
-    admin_text = "\n".join(admin_lines)
-    admin_text += (
-        f"\n{tg_custom_emoji(TOPUP_ADMIN_ORDER_ID_EMOJI_ID, '🏷')} 订单号：{html.escape(str(order.get('order_id') or ''))}\n"
-        f"{tg_custom_emoji(TOPUP_AMOUNT_EMOJI_ID, '🪙')} 金额：{format_money(paid_amount)} {paid_coin}\n"
-        f"{tg_custom_emoji(TOPUP_BALANCE_EMOJI_ID, '💬')} 余额：{format_money(balance)} USDT"
+    admin_text, admin_entities = build_okpay_topup_admin_text(
+        user_id,
+        username or "未设置",
+        str(order.get("order_id") or ""),
+        paid_amount,
+        paid_coin,
+        balance,
     )
     for admin_user_id in sorted(settings.admin_user_ids):
         try:
-            await application.bot.send_message(chat_id=int(admin_user_id), text=admin_text, parse_mode="HTML")
+            await application.bot.send_message(chat_id=int(admin_user_id), text=admin_text, entities=admin_entities)
         except Exception:
             logger.exception("发送管理员到账通知失败: %s", admin_user_id)
 
@@ -2533,14 +2639,6 @@ def recharge_channel_label(channel: str) -> str:
     return "充值"
 
 
-def recharge_menu_text(selected_channel: str | None) -> str:
-    if selected_channel == "trc20":
-        return f"<b>{tg_custom_emoji(RECHARGE_TRC20_TITLE_EMOJI_ID, '😃')} 请选择下面 USDT(TRC20) 充值金额</b>"
-    if selected_channel == "okpay":
-        return f"<b>{tg_custom_emoji(RECHARGE_OKPAY_TITLE_EMOJI_ID, '😃')} 请选择下面 OKPay 充值金额</b>"
-    return f"{tg_custom_emoji(RECHARGE_METHOD_TITLE_EMOJI_ID, '💳')} 请选择充值方式"
-
-
 RECHARGE_PRESET_AMOUNTS: tuple[tuple[int, ...], ...] = (
     (10, 30, 50),
     (100, 200, 500),
@@ -2795,14 +2893,7 @@ async def create_okpay_topup_order(update: Update, context: ContextTypes.DEFAULT
         expire_at=expire_at,
     )
 
-    text = (
-        "<b>OKPay充值订单已创建</b>\n\n"
-        f"订单号：<code>{html.escape(order_id)}</code>\n"
-        f"充值金额：<code>{html.escape(format_money(amount))} USDT</code>\n\n"
-        "请点击下面按钮完成支付。\n"
-        f"{tg_custom_emoji(OKPAY_MANUAL_CONFIRM_EMOJI_ID, '❗️')} "
-        "支付完成后，请回到机器人点击“我已支付”手动核验真实到账；OKPay 不会自动到账。"
-    )
+    text, text_entities = build_okpay_order_created_text(order_id, amount)
     keyboard = InlineKeyboardMarkup(
         [
             [
@@ -2835,11 +2926,11 @@ async def create_okpay_topup_order(update: Update, context: ContextTypes.DEFAULT
         ]
     )
     sent_message = progress_message
-    if not await update_progress_reply(sent_message, text, reply_markup=keyboard, parse_mode="HTML"):
+    if not await update_progress_reply(sent_message, text, reply_markup=keyboard, entities=text_entities):
         if update.callback_query is not None and update.callback_query.message is not None:
-            sent_message = await update.callback_query.message.reply_text(text, reply_markup=keyboard, parse_mode="HTML")
+            sent_message = await update.callback_query.message.reply_text(text, reply_markup=keyboard, entities=text_entities)
         elif update.message is not None:
-            sent_message = await update.message.reply_text(text, reply_markup=keyboard, parse_mode="HTML")
+            sent_message = await update.message.reply_text(text, reply_markup=keyboard, entities=text_entities)
         else:
             sent_message = None
     if sent_message is not None:
@@ -2887,7 +2978,13 @@ async def check_okpay_topup_order(update: Update, context: ContextTypes.DEFAULT_
     if status in {"expired", "canceled"}:
         await reply_inline(update, "这笔订单已经失效，请重新创建新的充值订单。")
         return
-    await notify_inline(update, "❗️ 暂时还没有查到支付成功，请支付后再点一次“我已支付”。")
+    unpaid_text, unpaid_entities = build_okpay_unpaid_notice_text()
+    await notify_inline_with_fallback_message(
+        update,
+        "❗️ 暂时还没有查到支付成功，请支付后再点一次“我已支付”。",
+        unpaid_text,
+        fallback_entities=unpaid_entities,
+    )
 
 
 async def cancel_okpay_topup_order(update: Update, context: ContextTypes.DEFAULT_TYPE, order_id: str) -> None:
@@ -2994,19 +3091,16 @@ async def show_recharge(
         if not trc20_available and not okpay_available:
             await reply_inline(update, "当前未开启充值方式，请联系管理员")
             return
-        text = recharge_menu_text(None)
-        parse_mode = "HTML"
+        text, entities = build_recharge_menu_text(None)
     elif selected_channel == "trc20":
-        text = recharge_menu_text("trc20")
-        parse_mode = "HTML"
+        text, entities = build_recharge_menu_text("trc20")
     else:
-        text = recharge_menu_text("okpay")
-        parse_mode = "HTML"
+        text, entities = build_recharge_menu_text("okpay")
     await reply_inline(
         update,
         text,
         build_recharge_keyboard(settings, okpay_config, recharge_address, selected_channel),
-        parse_mode=parse_mode,
+        entities=entities,
     )
 
 

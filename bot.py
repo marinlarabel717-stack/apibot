@@ -612,14 +612,21 @@ def normalize_trc20_transfer(item: dict[str, Any], recharge_address: str, contra
     event_type = str(item.get("type") or item.get("event_type") or "").strip().lower()
     if any(keyword in event_type for keyword in ("approve", "approval", "authorize", "authorization")):
         return None
+    if event_type and "transfer" not in event_type:
+        return None
     result = str(item.get("result") or item.get("transaction_result") or "").strip().upper()
     if result and result not in {"SUCCESS", "SUCESS"}:
         return None
     token_info = item.get("token_info") if isinstance(item.get("token_info"), dict) else {}
     to_address = str(item.get("to") or item.get("to_address") or "").strip()
     from_address = str(item.get("from") or item.get("from_address") or "").strip()
+    if from_address and from_address == to_address:
+        return None
     token_address = str(token_info.get("address") or item.get("contract_address") or "").strip()
+    token_symbol = str(token_info.get("symbol") or item.get("tokenName") or "USDT").strip().upper()
     if contract_address and token_address and token_address != contract_address:
+        return None
+    if token_symbol and token_symbol != "USDT":
         return None
     if to_address != recharge_address or not from_address:
         return None
@@ -635,7 +642,7 @@ def normalize_trc20_transfer(item: dict[str, Any], recharge_address: str, contra
         "from_address": from_address,
         "amount": float(amount),
         "amount_text": format_trc20_amount(float(amount)),
-        "currency": str(token_info.get("symbol") or "USDT").strip().upper() or "USDT",
+        "currency": token_symbol or "USDT",
         "block_timestamp": safe_int(item.get("block_timestamp") or item.get("block_ts")),
         "event_type": event_type or "transfer",
         "payload": item,
@@ -1779,6 +1786,7 @@ async def poll_trc20_topups_once(application: Application) -> None:
                 "amount": normalized["amount_text"],
                 "currency": normalized["currency"],
                 "block_timestamp": normalized["block_timestamp"],
+                "event_type": normalized["event_type"],
             },
         )
         if status == "paid" and order is not None:
@@ -2329,33 +2337,27 @@ async def create_trc20_topup_order(update: Update, context: ContextTypes.DEFAULT
         return
 
     await call_blocking(store.ensure_user, user.id, user.username or "", user.full_name or "")
-    await call_blocking(store.cancel_pending_topup_orders, user.id, "trc20", "recreated")
     try:
-        pay_amount, pay_amount_text = await call_blocking(
-            allocate_trc20_amount,
-            store,
-            recharge_address,
-            requested_amount,
-            user.id,
+        order = await call_blocking(
+            store.create_trc20_topup_order,
+            order_id=build_topup_order_id("TRC20", user.id),
+            user_id=user.id,
+            recharge_address=recharge_address,
+            requested_amount=requested_amount,
+            currency="USDT",
+            note="trc20",
+            expire_at=build_topup_expire_at(10),
         )
     except Exception as exc:
         await reply_inline(update, f"创建 TRC20 充值订单失败：{exc}")
         return
 
-    order_id = build_topup_order_id("TRC20", user.id)
-    expire_at = build_topup_expire_at(10)
-    await call_blocking(
-        store.create_topup_order,
-        order_id,
-        user.id,
-        "trc20",
-        pay_amount,
-        "USDT",
-        requested_amount=requested_amount,
-        pay_address=recharge_address,
-        note="trc20",
-        expire_at=expire_at,
-    )
+    order_id = str(order.get("order_id") or "")
+    pay_amount = safe_float(order.get("amount"))
+    pay_amount_text = format_trc20_amount(pay_amount)
+    if not order_id or pay_amount <= 0:
+        await reply_inline(update, "创建 TRC20 充值订单失败：订单数据异常")
+        return
 
     created_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     deadline_time = (datetime.now() + timedelta(minutes=10)).strftime("%Y-%m-%d %H:%M:%S")

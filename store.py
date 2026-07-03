@@ -4,6 +4,7 @@ import json
 import sqlite3
 import threading
 from datetime import datetime, timezone
+from decimal import Decimal, ROUND_DOWN
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +24,18 @@ class Store:
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         return conn
+
+    @staticmethod
+    def _format_trc20_amount(value: float) -> str:
+        text = f"{float(value):.4f}"
+        if "." in text:
+            text = text.rstrip("0").rstrip(".")
+        return text
+
+    @staticmethod
+    def _quantize_recharge_amount(value: float) -> float:
+        amount = Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+        return float(amount)
 
     def _init_db(self) -> None:
         with self._connect() as conn:
@@ -428,6 +441,85 @@ class Store:
             row = conn.execute("SELECT * FROM topup_orders WHERE order_id = ?", (str(order_id),)).fetchone()
             return dict(row) if row else {}
 
+    def create_trc20_topup_order(
+        self,
+        *,
+        order_id: str,
+        user_id: int,
+        recharge_address: str,
+        requested_amount: float,
+        currency: str = "USDT",
+        note: str = "trc20",
+        expire_at: str = "",
+    ) -> dict[str, Any]:
+        recharge_address = str(recharge_address or "").strip()
+        base = Decimal(str(self._quantize_recharge_amount(requested_amount)))
+        if base <= 0:
+            raise ValueError("充值金额必须大于 0")
+
+        with self._lock, self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            ts = now_iso()
+            conn.execute(
+                """
+                UPDATE topup_orders
+                SET state = 'canceled',
+                    canceled_at = ?,
+                    cancel_reason = 'recreated',
+                    updated_at = ?
+                WHERE user_id = ? AND channel = 'trc20' AND state = 'pending'
+                """,
+                (ts, ts, int(user_id)),
+            )
+            rows = conn.execute(
+                """
+                SELECT amount
+                FROM topup_orders
+                WHERE channel = 'trc20' AND state = 'pending' AND pay_address = ?
+                """,
+                (recharge_address,),
+            ).fetchall()
+            used = {
+                self._format_trc20_amount(float(row["amount"]))
+                for row in rows
+            }
+            start = abs(int(user_id)) % 100
+            pay_amount: float | None = None
+            for offset in range(1, 100):
+                step = ((start + offset - 1) % 99) + 1
+                candidate = (base + (Decimal(step) / Decimal("10000"))).quantize(Decimal("0.0001"))
+                text = self._format_trc20_amount(float(candidate))
+                if text not in used:
+                    pay_amount = float(candidate)
+                    break
+            if pay_amount is None:
+                raise RuntimeError("当前 TRC20 待支付订单较多，请稍后再试")
+
+            conn.execute(
+                """
+                INSERT INTO topup_orders (
+                    order_id, user_id, channel, requested_amount, amount, currency, state, pay_address, pay_url,
+                    txid, upstream_order_id, pay_user_id, callback_payload, note, message_id,
+                    created_at, updated_at, expire_at, paid_at, canceled_at, cancel_reason
+                ) VALUES (?, ?, 'trc20', ?, ?, ?, 'pending', ?, '', '', '', '', '', ?, 0, ?, ?, ?, '', '', '')
+                """,
+                (
+                    str(order_id),
+                    int(user_id),
+                    float(base),
+                    pay_amount,
+                    str(currency or "USDT").upper(),
+                    recharge_address,
+                    str(note or "trc20"),
+                    ts,
+                    ts,
+                    str(expire_at or ""),
+                ),
+            )
+            conn.commit()
+            row = conn.execute("SELECT * FROM topup_orders WHERE order_id = ?", (str(order_id),)).fetchone()
+            return dict(row) if row else {}
+
     def set_topup_order_message_id(self, order_id: str, message_id: int) -> None:
         with self._lock, self._connect() as conn:
             conn.execute(
@@ -690,6 +782,11 @@ class Store:
         paid_currency = str(currency or "USDT").upper()
         if not txid or not to_address or paid_amount <= 0:
             return "invalid_transfer", None
+        event_type = str((payload or {}).get("event_type") or "").strip().lower()
+        if any(keyword in event_type for keyword in ("approve", "approval", "authorize", "authorization")):
+            return "ignored_event", None
+        if event_type and "transfer" not in event_type:
+            return "ignored_event", None
 
         with self._lock, self._connect() as conn:
             existing_tx = conn.execute("SELECT * FROM trc20_transfers WHERE txid = ?", (txid,)).fetchone()

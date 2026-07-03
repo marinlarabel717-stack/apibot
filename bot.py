@@ -609,6 +609,9 @@ def normalize_trc20_transfer(item: dict[str, Any], recharge_address: str, contra
     txid = str(item.get("transaction_id") or item.get("transactionId") or item.get("id") or "").strip()
     if not txid or item.get("confirmed") is False:
         return None
+    event_type = str(item.get("type") or item.get("event_type") or "").strip().lower()
+    if any(keyword in event_type for keyword in ("approve", "approval", "authorize", "authorization")):
+        return None
     result = str(item.get("result") or item.get("transaction_result") or "").strip().upper()
     if result and result not in {"SUCCESS", "SUCESS"}:
         return None
@@ -634,6 +637,7 @@ def normalize_trc20_transfer(item: dict[str, Any], recharge_address: str, contra
         "amount_text": format_trc20_amount(float(amount)),
         "currency": str(token_info.get("symbol") or "USDT").strip().upper() or "USDT",
         "block_timestamp": safe_int(item.get("block_timestamp") or item.get("block_ts")),
+        "event_type": event_type or "transfer",
         "payload": item,
     }
 

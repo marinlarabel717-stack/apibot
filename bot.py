@@ -266,6 +266,31 @@ SEARCH_COUNTRY_KEYWORDS = {
     "澳洲", "澳大利亚", "新西兰",
 }
 
+CATEGORY_NAME_TRANSLATIONS: list[tuple[str, str]] = [
+    ("亚洲地区", "Asia Region"),
+    ("欧美地区", "Western Region"),
+    ("非洲地区", "Africa Region"),
+    ("2-5个月", "2-5 Months"),
+    ("2-5 个月", "2-5 Months"),
+    ("6-12个月", "6-12 Months"),
+    ("6-12 个月", "6-12 Months"),
+    ("1-2年", "1-2 Years"),
+    ("1-2 年", "1-2 Years"),
+    ("3-4年", "3-4 Years"),
+    ("3-4 年", "3-4 Years"),
+    ("5年以上主号", "5+ Years Main Account"),
+    ("7年以上主号", "7+ Years Main Account"),
+    ("5年以上", "5+ Years"),
+    ("7年以上", "7+ Years"),
+    ("会员号（盲盒）", "VIP Account (Blind Box)"),
+    ("会员号(盲盒)", "VIP Account (Blind Box)"),
+    ("会员号", "VIP Account"),
+    ("盲盒", "Blind Box"),
+    ("双向 Spam", "Two-way Spam"),
+    ("双向Spam", "Two-way Spam"),
+    ("靓号", "Fancy Number"),
+]
+
 PENDING_PURCHASE_KEY = "pending_purchase_quantity"
 PENDING_RECHARGE_KEY = "pending_recharge_amount"
 PENDING_ADMIN_KEY = "pending_admin_action"
@@ -1064,6 +1089,34 @@ def resolve_button_icon(settings: Settings, name: str) -> tuple[str, str | None]
                 )
             return fallback_icon, custom_id
     return "📦", None
+
+
+def translate_category_name(name: str, lang: str) -> str:
+    text = str(name or "").strip()
+    if not text or normalize_lang_code(lang) != "en":
+        return text
+    translated = text
+    for source, target in CATEGORY_NAME_TRANSLATIONS:
+        translated = translated.replace(source, target)
+    translated = re.sub(r"Fancy Number(?=[A-Za-z0-9])", "Fancy Number ", translated)
+    return " ".join(translated.split())
+
+
+def localized_catalog_button(
+    settings: Settings,
+    source_name: str,
+    display_label: str,
+    callback_data: str,
+) -> InlineKeyboardButton:
+    fallback_icon, custom_id = resolve_button_icon(settings, source_name)
+    button_text = display_label if custom_id else f"{fallback_icon} {display_label}"
+    kwargs: dict[str, Any] = {
+        "text": button_text,
+        "callback_data": callback_data,
+    }
+    if custom_id:
+        kwargs["icon_custom_emoji_id"] = custom_id
+    return InlineKeyboardButton(**kwargs)
 
 
 def catalog_button(settings: Settings, label: str, callback_data: str) -> InlineKeyboardButton:
@@ -2785,6 +2838,10 @@ def category_name_from_rows(rows: list[dict[str, Any]], category_id: int) -> str
     return f"分类 {category_id}"
 
 
+def localized_category_name_from_rows(rows: list[dict[str, Any]], category_id: int, lang: str) -> str:
+    return translate_category_name(category_name_from_rows(rows, category_id), lang)
+
+
 def build_product_keyboard(
     rows: list[dict[str, Any]],
     category_id: int,
@@ -2913,8 +2970,18 @@ def build_category_keyboard_configured_localized(
     for row in rows:
         category_id = safe_int(row.get("categoryId"))
         stock = safe_int(row.get("totalStock"))
-        name = shorten(str(row.get("categoryName") or f"分类 {category_id}"), 26)
-        buttons.append([catalog_button(settings, ui_text("product_list_stock", lang, name=name, stock=stock), f"cat:{category_id}:0")])
+        source_name = str(row.get("categoryName") or f"分类 {category_id}")
+        display_name = shorten(translate_category_name(source_name, lang), 26)
+        buttons.append(
+            [
+                localized_catalog_button(
+                    settings,
+                    source_name,
+                    ui_text("product_list_stock", lang, name=display_name, stock=stock),
+                    f"cat:{category_id}:0",
+                )
+            ]
+        )
     buttons.append([premium_inline_button(ui_text("button_main_menu", lang), "nav:menu", HOME_EMOJI_ID)])
     buttons.append([premium_inline_button(ui_text("close", lang), "nav:close", CLOSE_EMOJI_ID)])
     return InlineKeyboardMarkup(buttons)
@@ -3175,7 +3242,7 @@ async def show_products(
     if not rows:
         await reply_inline(update, ui_text("no_products_in_category", lang))
         return
-    category_name = category_name_from_rows(categories, category_id)
+    category_name = localized_category_name_from_rows(categories, category_id, lang)
     text, entities, keyboard = render_products_view_configured_localized(settings, category_name, category_id, rows, page, lang)
     await reply_inline(update, text, keyboard, entities=entities)
     return

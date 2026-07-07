@@ -244,6 +244,58 @@ UI_TEXTS.update(
         "category_id_number": {"zh": "category_id 必须是数字", "en": "category_id must be a number."},
         "product_id_number": {"zh": "product_id 必须是数字", "en": "product_id must be a number."},
         "local_order_missing": {"zh": "本地没有这笔订单记录。", "en": "No local record was found for this order."},
+        "trc20_address_unavailable": {"zh": "TRC20 充值地址还没有配置好，请先联系管理员。", "en": "The TRC20 recharge address is not configured yet. Please contact support first."},
+        "okpay_unavailable": {"zh": "OKPay 还没有配置完成，请先联系管理员。", "en": "OKPay is not configured yet. Please contact support first."},
+        "create_trc20_order_failed": {"zh": "创建 TRC20 充值订单失败：{error}", "en": "Failed to create the TRC20 recharge order: {error}"},
+        "create_trc20_order_invalid": {"zh": "创建 TRC20 充值订单失败：订单数据异常", "en": "Failed to create the TRC20 recharge order: invalid order data."},
+        "topup_detail_title": {"zh": "充值详情", "en": "Recharge Details"},
+        "unique_recharge_address": {"zh": "唯一收款地址：", "en": "Unique deposit address:"},
+        "address_copy_hint": {"zh": "（推荐使用扫码转账更加安全 点击上方地址即可快速复制粘贴）", "en": "(Scanning the QR code is recommended. Tap the address above to copy it quickly.)"},
+        "actual_payment_amount": {"zh": "实际支付金额：", "en": "Exact payment amount:"},
+        "amount_copy_hint": {"zh": "（点击上方金额可快速复制粘贴）", "en": "(Tap the amount above to copy it quickly.)"},
+        "recharge_created_time": {"zh": "充值订单创建时间：{time}", "en": "Recharge order created at: {time}"},
+        "transfer_deadline": {"zh": "转账最后截止时间：{time}", "en": "Transfer deadline: {time}"},
+        "transfer_exact_amount_tip": {"zh": "请一定按照金额后面小数点转账，否则无法自动到账", "en": "Please transfer the exact amount including decimals, or it cannot be credited automatically."},
+        "verify_address_tip": {"zh": "付款前请再次核对地址与金额，避免转错", "en": "Please verify the address and amount again before paying to avoid mistakes."},
+        "cancel_order": {"zh": "取消订单", "en": "Cancel Order"},
+        "creating_okpay_order": {"zh": "正在创建 OKPay 充值订单，请稍等…", "en": "Creating the OKPay recharge order, please wait..."},
+        "create_okpay_order_failed": {"zh": "创建 OKPay 充值订单失败：{error}", "en": "Failed to create the OKPay recharge order: {error}"},
+        "open_okpay_pay": {"zh": "打开OKPay支付", "en": "Open OKPay Payment"},
+        "i_paid": {"zh": "我已支付", "en": "I've Paid"},
+        "okpay_order_created_title": {"zh": "OKPay充值订单已创建", "en": "OKPay recharge order created"},
+        "order_id_label": {"zh": "订单号：", "en": "Order ID: "},
+        "amount_label": {"zh": "金额：", "en": "Amount: "},
+        "click_pay_prompt": {"zh": "请点击下面按钮完成支付。", "en": "Please use the button below to complete the payment."},
+        "okpay_manual_confirm_tip": {"zh": "支付完成后，请回到机器人点击“我已支付”手动核验真实到账；OKPay 不会自动到账。", "en": "After paying, return to the bot and tap \"I've Paid\" to confirm manually; OKPay credits are not automatic."},
+        "okpay_unpaid_notice": {"zh": "暂时还没有查到支付成功，请支付后再点一次“我已支付”。", "en": "Payment has not been confirmed yet. Please pay first, then tap \"I've Paid\" again."},
+        "okpay_paid_confirmed": {"zh": "OKPay 订单已确认支付，余额已经自动到账。", "en": "The OKPay payment has been confirmed and your balance has been credited automatically."},
+        "okpay_topup_success": {"zh": "OKPay充值到账", "en": "OKPay Recharge Credited"},
+        "trc20_topup_success": {"zh": "TRC20 充值到账", "en": "TRC20 Recharge Credited"},
+        "txid_label": {"zh": "交易哈希：{txid}", "en": "TxID: {txid}"},
+        "recharge_order_not_found_okpay": {"zh": "未找到对应的 OKPay 充值订单。", "en": "The corresponding OKPay recharge order was not found."},
+        "recharge_order_not_found_trc20": {"zh": "未找到对应的 TRC20 充值订单。", "en": "The corresponding TRC20 recharge order was not found."},
+        "recharge_order_not_found": {"zh": "未找到这笔充值订单。", "en": "This recharge order was not found."},
+        "recharge_order_not_yours": {"zh": "这笔充值订单不属于你。", "en": "This recharge order does not belong to you."},
+        "recharge_order_already_paid": {"zh": "这笔订单已经到账，无需重复检查。", "en": "This order has already been credited. No need to check it again."},
+        "recharge_order_expired": {"zh": "这笔订单已经失效，请重新创建新的充值订单。", "en": "This order has expired. Please create a new recharge order."},
+        "checking_payment_status": {"zh": "正在检查支付状态...", "en": "Checking payment status..."},
+        "okpay_check_failed": {"zh": "查询 OKPay 订单失败：{error}", "en": "Failed to query the OKPay order: {error}"},
+        "recharge_order_canceled": {"zh": "充值订单已取消。", "en": "Recharge order cancelled."},
+        "trc20_order_canceled": {"zh": "TRC20 充值订单已取消。", "en": "TRC20 recharge order cancelled."},
+        "trc20_paid_confirmed": {"zh": "TRC20 充值已确认到账，余额已经自动增加。", "en": "The TRC20 payment has been confirmed and your balance has been credited automatically."},
+        "trc20_transfer_not_detected": {"zh": "暂时还没有检测到这笔 TRC20 转账，请付款后稍等几秒再点一次。", "en": "This TRC20 transfer has not been detected yet. Please wait a few seconds after paying and try again."},
+        "stock_not_enough": {"zh": "库存不足。当前库存 {stock}，你要买 {quantity}", "en": "Insufficient stock. Current stock: {stock}, requested: {quantity}."},
+        "balance_not_enough": {"zh": "余额不足。\n当前余额: {balance} USDT\n本次需要: {total} USDT", "en": "Insufficient balance.\nCurrent balance: {balance} USDT\nRequired for this order: {total} USDT"},
+        "system_error_contact_support": {"zh": "系统错误：请咨询客服", "en": "System error: please contact support."},
+        "balance_refunded": {"zh": "已退款", "en": "Refunded"},
+        "order_processing": {"zh": "订单仍在处理中", "en": "The order is still being processed."},
+        "order_failed_refunded": {"zh": "订单失败，已退款", "en": "Order failed and has been refunded."},
+        "order_failed_auto_refund": {"zh": "订单失败，已自动退款。\n订单号: {task_id}\n退款: {amount} USDT", "en": "Order failed and has been refunded automatically.\nOrder ID: {task_id}\nRefund: {amount} USDT"},
+        "successful_quantity": {"zh": "成功数量: {success}/{quantity}", "en": "Successful quantity: {success}/{quantity}"},
+        "refund_amount_label": {"zh": "已退款: {amount} USDT", "en": "Refunded: {amount} USDT"},
+        "order_completed_summary": {"zh": "订单完成，成功数量 {success}/{quantity}", "en": "Order completed. Successful quantity: {success}/{quantity}"},
+        "order_completed_summary_refund": {"zh": "订单完成，成功数量 {success}/{quantity}，已退款 {amount} USDT", "en": "Order completed. Successful quantity: {success}/{quantity}, refunded {amount} USDT"},
+        "unknown_order_status": {"zh": "未知订单状态: {status}", "en": "Unknown order status: {status}"},
     }
 )
 SEARCH_COUNTRY_KEYWORDS = {
@@ -290,6 +342,127 @@ CATEGORY_NAME_TRANSLATIONS: list[tuple[str, str]] = [
     ("双向Spam", "Two-way Spam"),
     ("靓号", "Fancy Number"),
 ]
+
+COUNTRY_NAME_TRANSLATIONS: list[tuple[str, str]] = [
+    ("印度尼西亚", "Indonesia"),
+    ("沙特阿拉伯", "Saudi Arabia"),
+    ("阿拉伯联合酋长国", "United Arab Emirates"),
+    ("哈萨克斯坦", "Kazakhstan"),
+    ("乌兹别克斯坦", "Uzbekistan"),
+    ("土库曼斯坦", "Turkmenistan"),
+    ("吉尔吉斯斯坦", "Kyrgyzstan"),
+    ("塔吉克斯坦", "Tajikistan"),
+    ("埃塞俄比亚", "Ethiopia"),
+    ("阿尔及利亚", "Algeria"),
+    ("马来西亚", "Malaysia"),
+    ("斯里兰卡", "Sri Lanka"),
+    ("科特迪瓦", "Ivory Coast"),
+    ("委内瑞拉", "Venezuela"),
+    ("哥斯达黎加", "Costa Rica"),
+    ("白俄罗斯", "Belarus"),
+    ("澳大利亚", "Australia"),
+    ("新西兰", "New Zealand"),
+    ("中国", "China"),
+    ("香港", "Hong Kong"),
+    ("澳门", "Macau"),
+    ("台湾", "Taiwan"),
+    ("日本", "Japan"),
+    ("韩国", "South Korea"),
+    ("朝鲜", "North Korea"),
+    ("蒙古", "Mongolia"),
+    ("越南", "Vietnam"),
+    ("泰国", "Thailand"),
+    ("老挝", "Laos"),
+    ("柬埔寨", "Cambodia"),
+    ("缅甸", "Myanmar"),
+    ("新加坡", "Singapore"),
+    ("印尼", "Indonesia"),
+    ("菲律宾", "Philippines"),
+    ("文莱", "Brunei"),
+    ("东帝汶", "Timor-Leste"),
+    ("印度", "India"),
+    ("巴基斯坦", "Pakistan"),
+    ("孟加拉", "Bangladesh"),
+    ("尼泊尔", "Nepal"),
+    ("不丹", "Bhutan"),
+    ("马尔代夫", "Maldives"),
+    ("阿联酋", "UAE"),
+    ("迪拜", "Dubai"),
+    ("沙特", "Saudi Arabia"),
+    ("卡塔尔", "Qatar"),
+    ("科威特", "Kuwait"),
+    ("阿曼", "Oman"),
+    ("巴林", "Bahrain"),
+    ("也门", "Yemen"),
+    ("伊朗", "Iran"),
+    ("伊拉克", "Iraq"),
+    ("叙利亚", "Syria"),
+    ("约旦", "Jordan"),
+    ("黎巴嫩", "Lebanon"),
+    ("以色列", "Israel"),
+    ("巴勒斯坦", "Palestine"),
+    ("土耳其", "Turkey"),
+    ("埃及", "Egypt"),
+    ("摩洛哥", "Morocco"),
+    ("突尼斯", "Tunisia"),
+    ("利比亚", "Libya"),
+    ("苏丹", "Sudan"),
+    ("尼日利亚", "Nigeria"),
+    ("加纳", "Ghana"),
+    ("肯尼亚", "Kenya"),
+    ("乌干达", "Uganda"),
+    ("坦桑尼亚", "Tanzania"),
+    ("卢旺达", "Rwanda"),
+    ("南非", "South Africa"),
+    ("赞比亚", "Zambia"),
+    ("津巴布韦", "Zimbabwe"),
+    ("安哥拉", "Angola"),
+    ("喀麦隆", "Cameroon"),
+    ("塞内加尔", "Senegal"),
+    ("美国", "United States"),
+    ("加拿大", "Canada"),
+    ("墨西哥", "Mexico"),
+    ("巴西", "Brazil"),
+    ("阿根廷", "Argentina"),
+    ("智利", "Chile"),
+    ("哥伦比亚", "Colombia"),
+    ("秘鲁", "Peru"),
+    ("玻利维亚", "Bolivia"),
+    ("巴拉圭", "Paraguay"),
+    ("乌拉圭", "Uruguay"),
+    ("厄瓜多尔", "Ecuador"),
+    ("巴拿马", "Panama"),
+    ("英国", "United Kingdom"),
+    ("爱尔兰", "Ireland"),
+    ("法国", "France"),
+    ("德国", "Germany"),
+    ("意大利", "Italy"),
+    ("西班牙", "Spain"),
+    ("葡萄牙", "Portugal"),
+    ("荷兰", "Netherlands"),
+    ("比利时", "Belgium"),
+    ("瑞士", "Switzerland"),
+    ("奥地利", "Austria"),
+    ("波兰", "Poland"),
+    ("捷克", "Czech Republic"),
+    ("匈牙利", "Hungary"),
+    ("罗马尼亚", "Romania"),
+    ("希腊", "Greece"),
+    ("瑞典", "Sweden"),
+    ("挪威", "Norway"),
+    ("芬兰", "Finland"),
+    ("丹麦", "Denmark"),
+    ("冰岛", "Iceland"),
+    ("乌克兰", "Ukraine"),
+    ("俄罗斯", "Russia"),
+    ("澳洲", "Australia"),
+]
+
+DISPLAY_NAME_TRANSLATIONS: list[tuple[str, str]] = sorted(
+    [*CATEGORY_NAME_TRANSLATIONS, *COUNTRY_NAME_TRANSLATIONS],
+    key=lambda item: len(item[0]),
+    reverse=True,
+)
 
 PENDING_PURCHASE_KEY = "pending_purchase_quantity"
 PENDING_RECHARGE_KEY = "pending_recharge_amount"
@@ -1096,10 +1269,15 @@ def translate_category_name(name: str, lang: str) -> str:
     if not text or normalize_lang_code(lang) != "en":
         return text
     translated = text
-    for source, target in CATEGORY_NAME_TRANSLATIONS:
+    for source, target in DISPLAY_NAME_TRANSLATIONS:
         translated = translated.replace(source, target)
     translated = re.sub(r"Fancy Number(?=[A-Za-z0-9])", "Fancy Number ", translated)
+    translated = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", translated)
     return " ".join(translated.split())
+
+
+def translate_product_name(name: str, lang: str) -> str:
+    return translate_category_name(name, lang)
 
 
 def localized_catalog_button(
@@ -1371,7 +1549,7 @@ def build_recharge_menu_text_localized(selected_channel: str | None, lang: str) 
     )
 
 
-def build_okpay_order_created_text(order_id: str, amount: float) -> tuple[str, tuple[MessageEntity, ...]]:
+def build_okpay_order_created_text(order_id: str, amount: float, lang: str = DEFAULT_LANG) -> tuple[str, tuple[MessageEntity, ...]]:
     parts: list[tuple[str, str | None]] = []
     code_spans: list[tuple[int, int]] = []
     offset = 0
@@ -1385,49 +1563,54 @@ def build_okpay_order_created_text(order_id: str, amount: float) -> tuple[str, t
         offset += length
 
     add_text("🔗", OKPAY_ORDER_CREATED_TITLE_EMOJI_ID)
-    add_text(" OKPay充值订单已创建\n\n")
+    add_text(f" {ui_text('okpay_order_created_title', lang)}\n\n")
     add_text("🏷", TOPUP_ADMIN_ORDER_ID_EMOJI_ID)
-    add_text(" 订单号：")
+    add_text(f" {ui_text('order_id_label', lang)}")
     add_text(str(order_id), code=True)
     add_text("\n")
     add_text("🪙", TOPUP_AMOUNT_EMOJI_ID)
-    add_text(" 金额：")
+    add_text(f" {ui_text('amount_label', lang)}")
     add_text(f"{format_money(amount)} USDT", code=True)
     add_text("\n\n")
     add_text("🔽", OKPAY_ORDER_CREATED_PROMPT_EMOJI_ID)
-    add_text(" 请点击下面按钮完成支付。\n")
+    add_text(f" {ui_text('click_pay_prompt', lang)}\n")
     add_text("❗️", OKPAY_MANUAL_CONFIRM_EMOJI_ID)
-    add_text(" 支付完成后，请回到机器人点击“我已支付”手动核验真实到账；OKPay 不会自动到账。")
+    add_text(f" {ui_text('okpay_manual_confirm_tip', lang)}")
     return build_text_with_custom_emoji(parts, code_spans)
 
 
-def build_okpay_unpaid_notice_text() -> tuple[str, tuple[MessageEntity, ...]]:
+def build_okpay_unpaid_notice_text(lang: str = DEFAULT_LANG) -> tuple[str, tuple[MessageEntity, ...]]:
     return build_text_with_custom_emoji(
         [
             ("❗️", OKPAY_UNPAID_ALERT_EMOJI_ID),
-            (" 暂时还没有查到支付成功，请支付后再点一次“我已支付”。", None),
+            (f" {ui_text('okpay_unpaid_notice', lang)}", None),
         ]
     )
 
 
-def build_okpay_paid_confirmed_text() -> tuple[str, tuple[MessageEntity, ...]]:
+def build_okpay_paid_confirmed_text(lang: str = DEFAULT_LANG) -> tuple[str, tuple[MessageEntity, ...]]:
     return build_text_with_custom_emoji(
         [
             ("👀", OKPAY_PAID_CONFIRMED_EMOJI_ID),
-            (" OKPay 订单已确认支付，余额已经自动到账。", None),
+            (f" {ui_text('okpay_paid_confirmed', lang)}", None),
         ]
     )
 
 
-def build_okpay_topup_user_text(paid_amount: float, paid_coin: str, balance: float) -> tuple[str, tuple[MessageEntity, ...]]:
+def build_okpay_topup_user_text(
+    paid_amount: float,
+    paid_coin: str,
+    balance: float,
+    lang: str = DEFAULT_LANG,
+) -> tuple[str, tuple[MessageEntity, ...]]:
     return build_text_with_custom_emoji(
         [
             ("✅", OKPAY_TOPUP_SUCCESS_EMOJI_ID),
-            (" OKPay充值到账\n\n", None),
+            (f" {ui_text('okpay_topup_success', lang)}\n\n", None),
             ("🪙", TOPUP_AMOUNT_EMOJI_ID),
-            (f" 金额：{format_money(paid_amount)} {paid_coin}\n", None),
+            (f" {ui_text('amount_label', lang)}{format_money(paid_amount)} {paid_coin}\n", None),
             ("💬", TOPUP_BALANCE_EMOJI_ID),
-            (f" 当前余额：{format_money(balance)} USDT", None),
+            (f" {ui_text('balance_current', lang)}: {format_money(balance)} USDT", None),
         ]
     )
 
@@ -1483,6 +1666,23 @@ def build_purchase_refund_error_text(refund_amount: float, balance: float) -> tu
             (f"已退款 {format_money(refund_amount)} USDT\n", None),
             ("😃", BALANCE_NOTICE_CURRENT_EMOJI_ID),
             (f"当前余额: {format_money(balance)} USDT", None),
+        ]
+    )
+
+
+def build_purchase_refund_error_text_localized(
+    refund_amount: float,
+    balance: float,
+    lang: str,
+) -> tuple[str, tuple[MessageEntity, ...]]:
+    return build_text_with_custom_emoji(
+        [
+            ("⚠️", SYSTEM_ERROR_EMOJI_ID),
+            (f"{ui_text('system_error_contact_support', lang)}\n\n", None),
+            ("😃", BALANCE_NOTICE_REFUND_EMOJI_ID),
+            (f"{ui_text('balance_refunded', lang)} {format_money(refund_amount)} USDT\n", None),
+            ("😃", BALANCE_NOTICE_CURRENT_EMOJI_ID),
+            (f"{ui_text('balance_current', lang)}: {format_money(balance)} USDT", None),
         ]
     )
 
@@ -1763,10 +1963,11 @@ def build_search_results_text_localized(
     ]
     for row in rows[:SEARCH_RESULTS_LIMIT]:
         sell_price = price_resolver(row)
+        product_name = translate_product_name(str(row.get("productName") or "商品"), lang)
         parts.extend(
             [
                 ("- ", None),
-                (str(row.get("productName") or "商品"), None),
+                (product_name, None),
                 (f" | {ui_text('stock_short', lang)} ", None),
                 (str(safe_int(row.get("totalStock"))), None),
                 (" | $", None),
@@ -1813,9 +2014,10 @@ def build_product_detail_text_localized(
     stock: int,
     lang: str,
 ) -> tuple[str, tuple[MessageEntity, ...]]:
+    localized_name = translate_product_name(product_name, lang)
     parts: list[tuple[str, str | None]] = [
         ("✅", BUYING_EMOJI_ID),
-        (f" {ui_text('buying_product', lang, product_name=product_name)}", None),
+        (f" {ui_text('buying_product', lang, product_name=localized_name)}", None),
         ("\n\n", None),
         ("💰", PRICE_EMOJI_ID),
         (f" {ui_text('price_label', lang, price=format_money(price))}", None),
@@ -1858,9 +2060,10 @@ def build_purchase_confirm_text_localized(
     lang: str,
 ) -> tuple[str, tuple[MessageEntity, ...]]:
     total_price = unit_price * quantity
+    localized_name = translate_product_name(product_name, lang)
     parts: list[tuple[str, str | None]] = [
         ("🛍", PRODUCT_EMOJI_ID),
-        (f" {ui_text('confirm_product', lang, product_name=product_name)}", None),
+        (f" {ui_text('confirm_product', lang, product_name=localized_name)}", None),
         ("\n", None),
         ("🪙", UNIT_PRICE_EMOJI_ID),
         (f" {ui_text('unit_price_label', lang, price=format_money(unit_price))}", None),
@@ -1928,6 +2131,10 @@ def build_delivery_ready_text(
 
 def order_created_caption() -> str:
     return premium_text_prefix(PACKED_DONE_EMOJI_ID, "✅", "订单已创建，正在检查账号存活并打包，请稍后...")
+
+
+def order_created_caption_localized(lang: str) -> str:
+    return premium_text_prefix(PACKED_DONE_EMOJI_ID, "✅", ui_text("order_created", lang))
 
 
 def delivery_storage_filename(task_id: str, file_url: str) -> str:
@@ -2428,9 +2635,10 @@ async def send_okpay_topup_notifications(
     user_row = await call_blocking(store.get_user, user_id) or {}
     balance = safe_float(user_row.get("balance"))
     username = str(user_row.get("username") or "").strip()
-    user_text, user_entities = build_okpay_topup_user_text(paid_amount, paid_coin, balance)
+    user_lang = normalize_lang_code(str(user_row.get("lang") or DEFAULT_LANG))
+    user_text, user_entities = build_okpay_topup_user_text(paid_amount, paid_coin, balance, user_lang)
     try:
-        await application.bot.send_message(chat_id=user_id, text=user_text, entities=user_entities, reply_markup=MENU_KEYBOARD)
+        await application.bot.send_message(chat_id=user_id, text=user_text, entities=user_entities, reply_markup=build_menu_keyboard(user_lang))
     except Exception:
         logger.exception("发送 OKPay 到账通知失败: %s", user_id)
 
@@ -2462,14 +2670,15 @@ async def send_trc20_topup_notifications(
     user_row = await call_blocking(store.get_user, user_id) or {}
     balance = safe_float(user_row.get("balance"))
     username = str(user_row.get("username") or "").strip()
+    user_lang = normalize_lang_code(str(user_row.get("lang") or DEFAULT_LANG))
     user_text = (
-        "✅ TRC20 充值到账\n\n"
-        f"金额：{format_trc20_amount(paid_amount)} USDT\n"
-        f"交易哈希：`{txid}`\n"
-        f"当前余额：{format_money(balance)} USDT"
+        f"✅ {ui_text('trc20_topup_success', user_lang)}\n\n"
+        f"{ui_text('amount_label', user_lang)}{format_trc20_amount(paid_amount)} USDT\n"
+        f"{ui_text('txid_label', user_lang, txid=txid)}\n"
+        f"{ui_text('balance_current', user_lang)}: {format_money(balance)} USDT"
     )
     try:
-        await application.bot.send_message(chat_id=user_id, text=user_text, reply_markup=MENU_KEYBOARD, parse_mode="Markdown")
+        await application.bot.send_message(chat_id=user_id, text=user_text, reply_markup=build_menu_keyboard(user_lang))
     except Exception:
         logger.exception("发送 TRC20 到账通知失败: %s", user_id)
 
@@ -3009,7 +3218,7 @@ def build_product_keyboard_configured_localized(
     buttons: list[list[InlineKeyboardButton]] = []
     for row in rows:
         product_id = safe_int(row.get("productId"))
-        product_name = shorten(str(row.get("productName") or f"商品 {product_id}"), 28)
+        product_name = shorten(translate_product_name(str(row.get("productName") or f"商品 {product_id}"), lang), 28)
         stock = safe_int(row.get("totalStock"))
         price = resolve_sell_price(settings, row)
         buttons.append(
@@ -3556,17 +3765,18 @@ async def create_trc20_topup_order(update: Update, context: ContextTypes.DEFAULT
     user = update.effective_user
     if user is None:
         return
+    lang = await ensure_user_with_lang(context, user)
     recharge_address = effective_recharge_address(context)
     if not trc20_enabled(recharge_address):
-        await reply_inline(update, "TRC20 充值地址还没有配置好，请先联系管理员。")
+        await reply_inline(update, ui_text("trc20_address_unavailable", lang))
         return
     if amount <= 0:
-        await reply_inline(update, "充值金额必须大于 0。")
+        await reply_inline(update, ui_text("recharge_amount_positive", lang))
         return
 
     requested_amount = quantize_recharge_amount(amount)
     if requested_amount <= 0:
-        await reply_inline(update, "充值金额必须大于 0。")
+        await reply_inline(update, ui_text("recharge_amount_positive", lang))
         return
 
     await call_blocking(store.ensure_user, user.id, user.username or "", user.full_name or "")
@@ -3582,32 +3792,32 @@ async def create_trc20_topup_order(update: Update, context: ContextTypes.DEFAULT
             expire_at=build_topup_expire_at(10),
         )
     except Exception as exc:
-        await reply_inline(update, f"创建 TRC20 充值订单失败：{exc}")
+        await reply_inline(update, ui_text("create_trc20_order_failed", lang, error=exc))
         return
 
     order_id = str(order.get("order_id") or "")
     pay_amount = safe_float(order.get("amount"))
     pay_amount_text = format_trc20_amount(pay_amount)
     if not order_id or pay_amount <= 0:
-        await reply_inline(update, "创建 TRC20 充值订单失败：订单数据异常")
+        await reply_inline(update, ui_text("create_trc20_order_invalid", lang))
         return
 
     created_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     deadline_time = (datetime.now() + timedelta(minutes=10)).strftime("%Y-%m-%d %H:%M:%S")
     caption = (
-        "<b>充值详情</b>\n\n"
-        f"唯一收款地址：<code>{html.escape(recharge_address)}</code>\n"
-        "（推荐使用扫码转账更加安全 点击上方地址即可快速复制粘贴）\n\n"
-        f"实际支付金额：<code>{html.escape(pay_amount_text)} USDT</code>\n"
-        "（点击上方金额可快速复制粘贴）\n\n"
-        f"充值订单创建时间：{created_time}\n"
-        f"转账最后截止时间：{deadline_time}\n\n"
-        "❗️请一定按照金额后面小数点转账，否则无法自动到账\n"
-        "❗️付款前请再次核对地址与金额，避免转错"
+        f"<b>{ui_text('topup_detail_title', lang)}</b>\n\n"
+        f"{ui_text('unique_recharge_address', lang)}<code>{html.escape(recharge_address)}</code>\n"
+        f"{ui_text('address_copy_hint', lang)}\n\n"
+        f"{ui_text('actual_payment_amount', lang)}<code>{html.escape(pay_amount_text)} USDT</code>\n"
+        f"{ui_text('amount_copy_hint', lang)}\n\n"
+        f"{ui_text('recharge_created_time', lang, time=created_time)}\n"
+        f"{ui_text('transfer_deadline', lang, time=deadline_time)}\n\n"
+        f"❗️{ui_text('transfer_exact_amount_tip', lang)}\n"
+        f"❗️{ui_text('verify_address_tip', lang)}"
     )
     keyboard = InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton("取消订单", callback_data=f"rchg:trc20:cancel:{order_id}")],
+            [InlineKeyboardButton(ui_text("cancel_order", lang), callback_data=f"rchg:trc20:cancel:{order_id}")],
         ]
     )
     sent_message = None
@@ -3654,15 +3864,16 @@ async def create_okpay_topup_order(update: Update, context: ContextTypes.DEFAULT
     user = update.effective_user
     if user is None:
         return
+    lang = await ensure_user_with_lang(context, user)
     okpay_config = effective_okpay_settings(context, settings)
     if not okpay_enabled(okpay_config):
-        await reply_inline(update, "OKPay 还没有配置完成，请先联系管理员。")
+        await reply_inline(update, ui_text("okpay_unavailable", lang))
         return
     if amount <= 0:
-        await reply_inline(update, "充值金额必须大于 0。")
+        await reply_inline(update, ui_text("recharge_amount_positive", lang))
         return
 
-    progress_message = await send_progress_reply(update, "正在创建 OKPay 充值订单，请稍等…")
+    progress_message = await send_progress_reply(update, ui_text("creating_okpay_order", lang))
     await call_blocking(store.ensure_user, user.id, user.username or "", user.full_name or "")
     await call_blocking(store.cancel_pending_topup_orders, user.id, "okpay", "recreated")
     order_id = build_topup_order_id("OKPAY", user.id)
@@ -3673,7 +3884,7 @@ async def create_okpay_topup_order(update: Update, context: ContextTypes.DEFAULT
     except Exception as exc:
         elapsed_ms = int((datetime.now(timezone.utc) - started_at).total_seconds() * 1000)
         logger.warning("OKPay payLink failed after %sms for order %s: %s", elapsed_ms, order_id, exc)
-        message = f"创建 OKPay 充值订单失败：{exc}"
+        message = ui_text("create_okpay_order_failed", lang, error=exc)
         if not await update_progress_reply(progress_message, message):
             await reply_inline(update, message)
         return
@@ -3681,7 +3892,7 @@ async def create_okpay_topup_order(update: Update, context: ContextTypes.DEFAULT
     logger.info("OKPay payLink created in %sms for order %s", elapsed_ms, order_id)
 
     if isinstance(result, dict) and str(result.get("status") or "").lower() == "error":
-        message = f"创建 OKPay 充值订单失败：{result}"
+        message = ui_text("create_okpay_order_failed", lang, error=result)
         if not await update_progress_reply(progress_message, message):
             await reply_inline(update, message)
         return
@@ -3690,7 +3901,7 @@ async def create_okpay_topup_order(update: Update, context: ContextTypes.DEFAULT
     pay_url = str(data.get("pay_url") or result.get("pay_url") or "").strip()
     upstream_order_id = str(data.get("order_id") or result.get("order_id") or "").strip()
     if not pay_url:
-        message = f"创建 OKPay 充值订单失败：{result}"
+        message = ui_text("create_okpay_order_failed", lang, error=result)
         if not await update_progress_reply(progress_message, message):
             await reply_inline(update, message)
         return
@@ -3709,13 +3920,13 @@ async def create_okpay_topup_order(update: Update, context: ContextTypes.DEFAULT
         expire_at=expire_at,
     )
 
-    text, text_entities = build_okpay_order_created_text(order_id, amount)
+    text, text_entities = build_okpay_order_created_text(order_id, amount, lang)
     keyboard = InlineKeyboardMarkup(
         [
             [
                 premium_url_button_with_fallback(
                     settings,
-                    "打开okpay支付",
+                    ui_text("open_okpay_pay", lang),
                     pay_url,
                     OKPAY_OPEN_PAY_BUTTON_EMOJI_ID,
                     "➡️",
@@ -3724,7 +3935,7 @@ async def create_okpay_topup_order(update: Update, context: ContextTypes.DEFAULT
             [
                 premium_inline_button_with_fallback(
                     settings,
-                    "我已支付",
+                    ui_text("i_paid", lang),
                     f"rchg:okpay:paid:{order_id}",
                     OKPAY_PAID_BUTTON_EMOJI_ID,
                     "💬",
@@ -3733,7 +3944,7 @@ async def create_okpay_topup_order(update: Update, context: ContextTypes.DEFAULT
             [
                 premium_inline_button_with_fallback(
                     settings,
-                    "取消订单",
+                    ui_text("cancel_order", lang),
                     f"rchg:okpay:cancel:{order_id}",
                     OKPAY_CANCEL_ORDER_BUTTON_EMOJI_ID,
                     "🚫",
@@ -3758,53 +3969,54 @@ async def check_okpay_topup_order(update: Update, context: ContextTypes.DEFAULT_
     user = update.effective_user
     if user is None:
         return
+    lang = await ensure_user_with_lang(context, user)
     order = await call_blocking(store.get_topup_order, order_id)
     if order is None or str(order.get("channel") or "") != "okpay":
-        await reply_inline(update, "未找到对应的 OKPay 充值订单。")
+        await reply_inline(update, ui_text("recharge_order_not_found_okpay", lang))
         return
     if safe_int(order.get("user_id")) != user.id:
-        await reply_inline(update, "这笔充值订单不属于你。")
+        await reply_inline(update, ui_text("recharge_order_not_yours", lang))
         return
     if str(order.get("state") or "") == "paid":
-        await reply_inline(update, "这笔订单已经到账，无需重复检查。")
+        await reply_inline(update, ui_text("recharge_order_already_paid", lang))
         return
     if str(order.get("state") or "") != "pending":
-        await reply_inline(update, "这笔订单已失效，请重新创建新的充值订单。")
+        await reply_inline(update, ui_text("recharge_order_expired", lang))
         return
 
     okpay_config = effective_okpay_settings(context, settings)
     if not okpay_enabled(okpay_config):
-        await notify_inline(update, "OKPay 还没有配置完成，请先联系管理员。", show_alert=True)
+        await notify_inline(update, ui_text("okpay_unavailable", lang), show_alert=True)
         return
 
     await notify_inline_with_fallback_message(
         update,
-        "正在检查支付状态...",
-        "正在检查支付状态...",
+        ui_text("checking_payment_status", lang),
+        ui_text("checking_payment_status", lang),
     )
 
     try:
         result = await call_blocking(okpay_check_deposit, okpay_config, order_id)
     except Exception as exc:
-        await notify_inline(update, f"查询 OKPay 订单失败：{exc}", show_alert=True)
+        await notify_inline(update, ui_text("okpay_check_failed", lang, error=exc), show_alert=True)
         return
 
     payload = okpay_normalize_check_result(result)
     ok, status, fresh_order = process_okpay_topup(context.application, payload, source="manual_check")
     if ok and fresh_order is not None:
-        paid_text, paid_entities = build_okpay_paid_confirmed_text()
+        paid_text, paid_entities = build_okpay_paid_confirmed_text(lang)
         await reply_inline(update, paid_text, entities=paid_entities)
         return
     if status == "already_paid":
-        await notify_inline(update, "这笔订单已经到账，无需重复检查。")
+        await notify_inline(update, ui_text("recharge_order_already_paid", lang))
         return
     if status in {"expired", "canceled"}:
-        await reply_inline(update, "这笔订单已经失效，请重新创建新的充值订单。")
+        await reply_inline(update, ui_text("recharge_order_expired", lang))
         return
-    unpaid_text, unpaid_entities = build_okpay_unpaid_notice_text()
+    unpaid_text, unpaid_entities = build_okpay_unpaid_notice_text(lang)
     await notify_inline_with_fallback_message(
         update,
-        "❗️ 暂时还没有查到支付成功，请支付后再点一次“我已支付”。",
+        f"❗️ {ui_text('okpay_unpaid_notice', lang)}",
         unpaid_text,
         fallback_entities=unpaid_entities,
     )
@@ -3815,12 +4027,13 @@ async def cancel_okpay_topup_order(update: Update, context: ContextTypes.DEFAULT
     user = update.effective_user
     if user is None:
         return
+    lang = await ensure_user_with_lang(context, user)
     changed, order = await call_blocking(store.cancel_topup_order, order_id, user_id=user.id, reason="user_canceled")
     if order is None:
-        await reply_inline(update, "未找到这笔充值订单。")
+        await reply_inline(update, ui_text("recharge_order_not_found", lang))
         return
     if safe_int(order.get("user_id")) != user.id:
-        await reply_inline(update, "这笔充值订单不属于你。")
+        await reply_inline(update, ui_text("recharge_order_not_yours", lang))
         return
     if changed:
         if update.callback_query is not None and update.callback_query.message is not None:
@@ -3829,9 +4042,9 @@ async def cancel_okpay_topup_order(update: Update, context: ContextTypes.DEFAULT
                 return
             except BadRequest:
                 pass
-        await reply_inline(update, "充值订单已取消。")
+        await reply_inline(update, ui_text("recharge_order_canceled", lang))
         return
-    await reply_inline(update, "这笔订单当前不能取消。")
+    await reply_inline(update, ui_text("invalid_recharge_order", lang))
 
 
 async def check_trc20_topup_order(update: Update, context: ContextTypes.DEFAULT_TYPE, order_id: str) -> None:
@@ -3839,33 +4052,34 @@ async def check_trc20_topup_order(update: Update, context: ContextTypes.DEFAULT_
     user = update.effective_user
     if user is None:
         return
+    lang = await ensure_user_with_lang(context, user)
     await call_blocking(store.expire_topup_orders, "trc20")
     order = await call_blocking(store.get_topup_order, order_id)
     if order is None or str(order.get("channel") or "") != "trc20":
-        await reply_inline(update, "未找到对应的 TRC20 充值订单。")
+        await reply_inline(update, ui_text("recharge_order_not_found_trc20", lang))
         return
     if safe_int(order.get("user_id")) != user.id:
-        await reply_inline(update, "这笔充值订单不属于你。")
+        await reply_inline(update, ui_text("recharge_order_not_yours", lang))
         return
     if str(order.get("state") or "") == "paid":
-        await reply_inline(update, "这笔订单已经到账，无需重复检查。")
+        await reply_inline(update, ui_text("recharge_order_already_paid", lang))
         return
     if str(order.get("state") or "") != "pending":
-        await reply_inline(update, "这笔订单已经失效，请重新创建新的充值订单。")
+        await reply_inline(update, ui_text("recharge_order_expired", lang))
         return
 
     await poll_trc20_topups_once(context.application)
     fresh_order = await call_blocking(store.get_topup_order, order_id)
     if fresh_order is None:
-        await reply_inline(update, "未找到对应的 TRC20 充值订单。")
+        await reply_inline(update, ui_text("recharge_order_not_found_trc20", lang))
         return
     if str(fresh_order.get("state") or "") == "paid":
-        await reply_inline(update, "✅ TRC20 充值已确认到账，余额已经自动增加。")
+        await reply_inline(update, f"✅ {ui_text('trc20_paid_confirmed', lang)}")
         return
     if str(fresh_order.get("state") or "") != "pending":
-        await reply_inline(update, "这笔订单已经失效，请重新创建新的充值订单。")
+        await reply_inline(update, ui_text("recharge_order_expired", lang))
         return
-    await reply_inline(update, "暂时还没有检测到这笔 TRC20 转账，请付款后稍等几秒再点一次。")
+    await reply_inline(update, ui_text("trc20_transfer_not_detected", lang))
 
 
 async def cancel_trc20_topup_order(update: Update, context: ContextTypes.DEFAULT_TYPE, order_id: str) -> None:
@@ -3873,12 +4087,13 @@ async def cancel_trc20_topup_order(update: Update, context: ContextTypes.DEFAULT
     user = update.effective_user
     if user is None:
         return
+    lang = await ensure_user_with_lang(context, user)
     changed, order = await call_blocking(store.cancel_topup_order, order_id, user_id=user.id, reason="user_canceled")
     if order is None:
-        await reply_inline(update, "未找到这笔 TRC20 充值订单。")
+        await reply_inline(update, ui_text("recharge_order_not_found_trc20", lang))
         return
     if safe_int(order.get("user_id")) != user.id:
-        await reply_inline(update, "这笔充值订单不属于你。")
+        await reply_inline(update, ui_text("recharge_order_not_yours", lang))
         return
     if changed:
         if update.callback_query is not None and update.callback_query.message is not None:
@@ -3887,9 +4102,9 @@ async def cancel_trc20_topup_order(update: Update, context: ContextTypes.DEFAULT
                 return
             except BadRequest:
                 pass
-        await reply_inline(update, "TRC20 充值订单已取消。")
+        await reply_inline(update, ui_text("trc20_order_canceled", lang))
         return
-    await reply_inline(update, "这笔订单当前不能取消。")
+    await reply_inline(update, ui_text("invalid_recharge_order", lang))
 
 
 async def show_recharge(
@@ -4679,6 +4894,7 @@ async def execute_purchase(
     display_name: str,
     product_id: int,
     quantity: int,
+    lang: str = DEFAULT_LANG,
 ) -> tuple[str, tuple[MessageEntity, ...] | None] | None:
     settings, store, supplier = get_services(context)
     await call_blocking(store.ensure_user, user_id, username, display_name)
@@ -4693,7 +4909,7 @@ async def execute_purchase(
     total_price = unit_price * quantity
 
     if total_stock < quantity:
-        return f"库存不足。当前库存 {total_stock}，你要买 {quantity}", None
+        return ui_text("stock_not_enough", lang, stock=total_stock, quantity=quantity), None
 
     ok, remain = await call_blocking(
         store.debit_balance,
@@ -4704,10 +4920,11 @@ async def execute_purchase(
         f"{product_name} x{quantity}",
     )
     if not ok:
-        return (
-            "余额不足。\n"
-            f"当前余额: {format_money(remain)} USDT\n"
-            f"本次需要: {format_money(total_price)} USDT"
+        return ui_text(
+            "balance_not_enough",
+            lang,
+            balance=format_money(remain),
+            total=format_money(total_price),
         ), None
 
     try:
@@ -4722,7 +4939,7 @@ async def execute_purchase(
             f"下单失败退款: {product_name}",
         )
         logger.warning("上游下单失败，已退款 user_id=%s product_id=%s quantity=%s error=%s", user_id, product_id, quantity, exc)
-        return build_purchase_refund_error_text(total_price, refunded)
+        return build_purchase_refund_error_text_localized(total_price, refunded, lang)
 
     data = buy_payload.get("data") or {}
     task_id = str(data.get("taskId") or "").strip()
@@ -4742,7 +4959,7 @@ async def execute_purchase(
             f"下单失败退款: {product_name}",
         )
         logger.warning("上游创建订单失败，已退款 user_id=%s product_id=%s quantity=%s reason=%s", user_id, product_id, quantity, upstream_reason)
-        return build_purchase_refund_error_text(total_price, refunded)
+        return build_purchase_refund_error_text_localized(total_price, refunded, lang)
 
     await call_blocking(
         store.record_order,
@@ -4806,16 +5023,17 @@ async def finalize_remote_order(
     context: ContextTypes.DEFAULT_TYPE,
     task_id: str,
     notify_user: bool,
+    lang: str = DEFAULT_LANG,
 ) -> tuple[str, str]:
     _, store, supplier = get_services(context)
     order = await call_blocking(store.get_order, task_id)
     if not order:
-        return "missing", "本地没有这笔订单"
+        return "missing", ui_text("local_order_missing", lang)
 
     try:
         payload = await call_blocking(supplier.query_order, task_id)
     except SupplierApiError as exc:
-        return "error", f"查询上游订单失败: {exc}"
+        return "error", f"Querying upstream order failed: {exc}" if lang == "en" else f"查询上游订单失败: {exc}"
 
     data = payload.get("data") or {}
     status = safe_int(data.get("taskStatus"))
@@ -4826,7 +5044,7 @@ async def finalize_remote_order(
     total_price = safe_float(order["total_price"])
 
     if status == 2:
-        return "processing", "订单仍在处理中"
+        return "processing", ui_text("order_processing", lang)
 
     if status == 3:
         final_row, changed = await call_blocking(
@@ -4839,16 +5057,14 @@ async def finalize_remote_order(
             payload,
         )
         if changed and notify_user and final_row:
+            user_row = await call_blocking(store.get_user, int(final_row["user_id"])) or {}
+            notify_lang = normalize_lang_code(str(user_row.get("lang") or DEFAULT_LANG))
             await context.bot.send_message(
                 chat_id=int(final_row["user_id"]),
-                text=(
-                    "订单失败，已自动退款。\n"
-                    f"订单号: {task_id}\n"
-                    f"退款: {format_money(total_price)} USDT"
-                ),
-                reply_markup=MENU_KEYBOARD,
+                text=ui_text("order_failed_auto_refund", notify_lang, task_id=task_id, amount=format_money(total_price)),
+                reply_markup=build_menu_keyboard(notify_lang),
             )
-        return "failed", "订单失败，已退款"
+        return "failed", ui_text("order_failed_refunded", lang)
 
     if status == 1:
         refund_amount = 0.0
@@ -4866,16 +5082,18 @@ async def finalize_remote_order(
             payload,
         )
         if changed and notify_user and final_row:
+            user_row = await call_blocking(store.get_user, int(final_row["user_id"])) or {}
+            notify_lang = normalize_lang_code(str(user_row.get("lang") or DEFAULT_LANG))
             lines = [
-                f"订单号: {task_id}",
-                f"成功数量: {quantity_success}/{quantity}",
+                f"Order ID: {task_id}" if notify_lang == "en" else f"订单号: {task_id}",
+                ui_text("successful_quantity", notify_lang, success=quantity_success, quantity=quantity),
             ]
             if refund_amount > 0:
-                lines.append(f"已退款: {format_money(refund_amount)} USDT")
+                lines.append(ui_text("refund_amount_label", notify_lang, amount=format_money(refund_amount)))
             await context.bot.send_message(
                 chat_id=int(final_row["user_id"]),
                 text="\n".join(lines),
-                reply_markup=MENU_KEYBOARD,
+                reply_markup=build_menu_keyboard(notify_lang),
             )
         if final_row and file_url and not str(final_row.get("delivery_sent_at") or "").strip():
             await deliver_order_file(
@@ -4885,12 +5103,13 @@ async def finalize_remote_order(
                 include_ready_photo=notify_user,
                 notify_failure=notify_user,
             )
-        summary = f"订单完成，成功数量 {quantity_success}/{quantity}"
         if refund_amount > 0:
-            summary += f"，已退款 {format_money(refund_amount)} USDT"
+            summary = ui_text("order_completed_summary_refund", lang, success=quantity_success, quantity=quantity, amount=format_money(refund_amount))
+        else:
+            summary = ui_text("order_completed_summary", lang, success=quantity_success, quantity=quantity)
         return final_state, summary
 
-    return "unknown", f"未知订单状态: {status}"
+    return "unknown", ui_text("unknown_order_status", lang, status=status)
 
 
 async def poll_single_processing_order(
@@ -5304,7 +5523,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         except BadRequest:
             pass
         try:
-            result = await execute_purchase(context, user.id, user.username or "", user.full_name or "", product_id, quantity)
+            result = await execute_purchase(context, user.id, user.username or "", user.full_name or "", product_id, quantity, lang)
         except SupplierApiError as exc:
             if query.message is not None:
                 await query.message.reply_text(ui_text("fetch_product_detail_failed", lang, error=exc), reply_markup=build_menu_keyboard(lang))
@@ -5381,10 +5600,12 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             await show_language(update, context)
             return
         if target == "close":
-            await reply_inline(update, "已关闭。")
+            lang = await ensure_user_with_lang(context, update.effective_user)
+            await reply_inline(update, ui_text("close_done", lang))
             return
 
     if action == "rchg" and len(parts) >= 2:
+        lang = await ensure_user_with_lang(context, update.effective_user)
         if parts[1] == "back":
             clear_pending_purchase(context)
             clear_pending_recharge(context)
@@ -5399,7 +5620,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                     return
                 except BadRequest:
                     pass
-            await reply_inline(update, "已取消充值。")
+            await reply_inline(update, ui_text("recharge_canceled", lang))
             return
         if parts[1] in {"custom", "create", "paid", "cancel"}:
             legacy_parts = ["rchg", "okpay", *parts[1:]]
@@ -5416,7 +5637,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         if subaction == "custom":
             clear_pending_purchase(context)
             set_pending_recharge(context, channel)
-            prompt = "请输入充值金额" if channel == "trc20" else "请输入OKPay充值金额"
+            prompt = ui_text("input_recharge_amount", lang) if channel == "trc20" else ui_text("input_okpay_amount", lang)
             await reply_inline(update, prompt)
             return
         if subaction == "create" and len(parts) >= 4:
@@ -5450,7 +5671,8 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         category_id = safe_int(parts[1], -1)
         page = safe_int(parts[2], 0)
         if category_id <= 0:
-            await reply_inline(update, "分类参数不合法。")
+            lang = await ensure_user_with_lang(context, update.effective_user)
+            await reply_inline(update, ui_text("category_param_invalid", lang))
             return
         await show_products(update, context, category_id, page)
         return
@@ -5460,16 +5682,17 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         product_id = safe_int(parts[1], -1)
         category_id = safe_int(parts[2], 0)
         page = safe_int(parts[3], 0)
+        lang = await ensure_user_with_lang(context, update.effective_user)
         if product_id <= 0:
-            await reply_inline(update, "商品参数不合法。")
+            await reply_inline(update, ui_text("product_param_invalid", lang))
             return
         try:
             payload = await call_blocking(supplier.get_product_detail, product_id)
         except SupplierApiError as exc:
-            await reply_inline(update, f"获取商品详情失败: {exc}")
+            await reply_inline(update, ui_text("fetch_product_detail_failed", lang, error=exc))
             return
         row = payload.get("data") or {}
-        text, entities, keyboard = render_product_detail_view_configured(settings, row, category_id, page)
+        text, entities, keyboard = render_product_detail_view_configured_localized(settings, row, category_id, page, lang)
         await reply_inline(update, text, keyboard, entities=entities)
         return
 
@@ -5477,11 +5700,12 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         product_id = safe_int(parts[1], -1)
         category_id = safe_int(parts[3], 0)
         page = safe_int(parts[4], 0)
+        lang = await ensure_user_with_lang(context, update.effective_user)
         if product_id <= 0:
-            await reply_inline(update, "快捷购买参数不合法。")
+            await reply_inline(update, ui_text("quick_buy_param_invalid", lang))
             return
         set_pending_purchase(context, product_id, category_id, page)
-        await reply_inline(update, "请发送需要购买的数量，直接回复数字即可，例如：1")
+        await reply_inline(update, ui_text("quick_buy_prompt", lang))
         return
 
     if action == "cbuy" and len(parts) == 3:
@@ -5489,37 +5713,39 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         user = update.effective_user
         product_id = safe_int(parts[1], -1)
         quantity = safe_int(parts[2], 0)
+        lang = await ensure_user_with_lang(context, user)
         if user is None or product_id <= 0 or quantity <= 0:
-            await reply_inline(update, "快捷购买参数不合法。")
+            await reply_inline(update, ui_text("quick_buy_param_invalid", lang))
             return
-        await answer_callback_query_safely(query, "正在创建订单...")
+        await answer_callback_query_safely(query, ui_text("creating_order", lang))
         try:
             await query.edit_message_reply_markup(reply_markup=None)
         except BadRequest:
             pass
         try:
-            result = await execute_purchase(context, user.id, user.username or "", user.full_name or "", product_id, quantity)
+            result = await execute_purchase(context, user.id, user.username or "", user.full_name or "", product_id, quantity, lang)
         except SupplierApiError as exc:
             if query.message is not None:
-                await query.message.reply_text(f"获取商品详情失败: {exc}", reply_markup=MENU_KEYBOARD)
+                await query.message.reply_text(ui_text("fetch_product_detail_failed", lang, error=exc), reply_markup=build_menu_keyboard(lang))
             else:
-                await reply_inline(update, f"获取商品详情失败: {exc}")
+                await reply_inline(update, ui_text("fetch_product_detail_failed", lang, error=exc))
             return
         if result and query.message is not None:
             result_text, result_entities = result
-            await query.message.reply_text(result_text, entities=result_entities, reply_markup=MENU_KEYBOARD)
+            await query.message.reply_text(result_text, entities=result_entities, reply_markup=build_menu_keyboard(lang))
         elif result:
             result_text, result_entities = result
             await reply_inline(update, result_text, entities=result_entities)
         elif query.message is not None:
             await query.message.reply_text(
-                order_created_caption(),
-                reply_markup=MENU_KEYBOARD,
+                order_created_caption_localized(lang),
+                reply_markup=build_menu_keyboard(lang),
                 parse_mode="HTML",
             )
         return
 
-    await answer_callback_query_safely(query, "暂不支持这个按钮", show_alert=False)
+    lang = await ensure_user_with_lang(context, update.effective_user)
+    await answer_callback_query_safely(query, ui_text("unsupported_button", lang), show_alert=False)
 
 
 async def show_orders(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -5599,10 +5825,11 @@ async def search_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     for row in rows[:SEARCH_RESULTS_LIMIT]:
         product_id = safe_int(row.get("productId"))
         category_id = safe_int(row.get("categoryId"))
+        product_name = shorten(translate_product_name(str(row.get("productName") or ""), lang), 22)
         buttons.append(
             [
                 InlineKeyboardButton(
-                    text=ui_text("view_product", lang, name=shorten(str(row.get("productName")), 22)),
+                    text=ui_text("view_product", lang, name=product_name),
                     callback_data=f"prd:{product_id}:{category_id}:0",
                 )
             ]
@@ -5689,10 +5916,11 @@ async def search_text_rich(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         product_id = safe_int(row.get("productId"))
         category_id = safe_int(row.get("categoryId"))
         sell_price = resolve_sell_price(settings, row)
+        product_name = shorten(translate_product_name(str(row.get("productName") or ""), lang), 22)
         buttons.append(
             [
                 plain_catalog_button(
-                    ui_text("product_row_price", lang, name=shorten(str(row.get("productName")), 22), stock=safe_int(row.get("totalStock")), price=f"{sell_price:.2f}"),
+                    ui_text("product_row_price", lang, name=product_name, stock=safe_int(row.get("totalStock")), price=f"{sell_price:.2f}"),
                     f"prd:{product_id}:{category_id}:0",
                 )
             ]
@@ -5722,7 +5950,7 @@ async def buy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     try:
-        result = await execute_purchase(context, user.id, user.username or "", user.full_name or "", product_id, quantity)
+        result = await execute_purchase(context, user.id, user.username or "", user.full_name or "", product_id, quantity, lang)
     except SupplierApiError as exc:
         await update.message.reply_text(ui_text("fetch_product_detail_failed", lang, error=exc), reply_markup=build_menu_keyboard(lang))
         return
@@ -5748,7 +5976,7 @@ async def order(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not local_order:
         await update.message.reply_text(ui_text("local_order_missing", lang), reply_markup=build_menu_keyboard(lang))
         return
-    _, summary = await finalize_remote_order(context, task_id, notify_user=False)
+    _, summary = await finalize_remote_order(context, task_id, notify_user=False, lang=lang)
     local_order = await call_blocking(store.get_order, task_id) or local_order
     if local_order.get("file_url") and not str(local_order.get("delivery_sent_at") or "").strip():
         await deliver_order_file(
@@ -5761,7 +5989,7 @@ async def order(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         local_order = await call_blocking(store.get_order, task_id) or local_order
     lines = [
         f"Task ID: {task_id}" if lang == "en" else f"订单号: {task_id}",
-        f"Product: {local_order.get('product_name')}" if lang == "en" else f"商品: {local_order.get('product_name')}",
+        f"Product: {translate_product_name(str(local_order.get('product_name') or ''), lang)}" if lang == "en" else f"商品: {local_order.get('product_name')}",
         f"Status: {local_order.get('state')}" if lang == "en" else f"状态: {local_order.get('state')}",
         f"Quantity: {local_order.get('quantity')}" if lang == "en" else f"数量: {local_order.get('quantity')}",
         f"Success: {local_order.get('quantity_success')}" if lang == "en" else f"成功数量: {local_order.get('quantity_success')}",

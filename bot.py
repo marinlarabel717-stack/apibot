@@ -1260,12 +1260,6 @@ def build_balance_change_notice_text(action_label: str, amount: float, balance: 
 
 
 def build_balance_change_notice_text_localized(action_label: str, amount: float, balance: float, lang: str) -> tuple[str, tuple[MessageEntity, ...]]:
-    text = (
-        f"{ui_text('balance_notice_title', lang)}\n\n"
-        f"{action_label}: {format_money(amount)} USDT\n\n"
-        f"{ui_text('balance_current', lang)}: {format_money(balance)} USDT"
-    )
-    return text, ()
     return build_text_with_custom_emoji(
         [
             ("😄", BALANCE_NOTICE_TITLE_EMOJI_ID),
@@ -1302,11 +1296,6 @@ def build_recharge_menu_text(selected_channel: str | None) -> tuple[str, tuple[M
 
 
 def build_recharge_menu_text_localized(selected_channel: str | None, lang: str) -> tuple[str, tuple[MessageEntity, ...]]:
-    if selected_channel == "trc20":
-        return ui_text("recharge_trc20_title", lang), ()
-    if selected_channel == "okpay":
-        return ui_text("recharge_okpay_title", lang), ()
-    return ui_text("recharge_method_title", lang), ()
     if selected_channel == "trc20":
         return build_text_with_custom_emoji(
             [
@@ -1582,15 +1571,6 @@ def build_start_menu_text_localized(
     customer_service_contact: str,
     lang: str,
 ) -> tuple[str, tuple[MessageEntity, ...]]:
-    text = (
-        f"ID: {user.id}\n\n"
-        f"USDT: {format_money(balance)}\n"
-        f"{ui_text('spent_label', lang)}: {format_money(total_spent)}\n"
-        f"{ui_text('purchased_label', lang)}: {total_quantity}\n\n"
-        f"{ui_text('restock_label', lang)}: {restock_channel}\n"
-        f"{ui_text('support_label', lang)}: {customer_service_contact}"
-    )
-    return text, ()
     parts: list[tuple[str, str | None]] = []
     code_spans: list[tuple[int, int]] = []
     offset = 0
@@ -1645,12 +1625,6 @@ def build_categories_intro_text() -> tuple[str, tuple[MessageEntity, ...]]:
 
 
 def build_categories_intro_text_localized(lang: str) -> tuple[str, tuple[MessageEntity, ...]]:
-    text = (
-        f"{ui_text('categories_intro', lang)}\n\n"
-        f"{ui_text('first_buy_notice', lang)}\n"
-        f"{ui_text('virtual_notice', lang)}"
-    )
-    return text, ()
     parts: list[tuple[str, str | None]] = [
         ("🛍", PRODUCT_LIST_EMOJI_ID),
         (f" {ui_text('categories_intro', lang)}", None),
@@ -1680,12 +1654,6 @@ def build_products_intro_text(category_name: str) -> tuple[str, tuple[MessageEnt
 
 
 def build_products_intro_text_localized(category_name: str, lang: str) -> tuple[str, tuple[MessageEntity, ...]]:
-    text = (
-        f"{ui_text('products_intro', lang, category_name=category_name)}\n\n"
-        f"{ui_text('first_buy_notice', lang)}\n"
-        f"{ui_text('buy_test_notice', lang)}"
-    )
-    return text, ()
     parts: list[tuple[str, str | None]] = [
         ("🛍", PRODUCT_LIST_EMOJI_ID),
         (f" {ui_text('products_intro', lang, category_name=category_name)}", None),
@@ -1732,17 +1700,6 @@ def build_search_results_text_localized(
     price_resolver,
     lang: str,
 ) -> tuple[str, tuple[MessageEntity, ...]]:
-    lines = [
-        ui_text("search_results_title", lang, keyword=keyword),
-        ui_text("search_results_hint", lang),
-        "",
-    ]
-    for row in rows[:SEARCH_RESULTS_LIMIT]:
-        sell_price = price_resolver(row)
-        lines.append(
-            f"- {str(row.get('productName') or '商品')} | {ui_text('stock_short', lang)} {safe_int(row.get('totalStock'))} | ${sell_price:.2f}"
-        )
-    return "\n".join(lines).rstrip(), ()
     parts: list[tuple[str, str | None]] = [
         ("🔎", SEARCH_RESULTS_EMOJI_ID),
         (f" {ui_text('search_results_title', lang, keyword=keyword)}", None),
@@ -1802,13 +1759,6 @@ def build_product_detail_text_localized(
     stock: int,
     lang: str,
 ) -> tuple[str, tuple[MessageEntity, ...]]:
-    text = (
-        f"{ui_text('buying_product', lang, product_name=product_name)}\n\n"
-        f"{ui_text('price_label', lang, price=format_money(price))}\n\n"
-        f"{ui_text('stock_label', lang, stock=stock)}\n\n"
-        f"{ui_text('buy_test_notice', lang)}"
-    )
-    return text, ()
     parts: list[tuple[str, str | None]] = [
         ("✅", BUYING_EMOJI_ID),
         (f" {ui_text('buying_product', lang, product_name=product_name)}", None),
@@ -1853,14 +1803,6 @@ def build_purchase_confirm_text_localized(
     quantity: int,
     lang: str,
 ) -> tuple[str, tuple[MessageEntity, ...]]:
-    total_price = unit_price * quantity
-    text = (
-        f"{ui_text('confirm_product', lang, product_name=product_name)}\n"
-        f"{ui_text('unit_price_label', lang, price=format_money(unit_price))}\n"
-        f"{ui_text('quantity_label', lang, quantity=quantity)}\n\n"
-        f"{ui_text('total_due_label', lang, price=format_money(total_price))}"
-    )
-    return text, ()
     total_price = unit_price * quantity
     parts: list[tuple[str, str | None]] = [
         ("🛍", PRODUCT_EMOJI_ID),
@@ -2996,20 +2938,33 @@ def build_product_keyboard_configured_localized(
     page: int,
     lang: str,
 ) -> InlineKeyboardMarkup:
+    total_pages = max(1, (len(rows) + PRODUCTS_PER_PAGE - 1) // PRODUCTS_PER_PAGE)
+    page = max(0, min(page, total_pages - 1))
+    start = page * PRODUCTS_PER_PAGE
+    page_rows = rows[start : start + PRODUCTS_PER_PAGE]
+
     buttons: list[list[InlineKeyboardButton]] = []
-    for row in rows:
+    for row in page_rows:
         product_id = safe_int(row.get("productId"))
         product_name = shorten(str(row.get("productName") or f"商品 {product_id}"), 28)
         stock = safe_int(row.get("totalStock"))
         price = resolve_sell_price(settings, row)
         buttons.append(
             [
-                plain_catalog_button(
+                catalog_button(
+                    settings,
                     ui_text("product_row_price", lang, name=product_name, stock=stock, price=f"{price:.2f}"),
-                    f"prd:{product_id}:{category_id}:0",
+                    f"prd:{product_id}:{category_id}:{page}",
                 )
             ]
         )
+    nav_row: list[InlineKeyboardButton] = []
+    if page > 0:
+        nav_row.append(InlineKeyboardButton(f"⬅️ {ui_text('previous_page', lang)}", callback_data=f"cat:{category_id}:{page - 1}"))
+    nav_row.append(InlineKeyboardButton(f"{page + 1}/{total_pages}", callback_data=f"cat:{category_id}:{page}"))
+    if page < total_pages - 1:
+        nav_row.append(InlineKeyboardButton(f"{ui_text('next_page', lang)} ➡️", callback_data=f"cat:{category_id}:{page + 1}"))
+    buttons.append(nav_row)
     buttons.append(
         [
             premium_inline_button(ui_text("button_main_menu", lang), "nav:menu", HOME_EMOJI_ID),

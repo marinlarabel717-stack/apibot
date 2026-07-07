@@ -296,6 +296,10 @@ UI_TEXTS.update(
         "order_completed_summary": {"zh": "订单完成，成功数量 {success}/{quantity}", "en": "Order completed. Successful quantity: {success}/{quantity}"},
         "order_completed_summary_refund": {"zh": "订单完成，成功数量 {success}/{quantity}，已退款 {amount} USDT", "en": "Order completed. Successful quantity: {success}/{quantity}, refunded {amount} USDT"},
         "unknown_order_status": {"zh": "未知订单状态: {status}", "en": "Unknown order status: {status}"},
+        "delivery_ready_product": {"zh": "商品：", "en": "Product: "},
+        "delivery_ready_quantity": {"zh": "数量：", "en": "Quantity: "},
+        "delivery_ready_success": {"zh": "打包完成：存活账号 ", "en": "Packed: Live accounts "},
+        "delivery_ready_refund": {"zh": "已退款：", "en": "Refunded: "},
     }
 )
 CATEGORY_NAME_TRANSLATIONS: list[tuple[str, str]] = [
@@ -468,6 +472,7 @@ WESTERN_COUNTRY_TRANSLATIONS: list[tuple[str, str]] = [
     ("北马其顿", "North Macedonia"),
     ("斯洛文尼亚", "Slovenia"),
     ("克罗地亚", "Croatia"),
+    ("波斯尼亚", "Bosnia and Herzegovina"),
     ("波黑", "Bosnia and Herzegovina"),
     ("波斯尼亚和黑塞哥维那", "Bosnia and Herzegovina"),
     ("科索沃", "Kosovo"),
@@ -2219,18 +2224,21 @@ def build_delivery_ready_text(
     quantity: int,
     quantity_success: int,
     refund_amount: float,
+    lang: str = DEFAULT_LANG,
 ) -> tuple[str, tuple[MessageEntity, ...]]:
+    normalized_lang = normalize_lang_code(lang)
+    localized_product_name = translate_product_name(product_name, normalized_lang)
     parts: list[tuple[str, str | None]] = [
         ("🛍", PRODUCT_EMOJI_ID),
-        (" 商品：", None),
-        (product_name, None),
+        (f" {ui_text('delivery_ready_product', normalized_lang)}", None),
+        (localized_product_name, None),
         ("\n", None),
         ("📦", ITEM_COUNT_EMOJI_ID),
-        (" 数量：", None),
+        (f" {ui_text('delivery_ready_quantity', normalized_lang)}", None),
         (str(quantity), None),
         ("\n", None),
         ("✅", PACKED_DONE_EMOJI_ID),
-        (" 打包完成：存活账号 ", None),
+        (f" {ui_text('delivery_ready_success', normalized_lang)}", None),
         (str(quantity_success), None),
     ]
     if refund_amount > 0:
@@ -2238,7 +2246,7 @@ def build_delivery_ready_text(
             [
                 ("\n", None),
                 ("💸", None),
-                (" 已退款：", None),
+                (f" {ui_text('delivery_ready_refund', normalized_lang)}", None),
                 (f"{format_money(refund_amount)} USDT", None),
             ]
         )
@@ -2389,6 +2397,7 @@ async def deliver_order_file(
     quantity_success = safe_int(order_row.get("quantity_success"))
     refund_amount = safe_float(order_row.get("refund_amount"))
     user_id = safe_int(order_row.get("user_id"))
+    user_lang = normalize_lang_code(await call_blocking(store.get_user_lang, user_id, DEFAULT_LANG))
 
     media_write_timeout = max(20, int(settings.telegram_media_write_timeout_seconds))
     media_read_timeout = max(20, int(settings.telegram_media_read_timeout_seconds))
@@ -2406,6 +2415,7 @@ async def deliver_order_file(
                     quantity,
                     quantity_success,
                     refund_amount,
+                    user_lang,
                 )
                 await context.bot.send_photo(
                     chat_id=user_id,

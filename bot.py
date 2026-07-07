@@ -1588,7 +1588,8 @@ def build_start_menu_text_localized(
     add_text("\n\n")
 
     add_text("💰", custom_emoji_id=START_MENU_EMOJI_USDT_ID)
-    add_text(f" USDT : {format_money(balance)}", code=True)
+    add_text(" USDT : ")
+    add_text(format_money(balance), code=True)
     add_text("\n")
 
     add_text("📊", custom_emoji_id=START_MENU_EMOJI_SPENT_ID)

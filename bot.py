@@ -207,43 +207,43 @@ UI_TEXTS: dict[str, dict[str, str]] = {
 }
 UI_TEXTS.update(
     {
-        "spent_label": {"zh": "æ¶ˆè´¹é‡‘é¢", "en": "Total spent"},
-        "purchased_label": {"zh": "è´­ä¹°æ•°é‡", "en": "Purchased quantity"},
-        "restock_label": {"zh": "è¡¥è´§é¢‘é“", "en": "Restock channel"},
-        "support_label": {"zh": "è”ç³»å®¢æœ", "en": "Support"},
-        "profile_title": {"zh": "ðŸ‘¤ ä¸ªäººä¸­å¿ƒ", "en": "ðŸ‘¤ Profile"},
-        "user_id_label": {"zh": "ðŸ†” ç”¨æˆ·IDï¼š{user_id}", "en": "ðŸ†” User ID: {user_id}"},
-        "username_label": {"zh": "ðŸ‘¤ ç”¨æˆ·åï¼š{username}", "en": "ðŸ‘¤ Username: {username}"},
-        "username_unset": {"zh": "ðŸ‘¤ ç”¨æˆ·åï¼šæœªè®¾ç½®", "en": "ðŸ‘¤ Username: Not set"},
-        "balance_amount_label": {"zh": "ðŸ’° å½“å‰ä½™é¢ï¼š{balance} USDT", "en": "ðŸ’° Current balance: {balance} USDT"},
-        "recent_orders_section": {"zh": "ðŸ“¦ æœ€è¿‘è®¢å•ï¼š", "en": "ðŸ“¦ Recent orders:"},
-        "no_recent_orders": {"zh": "- æš‚æ— è®¢å•", "en": "- No orders yet"},
-        "profile_recharge": {"zh": "ðŸ’° æˆ‘è¦å……å€¼", "en": "ðŸ’° Recharge"},
-        "profile_orders": {"zh": "ðŸ“¦ æˆ‘çš„è®¢å•", "en": "ðŸ“¦ My Orders"},
-        "product_list_stock": {"zh": "{name} åº“å­˜ [{stock}]", "en": "{name} Stock [{stock}]"},
-        "product_row_price": {"zh": "{name} åº“å­˜ [{stock}] - ${price}", "en": "{name} Stock [{stock}] - ${price}"},
-        "view_product": {"zh": "æŸ¥çœ‹ {name}", "en": "View {name}"},
-        "previous_page": {"zh": "ä¸Šä¸€é¡µ", "en": "Previous"},
-        "next_page": {"zh": "ä¸‹ä¸€é¡µ", "en": "Next"},
-        "no_categories": {"zh": "å½“å‰æ²¡æœ‰åˆ†ç±»ã€‚", "en": "No categories available right now."},
-        "fetch_categories_failed": {"zh": "èŽ·å–åˆ†ç±»å¤±è´¥: {error}", "en": "Failed to load categories: {error}"},
-        "fetch_products_failed": {"zh": "èŽ·å–å•†å“åˆ—è¡¨å¤±è´¥: {error}", "en": "Failed to load products: {error}"},
-        "no_products_in_category": {"zh": "è¿™ä¸ªåˆ†ç±»ä¸‹æ²¡æœ‰å•†å“ã€‚", "en": "There are no products in this category."},
-        "recharge_unavailable": {"zh": "å½“å‰æœªå¼€å¯å……å€¼æ–¹å¼ï¼Œè¯·è”ç³»ç®¡ç†å‘˜", "en": "Recharge is not available right now. Please contact support."},
-        "close_done": {"zh": "å·²å…³é—­ã€‚", "en": "Closed."},
-        "recharge_canceled": {"zh": "å·²å–æ¶ˆå……å€¼ã€‚", "en": "Recharge cancelled."},
-        "invalid_recharge_order": {"zh": "è¿™ç¬”è®¢å•å½“å‰ä¸èƒ½å–æ¶ˆã€‚", "en": "This order cannot be cancelled right now."},
-        "quick_buy_prompt": {"zh": "è¯·å‘é€éœ€è¦è´­ä¹°çš„æ•°é‡ï¼Œç›´æŽ¥å›žå¤æ•°å­—å³å¯ï¼Œä¾‹å¦‚ï¼š1", "en": "Send the quantity you want to buy as a number, for example: 1"},
-        "unsupported_button": {"zh": "æš‚ä¸æ”¯æŒè¿™ä¸ªæŒ‰é’®", "en": "This button is not supported yet."},
-        "usage_buy": {"zh": "ç”¨æ³•: /buy <product_id> <æ•°é‡>", "en": "Usage: /buy <product_id> <quantity>"},
-        "usage_order": {"zh": "ç”¨æ³•: /order <task_id>", "en": "Usage: /order <task_id>"},
-        "usage_products": {"zh": "ç”¨æ³•: /products <category_id>", "en": "Usage: /products <category_id>"},
-        "usage_product": {"zh": "ç”¨æ³•: /product <product_id>", "en": "Usage: /product <product_id>"},
-        "product_and_quantity_number": {"zh": "product_id å’Œ æ•°é‡ éƒ½å¿…é¡»æ˜¯æ•°å­—", "en": "Both product_id and quantity must be numbers."},
-        "quantity_positive": {"zh": "æ•°é‡å¿…é¡»å¤§äºŽ 0", "en": "Quantity must be greater than 0."},
-        "category_id_number": {"zh": "category_id å¿…é¡»æ˜¯æ•°å­—", "en": "category_id must be a number."},
-        "product_id_number": {"zh": "product_id å¿…é¡»æ˜¯æ•°å­—", "en": "product_id must be a number."},
-        "local_order_missing": {"zh": "æœ¬åœ°æ²¡æœ‰è¿™ç¬”è®¢å•è®°å½•ã€‚", "en": "No local record was found for this order."},
+        "spent_label": {"zh": "消费金额", "en": "Total spent"},
+        "purchased_label": {"zh": "购买数量", "en": "Purchased quantity"},
+        "restock_label": {"zh": "补货频道", "en": "Restock channel"},
+        "support_label": {"zh": "联系客服", "en": "Support"},
+        "profile_title": {"zh": "👤 个人中心", "en": "👤 Profile"},
+        "user_id_label": {"zh": "🆔 用户ID：{user_id}", "en": "🆔 User ID: {user_id}"},
+        "username_label": {"zh": "👤 用户名：{username}", "en": "👤 Username: {username}"},
+        "username_unset": {"zh": "👤 用户名：未设置", "en": "👤 Username: Not set"},
+        "balance_amount_label": {"zh": "💰 当前余额：{balance} USDT", "en": "💰 Current balance: {balance} USDT"},
+        "recent_orders_section": {"zh": "📦 最近订单：", "en": "📦 Recent orders:"},
+        "no_recent_orders": {"zh": "- 暂无订单", "en": "- No orders yet"},
+        "profile_recharge": {"zh": "💰 我要充值", "en": "💰 Recharge"},
+        "profile_orders": {"zh": "📦 我的订单", "en": "📦 My Orders"},
+        "product_list_stock": {"zh": "{name} 库存 [{stock}]", "en": "{name} Stock [{stock}]"},
+        "product_row_price": {"zh": "{name} 库存 [{stock}] - ${price}", "en": "{name} Stock [{stock}] - ${price}"},
+        "view_product": {"zh": "查看 {name}", "en": "View {name}"},
+        "previous_page": {"zh": "上一页", "en": "Previous"},
+        "next_page": {"zh": "下一页", "en": "Next"},
+        "no_categories": {"zh": "当前没有分类。", "en": "No categories available right now."},
+        "fetch_categories_failed": {"zh": "获取分类失败: {error}", "en": "Failed to load categories: {error}"},
+        "fetch_products_failed": {"zh": "获取商品列表失败: {error}", "en": "Failed to load products: {error}"},
+        "no_products_in_category": {"zh": "这个分类下没有商品。", "en": "There are no products in this category."},
+        "recharge_unavailable": {"zh": "当前未开启充值方式，请联系管理员", "en": "Recharge is not available right now. Please contact support."},
+        "close_done": {"zh": "已关闭。", "en": "Closed."},
+        "recharge_canceled": {"zh": "已取消充值。", "en": "Recharge cancelled."},
+        "invalid_recharge_order": {"zh": "这笔订单当前不能取消。", "en": "This order cannot be cancelled right now."},
+        "quick_buy_prompt": {"zh": "请发送需要购买的数量，直接回复数字即可，例如：1", "en": "Send the quantity you want to buy as a number, for example: 1"},
+        "unsupported_button": {"zh": "暂不支持这个按钮", "en": "This button is not supported yet."},
+        "usage_buy": {"zh": "用法: /buy <product_id> <数量>", "en": "Usage: /buy <product_id> <quantity>"},
+        "usage_order": {"zh": "用法: /order <task_id>", "en": "Usage: /order <task_id>"},
+        "usage_products": {"zh": "用法: /products <category_id>", "en": "Usage: /products <category_id>"},
+        "usage_product": {"zh": "用法: /product <product_id>", "en": "Usage: /product <product_id>"},
+        "product_and_quantity_number": {"zh": "product_id 和 数量 都必须是数字", "en": "Both product_id and quantity must be numbers."},
+        "quantity_positive": {"zh": "数量必须大于 0", "en": "Quantity must be greater than 0."},
+        "category_id_number": {"zh": "category_id 必须是数字", "en": "category_id must be a number."},
+        "product_id_number": {"zh": "product_id 必须是数字", "en": "product_id must be a number."},
+        "local_order_missing": {"zh": "本地没有这笔订单记录。", "en": "No local record was found for this order."},
     }
 )
 SEARCH_COUNTRY_KEYWORDS = {
@@ -925,13 +925,13 @@ def build_orders_text(rows: list[dict[str, Any]]) -> str:
 
 
 def build_orders_text_localized(rows: list[dict[str, Any]], lang: str) -> str:
-    title = premium_text_prefix(RECENT_ORDERS_EMOJI_ID, "ðŸ›", ui_text("recent_orders", lang))
+    title = premium_text_prefix(RECENT_ORDERS_EMOJI_ID, "🛍", ui_text("recent_orders", lang))
     if not rows:
         return f"{title}\n\n{ui_text('no_orders', lang)}"
     text_lines = [title, ""]
     for row in rows:
         order_date = format_order_date(row.get("created_at")) or "-"
-        product_name = " ".join(str(row.get("product_name") or "").split()) or "å•†å“"
+        product_name = " ".join(str(row.get("product_name") or "").split()) or "商品"
         quantity = safe_int(row.get("quantity"), 1)
         spent = max(0.0, safe_float(row.get("total_price")) - safe_float(row.get("refund_amount")))
         text_lines.append(
@@ -1607,24 +1607,24 @@ def build_start_menu_text_localized(
     add_text(str(user.id), code=True)
     add_text("\n\n")
 
-    add_text("ðŸ’°", custom_emoji_id=START_MENU_EMOJI_USDT_ID)
+    add_text("💰", custom_emoji_id=START_MENU_EMOJI_USDT_ID)
     add_text(f" USDT : {format_money(balance)}", code=True)
     add_text("\n")
 
-    add_text("ðŸ“Š", custom_emoji_id=START_MENU_EMOJI_SPENT_ID)
+    add_text("📊", custom_emoji_id=START_MENU_EMOJI_SPENT_ID)
     add_text(f" {ui_text('spent_label', lang)} : ")
     add_text(format_money(total_spent), code=True)
     add_text("\n")
 
-    add_text("ðŸ“¦", custom_emoji_id=START_MENU_EMOJI_QUANTITY_ID)
+    add_text("📦", custom_emoji_id=START_MENU_EMOJI_QUANTITY_ID)
     add_text(f" {ui_text('purchased_label', lang)} : ")
     add_text(str(total_quantity), code=True)
     add_text("\n\n")
 
-    add_text("ðŸŸ¢", custom_emoji_id=START_MENU_EMOJI_RESTOCK_ID)
+    add_text("🟢", custom_emoji_id=START_MENU_EMOJI_RESTOCK_ID)
     add_text(f" {ui_text('restock_label', lang)}: {restock_channel}\n")
 
-    add_text("â˜Žï¸", custom_emoji_id=START_MENU_EMOJI_SUPPORT_ID)
+    add_text("☎️", custom_emoji_id=START_MENU_EMOJI_SUPPORT_ID)
     add_text(f" {ui_text('support_label', lang)}: {customer_service_contact}")
 
     return build_text_with_custom_emoji(parts, code_spans)
@@ -1652,13 +1652,13 @@ def build_categories_intro_text_localized(lang: str) -> tuple[str, tuple[Message
     )
     return text, ()
     parts: list[tuple[str, str | None]] = [
-        ("ðŸ›", PRODUCT_LIST_EMOJI_ID),
+        ("🛍", PRODUCT_LIST_EMOJI_ID),
         (f" {ui_text('categories_intro', lang)}", None),
         ("\n\n", None),
-        ("â—ï¸", PRODUCT_LIST_ALERT_EMOJI_ID),
+        ("❗️", PRODUCT_LIST_ALERT_EMOJI_ID),
         (f" {ui_text('first_buy_notice', lang)}", None),
         ("\n", None),
-        ("â—ï¸", PRODUCT_LIST_ALERT_EMOJI_ID),
+        ("❗️", PRODUCT_LIST_ALERT_EMOJI_ID),
         (f" {ui_text('virtual_notice', lang)}", None),
     ]
     return build_text_with_custom_emoji(parts)
@@ -1687,13 +1687,13 @@ def build_products_intro_text_localized(category_name: str, lang: str) -> tuple[
     )
     return text, ()
     parts: list[tuple[str, str | None]] = [
-        ("ðŸ›", PRODUCT_LIST_EMOJI_ID),
+        ("🛍", PRODUCT_LIST_EMOJI_ID),
         (f" {ui_text('products_intro', lang, category_name=category_name)}", None),
         ("\n\n", None),
-        ("â—ï¸", PRODUCT_LIST_ALERT_EMOJI_ID),
+        ("❗️", PRODUCT_LIST_ALERT_EMOJI_ID),
         (f" {ui_text('first_buy_notice', lang)}", None),
         ("\n", None),
-        ("â—ï¸", PRODUCT_LIST_ALERT_EMOJI_ID),
+        ("❗️", PRODUCT_LIST_ALERT_EMOJI_ID),
         (f" {ui_text('buy_test_notice', lang)}", None),
     ]
     return build_text_with_custom_emoji(parts)
@@ -1740,11 +1740,11 @@ def build_search_results_text_localized(
     for row in rows[:SEARCH_RESULTS_LIMIT]:
         sell_price = price_resolver(row)
         lines.append(
-            f"- {str(row.get('productName') or 'å•†å“')} | {ui_text('stock_short', lang)} {safe_int(row.get('totalStock'))} | ${sell_price:.2f}"
+            f"- {str(row.get('productName') or '商品')} | {ui_text('stock_short', lang)} {safe_int(row.get('totalStock'))} | ${sell_price:.2f}"
         )
     return "\n".join(lines).rstrip(), ()
     parts: list[tuple[str, str | None]] = [
-        ("ðŸ”Ž", SEARCH_RESULTS_EMOJI_ID),
+        ("🔎", SEARCH_RESULTS_EMOJI_ID),
         (f" {ui_text('search_results_title', lang, keyword=keyword)}", None),
         ("\n", None),
         (ui_text("search_results_hint", lang), None),
@@ -1755,7 +1755,7 @@ def build_search_results_text_localized(
         parts.extend(
             [
                 ("- ", None),
-                (str(row.get("productName") or "å•†å“"), None),
+                (str(row.get("productName") or "商品"), None),
                 (f" | {ui_text('stock_short', lang)} ", None),
                 (str(safe_int(row.get("totalStock"))), None),
                 (" | $", None),
@@ -1810,16 +1810,16 @@ def build_product_detail_text_localized(
     )
     return text, ()
     parts: list[tuple[str, str | None]] = [
-        ("âœ…", BUYING_EMOJI_ID),
+        ("✅", BUYING_EMOJI_ID),
         (f" {ui_text('buying_product', lang, product_name=product_name)}", None),
         ("\n\n", None),
-        ("ðŸ’°", PRICE_EMOJI_ID),
+        ("💰", PRICE_EMOJI_ID),
         (f" {ui_text('price_label', lang, price=format_money(price))}", None),
         ("\n\n", None),
-        ("ðŸ“Š", STOCK_EMOJI_ID),
+        ("📊", STOCK_EMOJI_ID),
         (f" {ui_text('stock_label', lang, stock=stock)}", None),
         ("\n\n", None),
-        ("â—ï¸", ALERT_EMOJI_ID),
+        ("❗️", ALERT_EMOJI_ID),
         (f" {ui_text('buy_test_notice', lang)}", None),
     ]
     return build_text_with_custom_emoji(parts)
@@ -1863,16 +1863,16 @@ def build_purchase_confirm_text_localized(
     return text, ()
     total_price = unit_price * quantity
     parts: list[tuple[str, str | None]] = [
-        ("ðŸ›", PRODUCT_EMOJI_ID),
+        ("🛍", PRODUCT_EMOJI_ID),
         (f" {ui_text('confirm_product', lang, product_name=product_name)}", None),
         ("\n", None),
-        ("ðŸª™", UNIT_PRICE_EMOJI_ID),
+        ("🪙", UNIT_PRICE_EMOJI_ID),
         (f" {ui_text('unit_price_label', lang, price=format_money(unit_price))}", None),
         ("\n", None),
-        ("ðŸ“¦", ITEM_COUNT_EMOJI_ID),
+        ("📦", ITEM_COUNT_EMOJI_ID),
         (f" {ui_text('quantity_label', lang, quantity=quantity)}", None),
         ("\n\n", None),
-        ("ðŸ§¾", TOTAL_DUE_EMOJI_ID),
+        ("🧾", TOTAL_DUE_EMOJI_ID),
         (f" {ui_text('total_due_label', lang, price=format_money(total_price))}", None),
     ]
     return build_text_with_custom_emoji(parts)
@@ -2100,7 +2100,7 @@ async def deliver_order_file(
             order_row = await call_blocking(store.mark_order_delivery_ready_sent, task_id) or order_row
         with zip_path.open("rb") as document_fp:
             logger.info(
-                "å‡†å¤‡å‘é€è®¢å• zip: task_id=%s user_id=%s size=%s timeout=%ss",
+                "准备发送订单 zip: task_id=%s user_id=%s size=%s timeout=%ss",
                 task_id,
                 user_id,
                 zip_path.stat().st_size,
@@ -2804,14 +2804,14 @@ def build_main_menu_inline_localized(settings: Settings, lang: str) -> InlineKey
     return InlineKeyboardMarkup(
         [
             [
-                build_main_menu_button(settings, ui_text("button_account_list", lang), "nav:cats", MAIN_MENU_EMOJI_ACCOUNT_LIST_ID, "ðŸ“‚"),
-                build_main_menu_button(settings, ui_text("button_recharge_balance", lang), "nav:recharge", MAIN_MENU_EMOJI_RECHARGE_BALANCE_ID, "ðŸ’°"),
+                build_main_menu_button(settings, ui_text("button_account_list", lang), "nav:cats", MAIN_MENU_EMOJI_ACCOUNT_LIST_ID, "📂"),
+                build_main_menu_button(settings, ui_text("button_recharge_balance", lang), "nav:recharge", MAIN_MENU_EMOJI_RECHARGE_BALANCE_ID, "💰"),
             ],
             [
-                build_main_menu_button(settings, ui_text("button_purchase_notice", lang), "nav:notice", MAIN_MENU_EMOJI_PURCHASE_NOTICE_ID, "ðŸ“–"),
-                build_main_menu_button(settings, ui_text("button_order_history", lang), "nav:orders", MAIN_MENU_EMOJI_ORDER_HISTORY_ID, "ðŸ“¦"),
+                build_main_menu_button(settings, ui_text("button_purchase_notice", lang), "nav:notice", MAIN_MENU_EMOJI_PURCHASE_NOTICE_ID, "📖"),
+                build_main_menu_button(settings, ui_text("button_order_history", lang), "nav:orders", MAIN_MENU_EMOJI_ORDER_HISTORY_ID, "📦"),
             ],
-            [build_main_menu_button(settings, ui_text("button_switch_language", lang), "nav:language", MAIN_MENU_EMOJI_SWITCH_LANGUAGE_ID, "ðŸŒ")],
+            [build_main_menu_button(settings, ui_text("button_switch_language", lang), "nav:language", MAIN_MENU_EMOJI_SWITCH_LANGUAGE_ID, "🌐")],
         ]
     )
 
@@ -2970,7 +2970,7 @@ def build_category_keyboard_configured_localized(
     for row in rows:
         category_id = safe_int(row.get("categoryId"))
         stock = safe_int(row.get("totalStock"))
-        name = shorten(str(row.get("categoryName") or f"åˆ†ç±» {category_id}"), 26)
+        name = shorten(str(row.get("categoryName") or f"分类 {category_id}"), 26)
         buttons.append([catalog_button(settings, ui_text("product_list_stock", lang, name=name, stock=stock), f"cat:{category_id}:0")])
     buttons.append([premium_inline_button(ui_text("button_main_menu", lang), "nav:menu", HOME_EMOJI_ID)])
     buttons.append([premium_inline_button(ui_text("close", lang), "nav:close", CLOSE_EMOJI_ID)])
@@ -2999,7 +2999,7 @@ def build_product_keyboard_configured_localized(
     buttons: list[list[InlineKeyboardButton]] = []
     for row in rows:
         product_id = safe_int(row.get("productId"))
-        product_name = shorten(str(row.get("productName") or f"å•†å“ {product_id}"), 28)
+        product_name = shorten(str(row.get("productName") or f"商品 {product_id}"), 28)
         stock = safe_int(row.get("totalStock"))
         price = resolve_sell_price(settings, row)
         buttons.append(
@@ -3073,7 +3073,7 @@ def render_product_detail_view_configured_localized(
     lang: str,
 ) -> tuple[str, tuple[MessageEntity, ...], InlineKeyboardMarkup]:
     product_id = safe_int(row.get("productId"))
-    product_name = str(row.get("productName") or f"å•†å“ {product_id}")
+    product_name = str(row.get("productName") or f"商品 {product_id}")
     sell_price = resolve_sell_price(settings, row)
     text, entities = build_product_detail_text_localized(
         product_name,
@@ -3377,7 +3377,7 @@ def build_recharge_keyboard_localized(
                         ui_text("recharge_channel_trc20", lang),
                         "rchg:select:trc20",
                         RECHARGE_CHANNEL_TRC20_EMOJI_ID,
-                        "ðŸ˜„",
+                        "😄",
                     )
                 ]
             )
@@ -3389,7 +3389,7 @@ def build_recharge_keyboard_localized(
                         ui_text("recharge_channel_okpay", lang),
                         "rchg:select:okpay",
                         RECHARGE_CHANNEL_OKPAY_EMOJI_ID,
-                        "ðŸ˜„",
+                        "😄",
                     )
                 ]
             )
@@ -3400,7 +3400,7 @@ def build_recharge_keyboard_localized(
                     ui_text("cancel_recharge", lang),
                     "rchg:close",
                     RECHARGE_CANCEL_EMOJI_ID,
-                    "ðŸš«",
+                    "🚫",
                 )
             ]
         )
@@ -3429,7 +3429,7 @@ def build_recharge_keyboard_localized(
                     ui_text("back_payment_methods", lang),
                     "rchg:back",
                     RECHARGE_BACK_EMOJI_ID,
-                    "â¬…ï¸",
+                    "⬅️",
                 )
             ]
         )
@@ -3440,7 +3440,7 @@ def build_recharge_keyboard_localized(
                     ui_text("cancel_recharge", lang),
                     "rchg:close",
                     RECHARGE_CANCEL_EMOJI_ID,
-                    "ðŸš«",
+                    "🚫",
                 )
             ]
         )
@@ -3975,7 +3975,7 @@ async def show_customer_service(update: Update, context: ContextTypes.DEFAULT_TY
     lang = await ensure_user_with_lang(context, update.effective_user)
     text = premium_text_prefix(
         CUSTOMER_SERVICE_EMOJI_ID,
-        "â˜Žï¸",
+        "☎️",
         ui_text("contact_customer_service", lang, contact=effective_customer_service_contact(context, settings)),
     )
     await reply_inline(update, text, parse_mode="HTML")
@@ -5641,7 +5641,7 @@ async def search_text_rich(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             await update.message.reply_text(ui_text("fetch_product_detail_failed", lang, error=exc), reply_markup=build_menu_keyboard(lang))
             return
         row = payload.get("data") or {}
-        product_name = str(row.get("productName") or f"å•†å“ {product_id}")
+        product_name = str(row.get("productName") or f"商品 {product_id}")
         unit_price = resolve_sell_price(settings, row)
         caption, caption_entities = build_purchase_confirm_text_localized(product_name, unit_price, quantity, lang)
         keyboard = build_purchase_confirm_keyboard_localized(product_id, quantity, category_id, page, lang)
@@ -5745,19 +5745,19 @@ async def order(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
         local_order = await call_blocking(store.get_order, task_id) or local_order
     lines = [
-        f"Task ID: {task_id}" if lang == "en" else f"è®¢å•å·: {task_id}",
-        f"Product: {local_order.get('product_name')}" if lang == "en" else f"å•†å“: {local_order.get('product_name')}",
-        f"Status: {local_order.get('state')}" if lang == "en" else f"çŠ¶æ€: {local_order.get('state')}",
-        f"Quantity: {local_order.get('quantity')}" if lang == "en" else f"æ•°é‡: {local_order.get('quantity')}",
-        f"Success: {local_order.get('quantity_success')}" if lang == "en" else f"æˆåŠŸæ•°é‡: {local_order.get('quantity_success')}",
-        f"Refund: {format_money(safe_float(local_order.get('refund_amount')))} USDT" if lang == "en" else f"é€€æ¬¾: {format_money(safe_float(local_order.get('refund_amount')))} USDT",
-        f"Result: {summary}" if lang == "en" else f"ç»“æžœ: {summary}",
+        f"Task ID: {task_id}" if lang == "en" else f"订单号: {task_id}",
+        f"Product: {local_order.get('product_name')}" if lang == "en" else f"商品: {local_order.get('product_name')}",
+        f"Status: {local_order.get('state')}" if lang == "en" else f"状态: {local_order.get('state')}",
+        f"Quantity: {local_order.get('quantity')}" if lang == "en" else f"数量: {local_order.get('quantity')}",
+        f"Success: {local_order.get('quantity_success')}" if lang == "en" else f"成功数量: {local_order.get('quantity_success')}",
+        f"Refund: {format_money(safe_float(local_order.get('refund_amount')))} USDT" if lang == "en" else f"退款: {format_money(safe_float(local_order.get('refund_amount')))} USDT",
+        f"Result: {summary}" if lang == "en" else f"结果: {summary}",
     ]
     if local_order.get("file_url"):
         if str(local_order.get("delivery_sent_at") or "").strip():
-            lines.append("Delivery file: zip sent" if lang == "en" else "å‘è´§æ–‡ä»¶: zip å·²å‘é€")
+            lines.append("Delivery file: zip sent" if lang == "en" else "发货文件: zip 已发送")
         else:
-            lines.append("Delivery file: pending, retry with /order" if lang == "en" else "å‘è´§æ–‡ä»¶: zip å¾…å‘é€ï¼Œå¯ç”¨ /order é‡è¯•")
+            lines.append("Delivery file: pending, retry with /order" if lang == "en" else "发货文件: zip 待发送，可用 /order 重试")
     await update.message.reply_text("\n".join(lines), reply_markup=build_menu_keyboard(lang))
 
 

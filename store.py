@@ -56,6 +56,7 @@ class Store:
                     user_id INTEGER PRIMARY KEY,
                     username TEXT NOT NULL DEFAULT '',
                     display_name TEXT NOT NULL DEFAULT '',
+                    lang TEXT NOT NULL DEFAULT 'zh',
                     balance REAL NOT NULL DEFAULT 0,
                     is_active INTEGER NOT NULL DEFAULT 1,
                     created_at TEXT NOT NULL,
@@ -152,6 +153,8 @@ class Store:
             user_columns = {row["name"] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
             if "display_name" not in user_columns:
                 conn.execute("ALTER TABLE users ADD COLUMN display_name TEXT NOT NULL DEFAULT ''")
+            if "lang" not in user_columns:
+                conn.execute("ALTER TABLE users ADD COLUMN lang TEXT NOT NULL DEFAULT 'zh'")
             if "is_active" not in user_columns:
                 conn.execute("ALTER TABLE users ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1")
             order_columns = {row["name"] for row in conn.execute("PRAGMA table_info(orders)").fetchall()}
@@ -174,20 +177,48 @@ class Store:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_trc20_transfer_state ON trc20_transfers(state, to_address, block_timestamp)")
             conn.commit()
 
-    def ensure_user(self, user_id: int, username: str = "", display_name: str = "") -> None:
+    def ensure_user(self, user_id: int, username: str = "", display_name: str = "", lang: str = "") -> None:
         with self._lock, self._connect() as conn:
             ts = now_iso()
             conn.execute(
                 """
-                INSERT INTO users (user_id, username, display_name, balance, is_active, created_at, updated_at)
-                VALUES (?, ?, ?, 0, 1, ?, ?)
+                INSERT INTO users (user_id, username, display_name, lang, balance, is_active, created_at, updated_at)
+                VALUES (?, ?, ?, ?, 0, 1, ?, ?)
                 ON CONFLICT(user_id) DO UPDATE SET
                     username = excluded.username,
                     display_name = excluded.display_name,
+                    lang = CASE
+                        WHEN excluded.lang != '' THEN excluded.lang
+                        ELSE users.lang
+                    END,
                     is_active = 1,
                     updated_at = excluded.updated_at
                 """,
-                (int(user_id), username or "", display_name or "", ts, ts),
+                (int(user_id), username or "", display_name or "", str(lang or "").strip(), ts, ts),
+            )
+            conn.commit()
+
+    def get_user_lang(self, user_id: int, fallback: str = "zh") -> str:
+        with self._connect() as conn:
+            row = conn.execute("SELECT lang FROM users WHERE user_id = ?", (int(user_id),)).fetchone()
+            value = str((row["lang"] if row else fallback) or fallback).strip().lower()
+            return value if value in {"zh", "en"} else fallback
+
+    def set_user_lang(self, user_id: int, lang: str) -> None:
+        normalized = str(lang or "zh").strip().lower()
+        if normalized not in {"zh", "en"}:
+            normalized = "zh"
+        with self._lock, self._connect() as conn:
+            ts = now_iso()
+            conn.execute(
+                """
+                INSERT INTO users (user_id, username, display_name, lang, balance, is_active, created_at, updated_at)
+                VALUES (?, '', '', ?, 0, 1, ?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    lang = excluded.lang,
+                    updated_at = excluded.updated_at
+                """,
+                (int(user_id), normalized, ts, ts),
             )
             conn.commit()
 

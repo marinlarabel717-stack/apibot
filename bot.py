@@ -87,6 +87,15 @@ BUTTON_RECHARGE_BALANCE = "充值余额"
 BUTTON_PURCHASE_NOTICE = "购买须知"
 BUTTON_ORDER_HISTORY = "购买记录"
 BUTTON_SWITCH_LANGUAGE = "切换语言"
+BUTTON_PRODUCTS_EN = "Product Catalog"
+BUTTON_MAIN_MENU_EN = "Main Menu"
+BUTTON_PROFILE_EN = "Profile"
+BUTTON_RECHARGE_EN = "Recharge"
+BUTTON_ACCOUNT_LIST_EN = "Account List"
+BUTTON_RECHARGE_BALANCE_EN = "Balance"
+BUTTON_PURCHASE_NOTICE_EN = "Purchase Notice"
+BUTTON_ORDER_HISTORY_EN = "Order History"
+BUTTON_SWITCH_LANGUAGE_EN = "Language"
 BOTTOM_BUTTON_MAIN_MENU = "主菜单"
 BOTTOM_BUTTON_CUSTOMER_SERVICE = "联系客服"
 BOTTOM_BUTTON_RECHARGE_BALANCE = "充值余额"
@@ -110,13 +119,133 @@ LEGACY_MENU_BUTTON_TEXTS = {
     BUTTON_PURCHASE_NOTICE,
     BUTTON_ORDER_HISTORY,
     BUTTON_SWITCH_LANGUAGE,
+    BUTTON_ACCOUNT_LIST_EN,
+    BUTTON_RECHARGE_BALANCE_EN,
+    BUTTON_PURCHASE_NOTICE_EN,
+    BUTTON_ORDER_HISTORY_EN,
+    BUTTON_SWITCH_LANGUAGE_EN,
 }
 NON_SEARCH_BUTTON_TEXTS = MENU_BUTTON_TEXTS | LEGACY_MENU_BUTTON_TEXTS | {
     BUTTON_PRODUCTS,
     BUTTON_MAIN_MENU,
     BUTTON_PROFILE,
     BUTTON_RECHARGE,
+    BUTTON_PRODUCTS_EN,
+    BUTTON_MAIN_MENU_EN,
+    BUTTON_PROFILE_EN,
+    BUTTON_RECHARGE_EN,
 }
+DEFAULT_LANG = "zh"
+SUPPORTED_LANGS = {"zh", "en"}
+UI_TEXTS: dict[str, dict[str, str]] = {
+    "button_products": {"zh": BUTTON_PRODUCTS, "en": BUTTON_PRODUCTS_EN},
+    "button_main_menu": {"zh": BUTTON_MAIN_MENU, "en": BUTTON_MAIN_MENU_EN},
+    "button_profile": {"zh": BUTTON_PROFILE, "en": BUTTON_PROFILE_EN},
+    "button_recharge": {"zh": BUTTON_RECHARGE, "en": BUTTON_RECHARGE_EN},
+    "button_account_list": {"zh": BUTTON_ACCOUNT_LIST, "en": BUTTON_ACCOUNT_LIST_EN},
+    "button_recharge_balance": {"zh": BUTTON_RECHARGE_BALANCE, "en": BUTTON_RECHARGE_BALANCE_EN},
+    "button_purchase_notice": {"zh": BUTTON_PURCHASE_NOTICE, "en": BUTTON_PURCHASE_NOTICE_EN},
+    "button_order_history": {"zh": BUTTON_ORDER_HISTORY, "en": BUTTON_ORDER_HISTORY_EN},
+    "button_switch_language": {"zh": BUTTON_SWITCH_LANGUAGE, "en": BUTTON_SWITCH_LANGUAGE_EN},
+    "bottom_main_menu": {"zh": BOTTOM_BUTTON_MAIN_MENU, "en": "Main Menu"},
+    "bottom_customer_service": {"zh": BOTTOM_BUTTON_CUSTOMER_SERVICE, "en": "Support"},
+    "bottom_recharge_balance": {"zh": BOTTOM_BUTTON_RECHARGE_BALANCE, "en": "Balance"},
+    "bottom_menu_refreshed": {"zh": "底部菜单已刷新。", "en": "Bottom menu refreshed."},
+    "language_choose": {"zh": "请选择语言", "en": "Please choose your language"},
+    "language_set_zh": {"zh": "中文", "en": "中文"},
+    "language_set_en": {"zh": "English", "en": "English"},
+    "language_changed": {"zh": "语言已切换为中文。", "en": "Language switched to English."},
+    "language_placeholder": {"zh": "🌐 切换语言", "en": "🌐 Switch Language"},
+    "categories_intro": {"zh": "这是商品分类列表，请选择你需要的分类：", "en": "This is the product category list. Please choose a category:"},
+    "products_intro": {"zh": "这是商品列表，当前分类：{category_name}", "en": "This is the product list. Current category: {category_name}"},
+    "first_buy_notice": {"zh": "首次购买建议先少量测试，确认符合需求再放量。", "en": "If this is your first time buying, place a small test order first."},
+    "virtual_notice": {"zh": "虚拟商品一经发货通常不支持无理由处理，请先看清分类与说明。", "en": "Virtual goods are usually not refundable after delivery. Please confirm the details first."},
+    "search_results_title": {"zh": "搜索结果：{keyword}", "en": "Search results: {keyword}"},
+    "search_results_hint": {"zh": "点击下面商品按钮查看详情：", "en": "Tap a product below to view details:"},
+    "stock_short": {"zh": "库存", "en": "Stock"},
+    "buying_product": {"zh": "您正在购买：{product_name}", "en": "You are buying: {product_name}"},
+    "price_label": {"zh": "价格：{price} USDT", "en": "Price: {price} USDT"},
+    "stock_label": {"zh": "库存：{stock}", "en": "Stock: {stock}"},
+    "buy_test_notice": {"zh": "未使用过的本店商品，请先少量购买测试，以免造成不必要的争议。", "en": "For unfamiliar items, please place a small test order first."},
+    "confirm_product": {"zh": "商品：{product_name}", "en": "Product: {product_name}"},
+    "unit_price_label": {"zh": "单价：{price} USDT", "en": "Unit price: {price} USDT"},
+    "quantity_label": {"zh": "数量：{quantity}", "en": "Quantity: {quantity}"},
+    "total_due_label": {"zh": "应付金额：{price} USDT", "en": "Total due: {price} USDT"},
+    "confirm_purchase": {"zh": "确认购买", "en": "Confirm Purchase"},
+    "back_product": {"zh": "返回商品", "en": "Back to Product"},
+    "back_categories": {"zh": "返回分类", "en": "Back to Categories"},
+    "close": {"zh": "关闭", "en": "Close"},
+    "browse_all_categories": {"zh": "浏览全部分类", "en": "Browse All Categories"},
+    "input_recharge_amount": {"zh": "请输入充值金额", "en": "Please enter the recharge amount"},
+    "input_okpay_amount": {"zh": "请输入OKPay充值金额", "en": "Please enter the OKPay recharge amount"},
+    "cancel_recharge": {"zh": "取消充值", "en": "Cancel Recharge"},
+    "back_payment_methods": {"zh": "返回支付方式", "en": "Back to Payment Methods"},
+    "custom_recharge": {"zh": "自定义充值金额", "en": "Custom Amount"},
+    "recharge_method_title": {"zh": "请选择充值方式", "en": "Please choose a recharge method"},
+    "recharge_trc20_title": {"zh": "请选择下面 USDT(TRC20) 充值金额", "en": "Please choose a USDT (TRC20) recharge amount"},
+    "recharge_okpay_title": {"zh": "请选择下面 OKPay 充值金额", "en": "Please choose an OKPay recharge amount"},
+    "recharge_channel_trc20": {"zh": "USDT充值|TRC20", "en": "USDT Recharge | TRC20"},
+    "recharge_channel_okpay": {"zh": "OKPay充值|秒到账", "en": "OKPay Recharge | Fast Credit"},
+    "contact_customer_service": {"zh": "联系客服：{contact}", "en": "Contact support: {contact}"},
+    "purchase_notice_text": {"zh": "📖 购买须知\n\n1. 首次购买建议先少量测试。\n2. 虚拟商品请及时验货。\n3. 已发货商品默认不支持无理由退换。\n4. 如遇问题请尽快联系管理员处理。", "en": "📖 Purchase Notice\n\n1. Place a small test order first if needed.\n2. Please check virtual goods promptly after delivery.\n3. Delivered goods are generally not refundable without cause.\n4. Contact support as soon as possible if you have any issues."},
+    "recent_orders": {"zh": "最近订单", "en": "Recent Orders"},
+    "no_orders": {"zh": "暂无订单", "en": "No orders yet"},
+    "order_created": {"zh": "订单已创建，正在检查账号存活并打包，请稍后...", "en": "Order created. Accounts are being checked and packed, please wait..."},
+    "search_failed": {"zh": "搜索失败: {error}", "en": "Search failed: {error}"},
+    "search_empty": {"zh": "没有搜到商品。", "en": "No products found."},
+    "enter_number": {"zh": "请输入数字", "en": "Please enter a number."},
+    "recharge_amount_positive": {"zh": "充值金额必须大于 0。", "en": "Recharge amount must be greater than 0."},
+    "enter_quantity": {"zh": "请输入要购买的数量，直接发数字即可，例如：1", "en": "Please enter the quantity as a number, for example: 1"},
+    "fetch_product_detail_failed": {"zh": "获取商品详情失败: {error}", "en": "Failed to get product details: {error}"},
+    "category_param_invalid": {"zh": "分类参数不合法。", "en": "Invalid category parameter."},
+    "product_param_invalid": {"zh": "商品参数不合法。", "en": "Invalid product parameter."},
+    "quick_buy_param_invalid": {"zh": "快捷购买参数不合法。", "en": "Invalid quick-buy parameters."},
+    "creating_order": {"zh": "正在创建订单...", "en": "Creating order..."},
+    "balance_notice_title": {"zh": "余额变动提醒", "en": "Balance Update"},
+    "balance_increased": {"zh": "已增加", "en": "Added"},
+    "balance_current": {"zh": "当前余额", "en": "Current balance"},
+}
+UI_TEXTS.update(
+    {
+        "spent_label": {"zh": "æ¶ˆè´¹é‡‘é¢", "en": "Total spent"},
+        "purchased_label": {"zh": "è´­ä¹°æ•°é‡", "en": "Purchased quantity"},
+        "restock_label": {"zh": "è¡¥è´§é¢‘é“", "en": "Restock channel"},
+        "support_label": {"zh": "è”ç³»å®¢æœ", "en": "Support"},
+        "profile_title": {"zh": "ðŸ‘¤ ä¸ªäººä¸­å¿ƒ", "en": "ðŸ‘¤ Profile"},
+        "user_id_label": {"zh": "ðŸ†” ç”¨æˆ·IDï¼š{user_id}", "en": "ðŸ†” User ID: {user_id}"},
+        "username_label": {"zh": "ðŸ‘¤ ç”¨æˆ·åï¼š{username}", "en": "ðŸ‘¤ Username: {username}"},
+        "username_unset": {"zh": "ðŸ‘¤ ç”¨æˆ·åï¼šæœªè®¾ç½®", "en": "ðŸ‘¤ Username: Not set"},
+        "balance_amount_label": {"zh": "ðŸ’° å½“å‰ä½™é¢ï¼š{balance} USDT", "en": "ðŸ’° Current balance: {balance} USDT"},
+        "recent_orders_section": {"zh": "ðŸ“¦ æœ€è¿‘è®¢å•ï¼š", "en": "ðŸ“¦ Recent orders:"},
+        "no_recent_orders": {"zh": "- æš‚æ— è®¢å•", "en": "- No orders yet"},
+        "profile_recharge": {"zh": "ðŸ’° æˆ‘è¦å……å€¼", "en": "ðŸ’° Recharge"},
+        "profile_orders": {"zh": "ðŸ“¦ æˆ‘çš„è®¢å•", "en": "ðŸ“¦ My Orders"},
+        "product_list_stock": {"zh": "{name} åº“å­˜ [{stock}]", "en": "{name} Stock [{stock}]"},
+        "product_row_price": {"zh": "{name} åº“å­˜ [{stock}] - ${price}", "en": "{name} Stock [{stock}] - ${price}"},
+        "view_product": {"zh": "æŸ¥çœ‹ {name}", "en": "View {name}"},
+        "previous_page": {"zh": "ä¸Šä¸€é¡µ", "en": "Previous"},
+        "next_page": {"zh": "ä¸‹ä¸€é¡µ", "en": "Next"},
+        "no_categories": {"zh": "å½“å‰æ²¡æœ‰åˆ†ç±»ã€‚", "en": "No categories available right now."},
+        "fetch_categories_failed": {"zh": "èŽ·å–åˆ†ç±»å¤±è´¥: {error}", "en": "Failed to load categories: {error}"},
+        "fetch_products_failed": {"zh": "èŽ·å–å•†å“åˆ—è¡¨å¤±è´¥: {error}", "en": "Failed to load products: {error}"},
+        "no_products_in_category": {"zh": "è¿™ä¸ªåˆ†ç±»ä¸‹æ²¡æœ‰å•†å“ã€‚", "en": "There are no products in this category."},
+        "recharge_unavailable": {"zh": "å½“å‰æœªå¼€å¯å……å€¼æ–¹å¼ï¼Œè¯·è”ç³»ç®¡ç†å‘˜", "en": "Recharge is not available right now. Please contact support."},
+        "close_done": {"zh": "å·²å…³é—­ã€‚", "en": "Closed."},
+        "recharge_canceled": {"zh": "å·²å–æ¶ˆå……å€¼ã€‚", "en": "Recharge cancelled."},
+        "invalid_recharge_order": {"zh": "è¿™ç¬”è®¢å•å½“å‰ä¸èƒ½å–æ¶ˆã€‚", "en": "This order cannot be cancelled right now."},
+        "quick_buy_prompt": {"zh": "è¯·å‘é€éœ€è¦è´­ä¹°çš„æ•°é‡ï¼Œç›´æŽ¥å›žå¤æ•°å­—å³å¯ï¼Œä¾‹å¦‚ï¼š1", "en": "Send the quantity you want to buy as a number, for example: 1"},
+        "unsupported_button": {"zh": "æš‚ä¸æ”¯æŒè¿™ä¸ªæŒ‰é’®", "en": "This button is not supported yet."},
+        "usage_buy": {"zh": "ç”¨æ³•: /buy <product_id> <æ•°é‡>", "en": "Usage: /buy <product_id> <quantity>"},
+        "usage_order": {"zh": "ç”¨æ³•: /order <task_id>", "en": "Usage: /order <task_id>"},
+        "usage_products": {"zh": "ç”¨æ³•: /products <category_id>", "en": "Usage: /products <category_id>"},
+        "usage_product": {"zh": "ç”¨æ³•: /product <product_id>", "en": "Usage: /product <product_id>"},
+        "product_and_quantity_number": {"zh": "product_id å’Œ æ•°é‡ éƒ½å¿…é¡»æ˜¯æ•°å­—", "en": "Both product_id and quantity must be numbers."},
+        "quantity_positive": {"zh": "æ•°é‡å¿…é¡»å¤§äºŽ 0", "en": "Quantity must be greater than 0."},
+        "category_id_number": {"zh": "category_id å¿…é¡»æ˜¯æ•°å­—", "en": "category_id must be a number."},
+        "product_id_number": {"zh": "product_id å¿…é¡»æ˜¯æ•°å­—", "en": "product_id must be a number."},
+        "local_order_missing": {"zh": "æœ¬åœ°æ²¡æœ‰è¿™ç¬”è®¢å•è®°å½•ã€‚", "en": "No local record was found for this order."},
+    }
+)
 SEARCH_COUNTRY_KEYWORDS = {
     "中国", "香港", "澳门", "台湾",
     "日本", "韩国", "朝鲜", "蒙古",
@@ -136,30 +265,6 @@ SEARCH_COUNTRY_KEYWORDS = {
     "芬兰", "丹麦", "冰岛", "乌克兰", "俄罗斯", "白俄罗斯",
     "澳洲", "澳大利亚", "新西兰",
 }
-
-MENU_KEYBOARD = ReplyKeyboardMarkup(
-    [
-        [
-            KeyboardButton(
-                BOTTOM_BUTTON_MAIN_MENU,
-                icon_custom_emoji_id=BOTTOM_BUTTON_HOME_EMOJI_ID,
-                style=KeyboardButtonStyle.PRIMARY,
-            ),
-            KeyboardButton(
-                BOTTOM_BUTTON_CUSTOMER_SERVICE,
-                icon_custom_emoji_id=BOTTOM_BUTTON_CUSTOMER_SERVICE_EMOJI_ID,
-                style=KeyboardButtonStyle.DANGER,
-            ),
-            KeyboardButton(
-                BOTTOM_BUTTON_RECHARGE_BALANCE,
-                icon_custom_emoji_id=BOTTOM_BUTTON_RECHARGE_EMOJI_ID,
-                style=KeyboardButtonStyle.SUCCESS,
-            ),
-        ],
-    ],
-    resize_keyboard=True,
-    is_persistent=True,
-)
 
 PENDING_PURCHASE_KEY = "pending_purchase_quantity"
 PENDING_RECHARGE_KEY = "pending_recharge_amount"
@@ -819,6 +924,22 @@ def build_orders_text(rows: list[dict[str, Any]]) -> str:
     return "\n".join(text_lines)
 
 
+def build_orders_text_localized(rows: list[dict[str, Any]], lang: str) -> str:
+    title = premium_text_prefix(RECENT_ORDERS_EMOJI_ID, "ðŸ›", ui_text("recent_orders", lang))
+    if not rows:
+        return f"{title}\n\n{ui_text('no_orders', lang)}"
+    text_lines = [title, ""]
+    for row in rows:
+        order_date = format_order_date(row.get("created_at")) or "-"
+        product_name = " ".join(str(row.get("product_name") or "").split()) or "å•†å“"
+        quantity = safe_int(row.get("quantity"), 1)
+        spent = max(0.0, safe_float(row.get("total_price")) - safe_float(row.get("refund_amount")))
+        text_lines.append(
+            f"{html.escape(order_date)} | {html.escape(product_name)} |{quantity} | {format_money(spent)} $"
+        )
+    return "\n".join(text_lines)
+
+
 def get_pending_purchase(context: ContextTypes.DEFAULT_TYPE) -> dict[str, int] | None:
     pending = context.user_data.get(PENDING_PURCHASE_KEY)
     return pending if isinstance(pending, dict) else None
@@ -997,6 +1118,104 @@ def premium_url_button_with_fallback(
     return InlineKeyboardButton(**kwargs)
 
 
+def normalize_lang_code(value: str | None) -> str:
+    text = str(value or "").strip().lower()
+    if text.startswith("en"):
+        return "en"
+    if text.startswith("zh"):
+        return "zh"
+    return DEFAULT_LANG
+
+
+def ui_text(key: str, lang: str = DEFAULT_LANG, **kwargs: Any) -> str:
+    normalized = normalize_lang_code(lang)
+    payload = UI_TEXTS.get(key, {})
+    template = str(payload.get(normalized) or payload.get(DEFAULT_LANG) or key)
+    return template.format(**kwargs)
+
+
+def infer_user_lang_from_profile(user: Any | None) -> str:
+    language_code = getattr(user, "language_code", None) if user is not None else None
+    return normalize_lang_code(language_code)
+
+
+def resolve_user_lang(context: ContextTypes.DEFAULT_TYPE, user: Any | None = None) -> str:
+    _, store, _ = get_services(context)
+    if user is None:
+        return DEFAULT_LANG
+    stored = call_blocking_sync(store.get_user_lang, user.id, DEFAULT_LANG)
+    return normalize_lang_code(stored or infer_user_lang_from_profile(user))
+
+
+def call_blocking_sync(func, *args):
+    return func(*args)
+
+
+async def ensure_user_with_lang(context: ContextTypes.DEFAULT_TYPE, user: Any | None) -> str:
+    _, store, _ = get_services(context)
+    if user is None:
+        return DEFAULT_LANG
+    fallback_lang = infer_user_lang_from_profile(user)
+    await call_blocking(store.ensure_user, user.id, user.username or "", user.full_name or "", fallback_lang)
+    lang = await call_blocking(store.get_user_lang, user.id, fallback_lang)
+    return normalize_lang_code(lang)
+
+
+async def update_user_lang(context: ContextTypes.DEFAULT_TYPE, user: Any | None, lang: str) -> str:
+    _, store, _ = get_services(context)
+    normalized = normalize_lang_code(lang)
+    if user is not None:
+        await call_blocking(store.ensure_user, user.id, user.username or "", user.full_name or "", normalized)
+        await call_blocking(store.set_user_lang, user.id, normalized)
+    return normalized
+
+
+def build_menu_keyboard(lang: str = DEFAULT_LANG) -> ReplyKeyboardMarkup:
+    normalized = normalize_lang_code(lang)
+    return ReplyKeyboardMarkup(
+        [
+            [
+                KeyboardButton(
+                    ui_text("bottom_main_menu", normalized),
+                    icon_custom_emoji_id=BOTTOM_BUTTON_HOME_EMOJI_ID,
+                    style=KeyboardButtonStyle.PRIMARY,
+                ),
+                KeyboardButton(
+                    ui_text("bottom_customer_service", normalized),
+                    icon_custom_emoji_id=BOTTOM_BUTTON_CUSTOMER_SERVICE_EMOJI_ID,
+                    style=KeyboardButtonStyle.DANGER,
+                ),
+                KeyboardButton(
+                    ui_text("bottom_recharge_balance", normalized),
+                    icon_custom_emoji_id=BOTTOM_BUTTON_RECHARGE_EMOJI_ID,
+                    style=KeyboardButtonStyle.SUCCESS,
+                ),
+            ],
+        ],
+        resize_keyboard=True,
+        is_persistent=True,
+    )
+
+
+MENU_KEYBOARD = build_menu_keyboard(DEFAULT_LANG)
+
+
+def button_matches(text: str, *keys: str) -> bool:
+    normalized = str(text or "").strip()
+    for key in keys:
+        if normalized == ui_text(key, "zh") or normalized == ui_text(key, "en"):
+            return True
+    legacy_candidates = {
+        "bottom_main_menu": {LEGACY_BOTTOM_BUTTON_MAIN_MENU},
+        "bottom_customer_service": {LEGACY_BOTTOM_BUTTON_CUSTOMER_SERVICE},
+        "bottom_recharge_balance": {LEGACY_BOTTOM_BUTTON_RECHARGE_BALANCE},
+    }
+    for key in keys:
+        if normalized in legacy_candidates.get(key, set()):
+            return True
+    return False
+
+
 def build_text_with_custom_emoji(parts: list[tuple[str, str | None]], code_spans: list[tuple[int, int]] | None = None) -> tuple[str, tuple[MessageEntity, ...]]:
     text_parts: list[str] = []
     entities: list[MessageEntity] = []
@@ -1040,6 +1259,19 @@ def build_balance_change_notice_text(action_label: str, amount: float, balance: 
     )
 
 
+def build_balance_change_notice_text_localized(action_label: str, amount: float, balance: float, lang: str) -> tuple[str, tuple[MessageEntity, ...]]:
+    return build_text_with_custom_emoji(
+        [
+            ("😄", BALANCE_NOTICE_TITLE_EMOJI_ID),
+            (f" {ui_text('balance_notice_title', lang)}\n\n", None),
+            ("😃", BALANCE_NOTICE_INCREASE_EMOJI_ID),
+            (f" {action_label}: {format_money(amount)} USDT\n\n", None),
+            ("😃", BALANCE_NOTICE_CURRENT_EMOJI_ID),
+            (f" {ui_text('balance_current', lang)}: {format_money(balance)} USDT", None),
+        ]
+    )
+
+
 def build_recharge_menu_text(selected_channel: str | None) -> tuple[str, tuple[MessageEntity, ...]]:
     if selected_channel == "trc20":
         return build_text_with_custom_emoji(
@@ -1059,6 +1291,29 @@ def build_recharge_menu_text(selected_channel: str | None) -> tuple[str, tuple[M
         [
             ("💳", RECHARGE_METHOD_TITLE_EMOJI_ID),
             (" 请选择充值方式", None),
+        ]
+    )
+
+
+def build_recharge_menu_text_localized(selected_channel: str | None, lang: str) -> tuple[str, tuple[MessageEntity, ...]]:
+    if selected_channel == "trc20":
+        return build_text_with_custom_emoji(
+            [
+                ("😃", RECHARGE_TRC20_TITLE_EMOJI_ID),
+                (f" {ui_text('recharge_trc20_title', lang)}", None),
+            ]
+        )
+    if selected_channel == "okpay":
+        return build_text_with_custom_emoji(
+            [
+                ("😃", RECHARGE_OKPAY_TITLE_EMOJI_ID),
+                (f" {ui_text('recharge_okpay_title', lang)}", None),
+            ]
+        )
+    return build_text_with_custom_emoji(
+        [
+            ("💳", RECHARGE_METHOD_TITLE_EMOJI_ID),
+            (f" {ui_text('recharge_method_title', lang)}", None),
         ]
     )
 
@@ -1306,6 +1561,55 @@ def build_start_menu_text(
     return build_text_with_custom_emoji(parts, code_spans)
 
 
+def build_start_menu_text_localized(
+    settings: Settings,
+    user: Any,
+    balance: float,
+    total_spent: float,
+    total_quantity: int,
+    restock_channel: str,
+    customer_service_contact: str,
+    lang: str,
+) -> tuple[str, tuple[MessageEntity, ...]]:
+    parts: list[tuple[str, str | None]] = []
+    code_spans: list[tuple[int, int]] = []
+    offset = 0
+
+    def add_text(value: str, custom_emoji_id: str | None = None, code: bool = False) -> None:
+        nonlocal offset
+        parts.append((value, custom_emoji_id))
+        length = len(value)
+        if code:
+            code_spans.append((offset, length))
+        offset += length
+
+    add_text("ID: ")
+    add_text(str(user.id), code=True)
+    add_text("\n\n")
+
+    add_text("ðŸ’°", custom_emoji_id=START_MENU_EMOJI_USDT_ID)
+    add_text(f" USDT : {format_money(balance)}", code=True)
+    add_text("\n")
+
+    add_text("ðŸ“Š", custom_emoji_id=START_MENU_EMOJI_SPENT_ID)
+    add_text(f" {ui_text('spent_label', lang)} : ")
+    add_text(format_money(total_spent), code=True)
+    add_text("\n")
+
+    add_text("ðŸ“¦", custom_emoji_id=START_MENU_EMOJI_QUANTITY_ID)
+    add_text(f" {ui_text('purchased_label', lang)} : ")
+    add_text(str(total_quantity), code=True)
+    add_text("\n\n")
+
+    add_text("ðŸŸ¢", custom_emoji_id=START_MENU_EMOJI_RESTOCK_ID)
+    add_text(f" {ui_text('restock_label', lang)}: {restock_channel}\n")
+
+    add_text("â˜Žï¸", custom_emoji_id=START_MENU_EMOJI_SUPPORT_ID)
+    add_text(f" {ui_text('support_label', lang)}: {customer_service_contact}")
+
+    return build_text_with_custom_emoji(parts, code_spans)
+
+
 def build_categories_intro_text() -> tuple[str, tuple[MessageEntity, ...]]:
     parts: list[tuple[str, str | None]] = [
         ("🛍", PRODUCT_LIST_EMOJI_ID),
@@ -1316,6 +1620,20 @@ def build_categories_intro_text() -> tuple[str, tuple[MessageEntity, ...]]:
         ("\n", None),
         ("❗️", PRODUCT_LIST_ALERT_EMOJI_ID),
         (" 虚拟商品一经发货通常不支持无理由处理，请先看清分类与说明。", None),
+    ]
+    return build_text_with_custom_emoji(parts)
+
+
+def build_categories_intro_text_localized(lang: str) -> tuple[str, tuple[MessageEntity, ...]]:
+    parts: list[tuple[str, str | None]] = [
+        ("ðŸ›", PRODUCT_LIST_EMOJI_ID),
+        (f" {ui_text('categories_intro', lang)}", None),
+        ("\n\n", None),
+        ("â—ï¸", PRODUCT_LIST_ALERT_EMOJI_ID),
+        (f" {ui_text('first_buy_notice', lang)}", None),
+        ("\n", None),
+        ("â—ï¸", PRODUCT_LIST_ALERT_EMOJI_ID),
+        (f" {ui_text('virtual_notice', lang)}", None),
     ]
     return build_text_with_custom_emoji(parts)
 
@@ -1331,6 +1649,20 @@ def build_products_intro_text(category_name: str) -> tuple[str, tuple[MessageEnt
         ("\n", None),
         ("❗️", PRODUCT_LIST_ALERT_EMOJI_ID),
         (" 账号放久难免会死，有差异请联系客服处理。", None),
+    ]
+    return build_text_with_custom_emoji(parts)
+
+
+def build_products_intro_text_localized(category_name: str, lang: str) -> tuple[str, tuple[MessageEntity, ...]]:
+    parts: list[tuple[str, str | None]] = [
+        ("ðŸ›", PRODUCT_LIST_EMOJI_ID),
+        (f" {ui_text('products_intro', lang, category_name=category_name)}", None),
+        ("\n\n", None),
+        ("â—ï¸", PRODUCT_LIST_ALERT_EMOJI_ID),
+        (f" {ui_text('first_buy_notice', lang)}", None),
+        ("\n", None),
+        ("â—ï¸", PRODUCT_LIST_ALERT_EMOJI_ID),
+        (f" {ui_text('buy_test_notice', lang)}", None),
     ]
     return build_text_with_custom_emoji(parts)
 
@@ -1351,6 +1683,37 @@ def build_search_results_text(keyword: str, rows: list[dict[str, Any]], price_re
                 ("- ", None),
                 (str(row.get("productName") or "商品"), None),
                 (" | 库存 ", None),
+                (str(safe_int(row.get("totalStock"))), None),
+                (" | $", None),
+                (f"{sell_price:.2f}", None),
+                ("\n", None),
+            ]
+        )
+    if parts[-1][0] == "\n":
+        parts.pop()
+    return build_text_with_custom_emoji(parts)
+
+
+def build_search_results_text_localized(
+    keyword: str,
+    rows: list[dict[str, Any]],
+    price_resolver,
+    lang: str,
+) -> tuple[str, tuple[MessageEntity, ...]]:
+    parts: list[tuple[str, str | None]] = [
+        ("ðŸ”Ž", SEARCH_RESULTS_EMOJI_ID),
+        (f" {ui_text('search_results_title', lang, keyword=keyword)}", None),
+        ("\n", None),
+        (ui_text("search_results_hint", lang), None),
+        ("\n\n", None),
+    ]
+    for row in rows[:SEARCH_RESULTS_LIMIT]:
+        sell_price = price_resolver(row)
+        parts.extend(
+            [
+                ("- ", None),
+                (str(row.get("productName") or "å•†å“"), None),
+                (f" | {ui_text('stock_short', lang)} ", None),
                 (str(safe_int(row.get("totalStock"))), None),
                 (" | $", None),
                 (f"{sell_price:.2f}", None),
@@ -1390,6 +1753,28 @@ def build_product_detail_text(
     return build_text_with_custom_emoji(parts)
 
 
+def build_product_detail_text_localized(
+    product_name: str,
+    price: float,
+    stock: int,
+    lang: str,
+) -> tuple[str, tuple[MessageEntity, ...]]:
+    parts: list[tuple[str, str | None]] = [
+        ("âœ…", BUYING_EMOJI_ID),
+        (f" {ui_text('buying_product', lang, product_name=product_name)}", None),
+        ("\n\n", None),
+        ("ðŸ’°", PRICE_EMOJI_ID),
+        (f" {ui_text('price_label', lang, price=format_money(price))}", None),
+        ("\n\n", None),
+        ("ðŸ“Š", STOCK_EMOJI_ID),
+        (f" {ui_text('stock_label', lang, stock=stock)}", None),
+        ("\n\n", None),
+        ("â—ï¸", ALERT_EMOJI_ID),
+        (f" {ui_text('buy_test_notice', lang)}", None),
+    ]
+    return build_text_with_custom_emoji(parts)
+
+
 def build_purchase_confirm_text(product_name: str, unit_price: float, quantity: int) -> tuple[str, tuple[MessageEntity, ...]]:
     total_price = unit_price * quantity
     parts: list[tuple[str, str | None]] = [
@@ -1408,6 +1793,29 @@ def build_purchase_confirm_text(product_name: str, unit_price: float, quantity: 
         ("🧾", TOTAL_DUE_EMOJI_ID),
         (" 应付金额：", None),
         (f"{format_money(total_price)} USDT", None),
+    ]
+    return build_text_with_custom_emoji(parts)
+
+
+def build_purchase_confirm_text_localized(
+    product_name: str,
+    unit_price: float,
+    quantity: int,
+    lang: str,
+) -> tuple[str, tuple[MessageEntity, ...]]:
+    total_price = unit_price * quantity
+    parts: list[tuple[str, str | None]] = [
+        ("ðŸ›", PRODUCT_EMOJI_ID),
+        (f" {ui_text('confirm_product', lang, product_name=product_name)}", None),
+        ("\n", None),
+        ("ðŸª™", UNIT_PRICE_EMOJI_ID),
+        (f" {ui_text('unit_price_label', lang, price=format_money(unit_price))}", None),
+        ("\n", None),
+        ("ðŸ“¦", ITEM_COUNT_EMOJI_ID),
+        (f" {ui_text('quantity_label', lang, quantity=quantity)}", None),
+        ("\n\n", None),
+        ("ðŸ§¾", TOTAL_DUE_EMOJI_ID),
+        (f" {ui_text('total_due_label', lang, price=format_money(total_price))}", None),
     ]
     return build_text_with_custom_emoji(parts)
 
@@ -1803,6 +2211,20 @@ async def send_menu_message(update: Update, text: str) -> None:
         await update.message.reply_text(text, reply_markup=MENU_KEYBOARD)
     elif update.callback_query is not None:
         await update.callback_query.message.reply_text(text, reply_markup=MENU_KEYBOARD)
+
+
+async def send_localized_menu_message(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    text_key: str,
+    **kwargs: Any,
+) -> None:
+    lang = await ensure_user_with_lang(context, update.effective_user)
+    text = ui_text(text_key, lang, **kwargs)
+    if update.message is not None:
+        await update.message.reply_text(text, reply_markup=build_menu_keyboard(lang))
+    elif update.callback_query is not None and update.callback_query.message is not None:
+        await update.callback_query.message.reply_text(text, reply_markup=build_menu_keyboard(lang))
 
 
 def build_topup_order_id(channel: str, user_id: int) -> str:
@@ -2320,6 +2742,22 @@ def build_main_menu_inline(settings: Settings) -> InlineKeyboardMarkup:
     )
 
 
+def build_main_menu_inline_localized(settings: Settings, lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                build_main_menu_button(settings, ui_text("button_account_list", lang), "nav:cats", MAIN_MENU_EMOJI_ACCOUNT_LIST_ID, "ðŸ“‚"),
+                build_main_menu_button(settings, ui_text("button_recharge_balance", lang), "nav:recharge", MAIN_MENU_EMOJI_RECHARGE_BALANCE_ID, "ðŸ’°"),
+            ],
+            [
+                build_main_menu_button(settings, ui_text("button_purchase_notice", lang), "nav:notice", MAIN_MENU_EMOJI_PURCHASE_NOTICE_ID, "ðŸ“–"),
+                build_main_menu_button(settings, ui_text("button_order_history", lang), "nav:orders", MAIN_MENU_EMOJI_ORDER_HISTORY_ID, "ðŸ“¦"),
+            ],
+            [build_main_menu_button(settings, ui_text("button_switch_language", lang), "nav:language", MAIN_MENU_EMOJI_SWITCH_LANGUAGE_ID, "ðŸŒ")],
+        ]
+    )
+
+
 def build_category_keyboard(rows: list[dict[str, Any]]) -> InlineKeyboardMarkup:
     buttons: list[list[InlineKeyboardButton]] = []
     for row in rows:
@@ -2387,6 +2825,28 @@ def build_product_keyboard(
     return InlineKeyboardMarkup(buttons)
 
 
+def build_purchase_confirm_keyboard_localized(
+    product_id: int,
+    quantity: int,
+    category_id: int,
+    page: int,
+    lang: str,
+) -> InlineKeyboardMarkup:
+    buttons: list[list[InlineKeyboardButton]] = [
+        [premium_inline_button(ui_text("confirm_purchase", lang), f"cbuy:{product_id}:{quantity}", BUY_BUTTON_EMOJI_ID)],
+    ]
+    if category_id > 0:
+        buttons.append(
+            [
+                premium_inline_button(ui_text("button_main_menu", lang), "nav:menu", HOME_EMOJI_ID),
+                premium_inline_button(ui_text("back_product", lang), f"prd:{product_id}:{category_id}:{page}", BACK_EMOJI_ID),
+            ]
+        )
+    else:
+        buttons.append([premium_inline_button(ui_text("button_main_menu", lang), "nav:menu", HOME_EMOJI_ID)])
+    return InlineKeyboardMarkup(buttons)
+
+
 def render_products_view(
     category_name: str,
     category_id: int,
@@ -2412,6 +2872,22 @@ def build_product_detail_keyboard(product_id: int, category_id: int, page: int) 
     return InlineKeyboardMarkup(buttons)
 
 
+def build_product_detail_keyboard_localized(product_id: int, category_id: int, page: int, lang: str) -> InlineKeyboardMarkup:
+    buttons: list[list[InlineKeyboardButton]] = [
+        [premium_inline_button(ui_text("confirm_purchase", lang), f"qbuy:{product_id}:1:{category_id}:{page}", BUY_BUTTON_EMOJI_ID)]
+    ]
+    if category_id > 0:
+        buttons.append(
+            [
+                premium_inline_button(ui_text("button_main_menu", lang), "nav:menu", HOME_EMOJI_ID),
+                premium_inline_button(ui_text("back_categories", lang), f"cat:{category_id}:{page}", BACK_EMOJI_ID),
+            ]
+        )
+    else:
+        buttons.append([premium_inline_button(ui_text("button_main_menu", lang), "nav:menu", HOME_EMOJI_ID)])
+    return InlineKeyboardMarkup(buttons)
+
+
 def render_product_detail_view(
     row: dict[str, Any],
     category_id: int,
@@ -2427,6 +2903,22 @@ def render_product_detail_view(
     return text, entities, build_product_detail_keyboard(product_id, category_id, page)
 
 
+def build_category_keyboard_configured_localized(
+    settings: Settings,
+    rows: list[dict[str, Any]],
+    lang: str,
+) -> InlineKeyboardMarkup:
+    buttons: list[list[InlineKeyboardButton]] = []
+    for row in rows:
+        category_id = safe_int(row.get("categoryId"))
+        stock = safe_int(row.get("totalStock"))
+        name = shorten(str(row.get("categoryName") or f"åˆ†ç±» {category_id}"), 26)
+        buttons.append([catalog_button(settings, ui_text("product_list_stock", lang, name=name, stock=stock), f"cat:{category_id}:0")])
+    buttons.append([premium_inline_button(ui_text("button_main_menu", lang), "nav:menu", HOME_EMOJI_ID)])
+    buttons.append([premium_inline_button(ui_text("close", lang), "nav:close", CLOSE_EMOJI_ID)])
+    return InlineKeyboardMarkup(buttons)
+
+
 def build_category_keyboard_configured(settings: Settings, rows: list[dict[str, Any]]) -> InlineKeyboardMarkup:
     buttons: list[list[InlineKeyboardButton]] = []
     for row in rows:
@@ -2436,6 +2928,36 @@ def build_category_keyboard_configured(settings: Settings, rows: list[dict[str, 
         buttons.append([catalog_button(settings, f"{name} 库存 [{stock}]", f"cat:{category_id}:0")])
     buttons.append([premium_inline_button(BUTTON_MAIN_MENU, "nav:menu", HOME_EMOJI_ID)])
     buttons.append([premium_inline_button("关闭", "nav:close", CLOSE_EMOJI_ID)])
+    return InlineKeyboardMarkup(buttons)
+
+
+def build_product_keyboard_configured_localized(
+    settings: Settings,
+    rows: list[dict[str, Any]],
+    category_id: int,
+    page: int,
+    lang: str,
+) -> InlineKeyboardMarkup:
+    buttons: list[list[InlineKeyboardButton]] = []
+    for row in rows:
+        product_id = safe_int(row.get("productId"))
+        product_name = shorten(str(row.get("productName") or f"å•†å“ {product_id}"), 28)
+        stock = safe_int(row.get("totalStock"))
+        price = resolve_sell_price(settings, row)
+        buttons.append(
+            [
+                plain_catalog_button(
+                    ui_text("product_row_price", lang, name=product_name, stock=stock, price=f"{price:.2f}"),
+                    f"prd:{product_id}:{category_id}:0",
+                )
+            ]
+        )
+    buttons.append(
+        [
+            premium_inline_button(ui_text("button_main_menu", lang), "nav:menu", HOME_EMOJI_ID),
+            premium_inline_button(ui_text("back_categories", lang), "nav:cats", BACK_EMOJI_ID),
+        ]
+    )
     return InlineKeyboardMarkup(buttons)
 
 
@@ -2462,6 +2984,18 @@ def build_product_keyboard_configured(
     return InlineKeyboardMarkup(buttons)
 
 
+def render_products_view_configured_localized(
+    settings: Settings,
+    category_name: str,
+    category_id: int,
+    rows: list[dict[str, Any]],
+    page: int,
+    lang: str,
+) -> tuple[str, tuple[MessageEntity, ...], InlineKeyboardMarkup]:
+    text, entities = build_products_intro_text_localized(category_name, lang)
+    return text, entities, build_product_keyboard_configured_localized(settings, rows, category_id, page, lang)
+
+
 def render_products_view_configured(
     settings: Settings,
     category_name: str,
@@ -2471,6 +3005,25 @@ def render_products_view_configured(
 ) -> tuple[str, tuple[MessageEntity, ...], InlineKeyboardMarkup]:
     text, entities = build_products_intro_text(category_name)
     return text, entities, build_product_keyboard_configured(settings, rows, category_id, page)
+
+
+def render_product_detail_view_configured_localized(
+    settings: Settings,
+    row: dict[str, Any],
+    category_id: int,
+    page: int,
+    lang: str,
+) -> tuple[str, tuple[MessageEntity, ...], InlineKeyboardMarkup]:
+    product_id = safe_int(row.get("productId"))
+    product_name = str(row.get("productName") or f"å•†å“ {product_id}")
+    sell_price = resolve_sell_price(settings, row)
+    text, entities = build_product_detail_text_localized(
+        product_name,
+        sell_price,
+        safe_int(row.get("totalStock")),
+        lang,
+    )
+    return text, entities, build_product_detail_keyboard_localized(product_id, category_id, page, lang)
 
 
 def render_product_detail_view_configured(
@@ -2505,10 +3058,10 @@ async def build_main_menu_message(
     user: Any,
 ) -> tuple[str, tuple[MessageEntity, ...], InlineKeyboardMarkup]:
     settings, store, _ = get_services(context)
-    await call_blocking(store.ensure_user, user.id, user.username or "", user.full_name or "")
+    lang = await ensure_user_with_lang(context, user)
     balance = await call_blocking(store.get_balance, user.id)
     summary = await call_blocking(store.get_user_summary, user.id)
-    text, entities = build_start_menu_text(
+    text, entities = build_start_menu_text_localized(
         settings,
         user,
         balance,
@@ -2516,14 +3069,21 @@ async def build_main_menu_message(
         safe_int(summary.get("total_quantity")),
         effective_restock_channel(context, settings),
         effective_customer_service_contact(context, settings),
+        lang,
     )
-    main_menu_inline = build_main_menu_inline(settings)
+    main_menu_inline = build_main_menu_inline_localized(settings, lang)
     return text, entities, main_menu_inline
 
 
 async def refresh_bottom_menu_keyboard(update: Update) -> None:
     if update.message is not None:
         await update.message.reply_text("底部菜单已刷新。", reply_markup=MENU_KEYBOARD)
+
+
+async def refresh_bottom_menu_keyboard_localized(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    lang = await ensure_user_with_lang(context, update.effective_user)
+    if update.message is not None:
+        await update.message.reply_text(ui_text("bottom_menu_refreshed", lang), reply_markup=build_menu_keyboard(lang))
 
 
 async def show_start_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -2533,7 +3093,7 @@ async def show_start_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     text, text_entities, main_menu_inline = await build_main_menu_message(context, user)
     if update.callback_query is not None:
         await answer_callback_query_safely(update.callback_query)
-    await refresh_bottom_menu_keyboard(update)
+    await refresh_bottom_menu_keyboard_localized(update, context)
     start_menu_image_path = START_MENU_IMAGE_PATH if START_MENU_IMAGE_PATH.exists() else LEGACY_START_MENU_IMAGE_PATH
     if start_menu_image_path.exists():
         with start_menu_image_path.open("rb") as photo_fp:
@@ -2568,6 +3128,18 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 async def show_categories(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     settings, _, supplier = get_services(context)
+    lang = await ensure_user_with_lang(context, update.effective_user)
+    try:
+        rows = await fetch_categories(supplier)
+    except SupplierApiError as exc:
+        await reply_inline(update, ui_text("fetch_categories_failed", lang, error=exc))
+        return
+    if not rows:
+        await reply_inline(update, ui_text("no_categories", lang))
+        return
+    text, entities = build_categories_intro_text_localized(lang)
+    await reply_inline(update, text, build_category_keyboard_configured_localized(settings, rows, lang), entities=entities)
+    return
     try:
         rows = await fetch_categories(supplier)
     except SupplierApiError as exc:
@@ -2587,6 +3159,20 @@ async def show_products(
     page: int = 0,
 ) -> None:
     settings, _, supplier = get_services(context)
+    lang = await ensure_user_with_lang(context, update.effective_user)
+    try:
+        categories = await fetch_categories(supplier)
+        rows = await fetch_category_products(supplier, category_id)
+    except SupplierApiError as exc:
+        await reply_inline(update, ui_text("fetch_products_failed", lang, error=exc))
+        return
+    if not rows:
+        await reply_inline(update, ui_text("no_products_in_category", lang))
+        return
+    category_name = category_name_from_rows(categories, category_id)
+    text, entities, keyboard = render_products_view_configured_localized(settings, category_name, category_id, rows, page, lang)
+    await reply_inline(update, text, keyboard, entities=entities)
+    return
     try:
         categories = await fetch_categories(supplier)
         rows = await fetch_category_products(supplier, category_id)
@@ -2601,11 +3187,62 @@ async def show_products(
     await reply_inline(update, text, keyboard, entities=entities)
 
 
+def build_profile_text_localized(user: Any, balance: float, rows: list[dict[str, Any]], lang: str) -> str:
+    lines = [
+        ui_text("profile_title", lang),
+        "",
+        ui_text("user_id_label", lang, user_id=user.id),
+        ui_text("username_label", lang, username=f"@{user.username}") if user.username else ui_text("username_unset", lang),
+        ui_text("balance_amount_label", lang, balance=format_money(balance)),
+        "",
+        ui_text("recent_orders_section", lang),
+    ]
+    if rows:
+        for row in rows:
+            lines.append(
+                f"- {row['product_name']} | {row['state']} | "
+                f"{row['quantity_success']}/{row['quantity']}"
+            )
+    else:
+        lines.append(ui_text("no_recent_orders", lang))
+    return "\n".join(lines)
+
+
+def build_profile_keyboard_localized(lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton(ui_text("profile_recharge", lang), callback_data="nav:recharge")],
+            [
+                InlineKeyboardButton(ui_text("button_account_list", lang), callback_data="nav:cats"),
+                InlineKeyboardButton(ui_text("profile_orders", lang), callback_data="nav:orders"),
+            ],
+            [premium_inline_button(ui_text("button_main_menu", lang), "nav:menu", HOME_EMOJI_ID)],
+        ]
+    )
+
+
+def build_language_keyboard(lang: str = DEFAULT_LANG) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(ui_text("language_set_zh", "zh"), callback_data="lang:set:zh"),
+                InlineKeyboardButton(ui_text("language_set_en", "en"), callback_data="lang:set:en"),
+            ],
+            [premium_inline_button(ui_text("button_main_menu", lang), "nav:menu", HOME_EMOJI_ID)],
+        ]
+    )
+
+
 async def show_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     settings, store, _ = get_services(context)
     user = update.effective_user
     if user is None:
         return
+    lang = await ensure_user_with_lang(context, user)
+    balance = await call_blocking(store.get_balance, user.id)
+    rows = await call_blocking(store.list_user_orders, user.id, 5)
+    await reply_inline(update, build_profile_text_localized(user, balance, rows, lang), build_profile_keyboard_localized(lang))
+    return
     await call_blocking(store.ensure_user, user.id, user.username or "", user.full_name or "")
     balance = await call_blocking(store.get_balance, user.id)
     rows = await call_blocking(store.list_user_orders, user.id, 5)
@@ -2660,6 +3297,96 @@ RECHARGE_PRESET_AMOUNTS: tuple[tuple[int, ...], ...] = (
     (100, 200, 500),
     (1000, 1500, 2000),
 )
+
+
+def build_recharge_keyboard_localized(
+    settings: Settings,
+    okpay_config: dict[str, str],
+    recharge_address: str,
+    selected_channel: str | None,
+    lang: str,
+) -> InlineKeyboardMarkup:
+    trc20_available = trc20_enabled(recharge_address)
+    okpay_available = okpay_enabled(okpay_config)
+    selected_channel = normalize_recharge_channel(selected_channel)
+    rows: list[list[InlineKeyboardButton]] = []
+    if selected_channel is None:
+        if trc20_available:
+            rows.append(
+                [
+                    premium_inline_button_with_fallback(
+                        settings,
+                        ui_text("recharge_channel_trc20", lang),
+                        "rchg:select:trc20",
+                        RECHARGE_CHANNEL_TRC20_EMOJI_ID,
+                        "ðŸ˜„",
+                    )
+                ]
+            )
+        if okpay_available:
+            rows.append(
+                [
+                    premium_inline_button_with_fallback(
+                        settings,
+                        ui_text("recharge_channel_okpay", lang),
+                        "rchg:select:okpay",
+                        RECHARGE_CHANNEL_OKPAY_EMOJI_ID,
+                        "ðŸ˜„",
+                    )
+                ]
+            )
+        rows.append(
+            [
+                premium_inline_button_with_fallback(
+                    settings,
+                    ui_text("cancel_recharge", lang),
+                    "rchg:close",
+                    RECHARGE_CANCEL_EMOJI_ID,
+                    "ðŸš«",
+                )
+            ]
+        )
+        return InlineKeyboardMarkup(rows)
+
+    if selected_channel == "trc20" and not trc20_available:
+        selected_channel = None
+    if selected_channel == "okpay" and not okpay_available:
+        selected_channel = None
+    if selected_channel is not None:
+        for amount_row in RECHARGE_PRESET_AMOUNTS:
+            rows.append(
+                [
+                    InlineKeyboardButton(
+                        f"{amount}USDT",
+                        callback_data=f"rchg:{selected_channel}:create:{amount}",
+                    )
+                    for amount in amount_row
+                ]
+            )
+        rows.append([InlineKeyboardButton(ui_text("custom_recharge", lang), callback_data=f"rchg:{selected_channel}:custom")])
+        rows.append(
+            [
+                premium_inline_button_with_fallback(
+                    settings,
+                    ui_text("back_payment_methods", lang),
+                    "rchg:back",
+                    RECHARGE_BACK_EMOJI_ID,
+                    "â¬…ï¸",
+                )
+            ]
+        )
+        rows.append(
+            [
+                premium_inline_button_with_fallback(
+                    settings,
+                    ui_text("cancel_recharge", lang),
+                    "rchg:close",
+                    RECHARGE_CANCEL_EMOJI_ID,
+                    "ðŸš«",
+                )
+            ]
+        )
+    return InlineKeyboardMarkup(rows)
 
 
 def build_recharge_keyboard(
@@ -3099,6 +3826,34 @@ async def show_recharge(
 ) -> None:
     settings, store, _ = get_services(context)
     user = update.effective_user
+    lang = await ensure_user_with_lang(context, user)
+    recharge_address = effective_recharge_address(context)
+    okpay_config = effective_okpay_settings(context, settings)
+    trc20_available = trc20_enabled(recharge_address)
+    okpay_available = okpay_enabled(okpay_config)
+    selected_channel = normalize_recharge_channel(selected_channel)
+    if user is not None:
+        await call_blocking(store.ensure_user, user.id, user.username or "", user.full_name or "")
+    if selected_channel == "trc20" and not trc20_available:
+        selected_channel = None
+    if selected_channel == "okpay" and not okpay_available:
+        selected_channel = None
+    if selected_channel is None:
+        if not trc20_available and not okpay_available:
+            await reply_inline(update, ui_text("recharge_unavailable", lang))
+            return
+        text, entities = build_recharge_menu_text_localized(None, lang)
+    elif selected_channel == "trc20":
+        text, entities = build_recharge_menu_text_localized("trc20", lang)
+    else:
+        text, entities = build_recharge_menu_text_localized("okpay", lang)
+    await reply_inline(
+        update,
+        text,
+        build_recharge_keyboard_localized(settings, okpay_config, recharge_address, selected_channel, lang),
+        entities=entities,
+    )
+    return
     if user is not None:
         await call_blocking(store.ensure_user, user.id, user.username or "", user.full_name or "")
     recharge_address = effective_recharge_address(context)
@@ -3155,6 +3910,33 @@ async def show_language(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     if await should_ignore_for_closed_business(update, context):
         return
     await send_menu_message(update, "🌐 切换语言功能稍后补上，当前默认中文。")
+
+
+async def show_customer_service(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    settings, _, _ = get_services(context)
+    lang = await ensure_user_with_lang(context, update.effective_user)
+    text = premium_text_prefix(
+        CUSTOMER_SERVICE_EMOJI_ID,
+        "â˜Žï¸",
+        ui_text("contact_customer_service", lang, contact=effective_customer_service_contact(context, settings)),
+    )
+    await reply_inline(update, text, parse_mode="HTML")
+
+
+async def show_notice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if await should_ignore_for_closed_business(update, context):
+        return
+    lang = await ensure_user_with_lang(context, update.effective_user)
+    text = ui_text("purchase_notice_text", lang)
+    keyboard = InlineKeyboardMarkup([[premium_inline_button(ui_text("button_main_menu", lang), "nav:menu", HOME_EMOJI_ID)]])
+    await reply_inline(update, text, keyboard)
+
+
+async def show_language(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if await should_ignore_for_closed_business(update, context):
+        return
+    lang = await ensure_user_with_lang(context, update.effective_user)
+    await reply_inline(update, ui_text("language_choose", lang), build_language_keyboard(lang))
 
 
 def build_admin_home_keyboard() -> InlineKeyboardMarkup:
@@ -4384,9 +5166,124 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if action != "rchg":
         clear_pending_recharge(context)
 
+    if action == "lang" and len(parts) >= 3 and parts[1] == "set":
+        user = update.effective_user
+        lang = normalize_lang_code(parts[2])
+        await update_user_lang(context, user, lang)
+        await answer_callback_query_safely(query, ui_text("language_changed", lang))
+        await show_start_menu(update, context)
+        return
+
+    if action == "cat" and len(parts) == 3:
+        clear_pending_purchase(context)
+        category_id = safe_int(parts[1], -1)
+        page = safe_int(parts[2], 0)
+        if category_id <= 0:
+            lang = await ensure_user_with_lang(context, update.effective_user)
+            await reply_inline(update, ui_text("category_param_invalid", lang))
+            return
+        await show_products(update, context, category_id, page)
+        return
+
+    if action == "prd" and len(parts) == 4:
+        clear_pending_purchase(context)
+        product_id = safe_int(parts[1], -1)
+        category_id = safe_int(parts[2], 0)
+        page = safe_int(parts[3], 0)
+        lang = await ensure_user_with_lang(context, update.effective_user)
+        if product_id <= 0:
+            await reply_inline(update, ui_text("product_param_invalid", lang))
+            return
+        try:
+            payload = await call_blocking(supplier.get_product_detail, product_id)
+        except SupplierApiError as exc:
+            await reply_inline(update, ui_text("fetch_product_detail_failed", lang, error=exc))
+            return
+        row = payload.get("data") or {}
+        text, entities, keyboard = render_product_detail_view_configured_localized(settings, row, category_id, page, lang)
+        await reply_inline(update, text, keyboard, entities=entities)
+        return
+
+    if action == "qbuy" and len(parts) == 5:
+        product_id = safe_int(parts[1], -1)
+        category_id = safe_int(parts[3], 0)
+        page = safe_int(parts[4], 0)
+        lang = await ensure_user_with_lang(context, update.effective_user)
+        if product_id <= 0:
+            await reply_inline(update, ui_text("quick_buy_param_invalid", lang))
+            return
+        set_pending_purchase(context, product_id, category_id, page)
+        await reply_inline(update, ui_text("quick_buy_prompt", lang))
+        return
+
+    if action == "cbuy" and len(parts) == 3:
+        clear_pending_purchase(context)
+        user = update.effective_user
+        product_id = safe_int(parts[1], -1)
+        quantity = safe_int(parts[2], 0)
+        lang = await ensure_user_with_lang(context, user)
+        if user is None or product_id <= 0 or quantity <= 0:
+            await reply_inline(update, ui_text("quick_buy_param_invalid", lang))
+            return
+        await answer_callback_query_safely(query, ui_text("creating_order", lang))
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except BadRequest:
+            pass
+        try:
+            result = await execute_purchase(context, user.id, user.username or "", user.full_name or "", product_id, quantity)
+        except SupplierApiError as exc:
+            if query.message is not None:
+                await query.message.reply_text(ui_text("fetch_product_detail_failed", lang, error=exc), reply_markup=build_menu_keyboard(lang))
+            else:
+                await reply_inline(update, ui_text("fetch_product_detail_failed", lang, error=exc))
+            return
+        if result and query.message is not None:
+            result_text, result_entities = result
+            await query.message.reply_text(result_text, entities=result_entities, reply_markup=build_menu_keyboard(lang))
+        elif result:
+            result_text, result_entities = result
+            await reply_inline(update, result_text, entities=result_entities)
+        elif query.message is not None:
+            await query.message.reply_text(ui_text("order_created", lang), reply_markup=build_menu_keyboard(lang))
+        return
+
+    if action == "rchg" and len(parts) >= 2:
+        lang = await ensure_user_with_lang(context, update.effective_user)
+        if parts[1] == "close":
+            clear_pending_purchase(context)
+            clear_pending_recharge(context)
+            if update.callback_query is not None and update.callback_query.message is not None:
+                try:
+                    await update.callback_query.message.delete()
+                    return
+                except BadRequest:
+                    pass
+            await reply_inline(update, ui_text("recharge_canceled", lang))
+            return
+        channel = parts[1] if len(parts) > 1 else "okpay"
+        if channel in {"okpay", "trc20"}:
+            subaction = parts[2] if len(parts) > 2 else ""
+            if subaction == "custom":
+                clear_pending_purchase(context)
+                set_pending_recharge(context, channel)
+                prompt = ui_text("input_recharge_amount", lang) if channel == "trc20" else ui_text("input_okpay_amount", lang)
+                await reply_inline(update, prompt)
+                return
+
     if action == "adm":
         await handle_admin_callback(update, context, parts)
         return
+
+    if action == "nav" and len(parts) >= 2:
+        target = parts[1]
+        if target == "language":
+            await show_language(update, context)
+            return
+        if target == "close":
+            lang = await ensure_user_with_lang(context, update.effective_user)
+            await reply_inline(update, ui_text("close_done", lang))
+            return
 
     if action == "nav":
         clear_pending_purchase(context)
@@ -4406,6 +5303,9 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             return
         if target == "orders":
             await show_orders(update, context)
+            return
+        if target == "language":
+            await show_language(update, context)
             return
         if target == "close":
             await reply_inline(update, "已关闭。")
@@ -4547,6 +5447,302 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
 
     await answer_callback_query_safely(query, "暂不支持这个按钮", show_alert=False)
+
+
+async def show_orders(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    _, store, _ = get_services(context)
+    user = update.effective_user
+    if user is None:
+        return
+    lang = await ensure_user_with_lang(context, user)
+    rows = await call_blocking(store.list_user_orders, user.id, 10)
+    text = build_orders_text_localized(rows, lang)
+    keyboard = InlineKeyboardMarkup([[premium_inline_button(ui_text("button_main_menu", lang), "nav:menu", HOME_EMOJI_ID)]])
+    await reply_inline(update, text, keyboard, parse_mode="HTML")
+
+
+async def route_menu_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if await should_ignore_for_closed_business(update, context):
+        return
+    if update.message is None or not update.message.text:
+        return
+    text = update.message.text.strip()
+    if button_matches(text, "button_products", "button_account_list"):
+        clear_pending_purchase(context)
+        clear_pending_recharge(context)
+        await show_categories(update, context)
+        return
+    if button_matches(text, "button_main_menu", "bottom_main_menu"):
+        clear_pending_purchase(context)
+        clear_pending_recharge(context)
+        await show_start_menu(update, context)
+        return
+    if button_matches(text, "button_profile", "button_recharge_balance", "bottom_recharge_balance"):
+        clear_pending_purchase(context)
+        clear_pending_recharge(context)
+        await show_recharge(update, context)
+        return
+    if button_matches(text, "bottom_customer_service"):
+        clear_pending_purchase(context)
+        clear_pending_recharge(context)
+        await show_customer_service(update, context)
+        return
+    if button_matches(text, "button_purchase_notice"):
+        clear_pending_purchase(context)
+        clear_pending_recharge(context)
+        await show_notice(update, context)
+        return
+    if button_matches(text, "button_order_history"):
+        clear_pending_purchase(context)
+        clear_pending_recharge(context)
+        await show_orders(update, context)
+        return
+    if button_matches(text, "button_switch_language"):
+        clear_pending_purchase(context)
+        clear_pending_recharge(context)
+        await show_language(update, context)
+
+
+async def search_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    _, _, supplier = get_services(context)
+    if update.message is None or not update.message.text:
+        return
+    keyword = normalize_search_keyword(update.message.text)
+    if not should_trigger_product_search(keyword):
+        return
+    lang = await ensure_user_with_lang(context, update.effective_user)
+    try:
+        payload = await call_blocking(supplier.search_products, keyword)
+    except SupplierApiError as exc:
+        await update.message.reply_text(ui_text("search_failed", lang, error=exc))
+        return
+    rows = payload.get("data") or []
+    if not rows:
+        await update.message.reply_text(ui_text("search_empty", lang), reply_markup=build_menu_keyboard(lang))
+        return
+
+    text, entities = build_search_results_text_localized(keyword, rows, lambda row: safe_float(row.get("price")), lang)
+    buttons: list[list[InlineKeyboardButton]] = []
+    for row in rows[:SEARCH_RESULTS_LIMIT]:
+        product_id = safe_int(row.get("productId"))
+        category_id = safe_int(row.get("categoryId"))
+        buttons.append(
+            [
+                InlineKeyboardButton(
+                    text=ui_text("view_product", lang, name=shorten(str(row.get("productName")), 22)),
+                    callback_data=f"prd:{product_id}:{category_id}:0",
+                )
+            ]
+        )
+    buttons.append([InlineKeyboardButton(ui_text("browse_all_categories", lang), callback_data="nav:cats")])
+    await update.message.reply_text(text, entities=entities, reply_markup=InlineKeyboardMarkup(buttons))
+
+
+async def search_text_rich(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.message is None or not update.message.text:
+        return
+    keyword = normalize_search_keyword(update.message.text)
+    if await handle_admin_business_toggle(update, context, keyword):
+        return
+    if await should_ignore_for_closed_business(update, context):
+        return
+    settings, _, supplier = get_services(context)
+    if await handle_admin_text_input(update, context, keyword):
+        return
+    lang = await ensure_user_with_lang(context, update.effective_user)
+    pending_recharge = get_pending_recharge(context)
+    if pending_recharge is not None:
+        try:
+            amount = quantize_recharge_amount(float(keyword))
+        except ValueError:
+            await update.message.reply_text(ui_text("enter_number", lang), reply_markup=build_menu_keyboard(lang))
+            return
+        if amount <= 0:
+            await update.message.reply_text(ui_text("recharge_amount_positive", lang), reply_markup=build_menu_keyboard(lang))
+            return
+        channel = str(pending_recharge.get("channel") or "okpay").strip().lower()
+        clear_pending_recharge(context)
+        if channel == "trc20":
+            await create_trc20_topup_order(update, context, amount)
+        else:
+            await create_okpay_topup_order(update, context, amount)
+        return
+    pending_purchase = get_pending_purchase(context)
+    if pending_purchase is not None:
+        quantity = safe_int(keyword, -1)
+        if quantity <= 0:
+            await update.message.reply_text(ui_text("enter_quantity", lang), reply_markup=build_menu_keyboard(lang))
+            return
+        clear_pending_purchase(context)
+        product_id = safe_int(pending_purchase.get("product_id"), -1)
+        category_id = safe_int(pending_purchase.get("category_id"), 0)
+        page = safe_int(pending_purchase.get("page"), 0)
+        try:
+            payload = await call_blocking(supplier.get_product_detail, product_id)
+        except SupplierApiError as exc:
+            await update.message.reply_text(ui_text("fetch_product_detail_failed", lang, error=exc), reply_markup=build_menu_keyboard(lang))
+            return
+        row = payload.get("data") or {}
+        product_name = str(row.get("productName") or f"å•†å“ {product_id}")
+        unit_price = resolve_sell_price(settings, row)
+        caption, caption_entities = build_purchase_confirm_text_localized(product_name, unit_price, quantity, lang)
+        keyboard = build_purchase_confirm_keyboard_localized(product_id, quantity, category_id, page, lang)
+        if PURCHASE_CONFIRM_IMAGE_PATH.exists():
+            with PURCHASE_CONFIRM_IMAGE_PATH.open("rb") as photo_fp:
+                await update.message.reply_photo(
+                    photo=photo_fp,
+                    caption=caption,
+                    caption_entities=caption_entities,
+                    reply_markup=keyboard,
+                )
+        else:
+            await update.message.reply_text(caption, entities=caption_entities, reply_markup=keyboard)
+        return
+    if not should_trigger_product_search(keyword):
+        return
+    try:
+        payload = await call_blocking(supplier.search_products, keyword)
+    except SupplierApiError as exc:
+        await update.message.reply_text(ui_text("search_failed", lang, error=exc))
+        return
+    rows = payload.get("data") or []
+    if not rows:
+        await update.message.reply_text(ui_text("search_empty", lang), reply_markup=build_menu_keyboard(lang))
+        return
+
+    text, entities = build_search_results_text_localized(keyword, rows, lambda row: resolve_sell_price(settings, row), lang)
+    buttons: list[list[InlineKeyboardButton]] = []
+    for row in rows[:SEARCH_RESULTS_LIMIT]:
+        product_id = safe_int(row.get("productId"))
+        category_id = safe_int(row.get("categoryId"))
+        sell_price = resolve_sell_price(settings, row)
+        buttons.append(
+            [
+                plain_catalog_button(
+                    ui_text("product_row_price", lang, name=shorten(str(row.get("productName")), 22), stock=safe_int(row.get("totalStock")), price=f"{sell_price:.2f}"),
+                    f"prd:{product_id}:{category_id}:0",
+                )
+            ]
+        )
+    buttons.append([InlineKeyboardButton(ui_text("browse_all_categories", lang), callback_data="nav:cats")])
+    await update.message.reply_text(text, entities=entities, reply_markup=InlineKeyboardMarkup(buttons))
+
+
+async def buy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if await should_ignore_for_closed_business(update, context):
+        return
+    user = update.effective_user
+    if user is None or update.message is None:
+        return
+    lang = await ensure_user_with_lang(context, user)
+    if len(context.args) < 2:
+        await update.message.reply_text(ui_text("usage_buy", lang), reply_markup=build_menu_keyboard(lang))
+        return
+    try:
+        product_id = int(context.args[0])
+        quantity = int(context.args[1])
+    except ValueError:
+        await update.message.reply_text(ui_text("product_and_quantity_number", lang), reply_markup=build_menu_keyboard(lang))
+        return
+    if quantity <= 0:
+        await update.message.reply_text(ui_text("quantity_positive", lang), reply_markup=build_menu_keyboard(lang))
+        return
+
+    try:
+        result = await execute_purchase(context, user.id, user.username or "", user.full_name or "", product_id, quantity)
+    except SupplierApiError as exc:
+        await update.message.reply_text(ui_text("fetch_product_detail_failed", lang, error=exc), reply_markup=build_menu_keyboard(lang))
+        return
+    if result:
+        result_text, result_entities = result
+        await update.message.reply_text(result_text, entities=result_entities, reply_markup=build_menu_keyboard(lang))
+    else:
+        await update.message.reply_text(ui_text("order_created", lang), reply_markup=build_menu_keyboard(lang))
+
+
+async def order(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if await should_ignore_for_closed_business(update, context):
+        return
+    _, store, supplier = get_services(context)
+    if update.message is None:
+        return
+    lang = await ensure_user_with_lang(context, update.effective_user)
+    if not context.args:
+        await update.message.reply_text(ui_text("usage_order", lang), reply_markup=build_menu_keyboard(lang))
+        return
+    task_id = context.args[0].strip()
+    local_order = await call_blocking(store.get_order, task_id)
+    if not local_order:
+        await update.message.reply_text(ui_text("local_order_missing", lang), reply_markup=build_menu_keyboard(lang))
+        return
+    _, summary = await finalize_remote_order(context, task_id, notify_user=False)
+    local_order = await call_blocking(store.get_order, task_id) or local_order
+    if local_order.get("file_url") and not str(local_order.get("delivery_sent_at") or "").strip():
+        await deliver_order_file(
+            context,
+            local_order,
+            supplier,
+            include_ready_photo=True,
+            notify_failure=True,
+        )
+        local_order = await call_blocking(store.get_order, task_id) or local_order
+    lines = [
+        f"Task ID: {task_id}" if lang == "en" else f"è®¢å•å·: {task_id}",
+        f"Product: {local_order.get('product_name')}" if lang == "en" else f"å•†å“: {local_order.get('product_name')}",
+        f"Status: {local_order.get('state')}" if lang == "en" else f"çŠ¶æ€: {local_order.get('state')}",
+        f"Quantity: {local_order.get('quantity')}" if lang == "en" else f"æ•°é‡: {local_order.get('quantity')}",
+        f"Success: {local_order.get('quantity_success')}" if lang == "en" else f"æˆåŠŸæ•°é‡: {local_order.get('quantity_success')}",
+        f"Refund: {format_money(safe_float(local_order.get('refund_amount')))} USDT" if lang == "en" else f"é€€æ¬¾: {format_money(safe_float(local_order.get('refund_amount')))} USDT",
+        f"Result: {summary}" if lang == "en" else f"ç»“æžœ: {summary}",
+    ]
+    if local_order.get("file_url"):
+        if str(local_order.get("delivery_sent_at") or "").strip():
+            lines.append("Delivery file: zip sent" if lang == "en" else "å‘è´§æ–‡ä»¶: zip å·²å‘é€")
+        else:
+            lines.append("Delivery file: pending, retry with /order" if lang == "en" else "å‘è´§æ–‡ä»¶: zip å¾…å‘é€ï¼Œå¯ç”¨ /order é‡è¯•")
+    await update.message.reply_text("\n".join(lines), reply_markup=build_menu_keyboard(lang))
+
+
+async def products(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if await should_ignore_for_closed_business(update, context):
+        return
+    if update.message is None:
+        return
+    lang = await ensure_user_with_lang(context, update.effective_user)
+    if not context.args:
+        await update.message.reply_text(ui_text("usage_products", lang), reply_markup=build_menu_keyboard(lang))
+        return
+    try:
+        category_id = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text(ui_text("category_id_number", lang), reply_markup=build_menu_keyboard(lang))
+        return
+    await show_products(update, context, category_id, page=0)
+
+
+async def product(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if await should_ignore_for_closed_business(update, context):
+        return
+    settings, _, supplier = get_services(context)
+    if update.message is None:
+        return
+    lang = await ensure_user_with_lang(context, update.effective_user)
+    if not context.args:
+        await update.message.reply_text(ui_text("usage_product", lang), reply_markup=build_menu_keyboard(lang))
+        return
+    try:
+        product_id = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text(ui_text("product_id_number", lang), reply_markup=build_menu_keyboard(lang))
+        return
+    try:
+        payload = await call_blocking(supplier.get_product_detail, product_id)
+    except SupplierApiError as exc:
+        await update.message.reply_text(ui_text("fetch_product_detail_failed", lang, error=exc), reply_markup=build_menu_keyboard(lang))
+        return
+    row = payload.get("data") or {}
+    text, entities, keyboard = render_product_detail_view_configured_localized(settings, row, category_id=0, page=0, lang=lang)
+    await update.message.reply_text(text, entities=entities, reply_markup=keyboard)
 
 
 async def poll_processing_orders(context: ContextTypes.DEFAULT_TYPE) -> None:

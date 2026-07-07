@@ -188,7 +188,7 @@ class Store:
                     username = excluded.username,
                     display_name = excluded.display_name,
                     lang = CASE
-                        WHEN excluded.lang != '' THEN excluded.lang
+                        WHEN users.lang = '' AND excluded.lang != '' THEN excluded.lang
                         ELSE users.lang
                     END,
                     is_active = 1,

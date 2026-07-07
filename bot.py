@@ -3097,6 +3097,11 @@ async def refresh_bottom_menu_keyboard_localized(update: Update, context: Contex
     lang = await ensure_user_with_lang(context, update.effective_user)
     if update.message is not None:
         await update.message.reply_text(ui_text("bottom_menu_refreshed", lang), reply_markup=build_menu_keyboard(lang))
+    elif update.callback_query is not None and update.callback_query.message is not None:
+        await update.callback_query.message.reply_text(
+            ui_text("bottom_menu_refreshed", lang),
+            reply_markup=build_menu_keyboard(lang),
+        )
 
 
 async def show_start_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

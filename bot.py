@@ -337,6 +337,7 @@ CATEGORY_NAME_TRANSLATIONS: list[tuple[str, str]] = [
     ("会员号（盲盒）", "VIP Account (Blind Box)"),
     ("会员号(盲盒)", "VIP Account (Blind Box)"),
     ("会员号", "VIP Account"),
+    ("卡号", "Card Account"),
     ("盲盒", "Blind Box"),
     ("双向 Spam", "Two-way Spam"),
     ("双向Spam", "Two-way Spam"),
@@ -463,6 +464,14 @@ DISPLAY_NAME_TRANSLATIONS: list[tuple[str, str]] = sorted(
     key=lambda item: len(item[0]),
     reverse=True,
 )
+
+DISPLAY_NAME_REGEX_TRANSLATIONS: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"[5５五]\s*年\s*以\s*上\s*主号"), "5+ Years Main Account"),
+    (re.compile(r"[7７七]\s*年\s*以\s*上\s*主号"), "7+ Years Main Account"),
+    (re.compile(r"[5５五]\s*年\s*以\s*上"), "5+ Years"),
+    (re.compile(r"[7７七]\s*年\s*以\s*上"), "7+ Years"),
+    (re.compile(r"卡号"), "Card Account"),
+]
 
 PENDING_PURCHASE_KEY = "pending_purchase_quantity"
 PENDING_RECHARGE_KEY = "pending_recharge_amount"
@@ -1271,6 +1280,8 @@ def translate_category_name(name: str, lang: str) -> str:
     translated = text
     for source, target in DISPLAY_NAME_TRANSLATIONS:
         translated = translated.replace(source, target)
+    for pattern, target in DISPLAY_NAME_REGEX_TRANSLATIONS:
+        translated = pattern.sub(target, translated)
     translated = re.sub(r"Fancy Number(?=[A-Za-z0-9])", "Fancy Number ", translated)
     translated = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", translated)
     return " ".join(translated.split())

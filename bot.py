@@ -1359,7 +1359,7 @@ def build_admin_cha_text(row: dict[str, Any], summary: dict[str, float], orders:
     return "\n".join(lines)
 
 
-def build_admin_cha_summary_text(row: dict[str, Any], summary: dict[str, Any]) -> str:
+def build_admin_cha_summary_text(row: dict[str, Any], summary: dict[str, Any]) -> tuple[str, tuple[MessageEntity, ...]]:
     username = str(row.get("username") or "").strip()
     username_text = f"@{username}" if username else "未设置"
     display_name = " ".join(str(row.get("display_name") or "").split()).strip() or "未设置"
@@ -1367,18 +1367,37 @@ def build_admin_cha_summary_text(row: dict[str, Any], summary: dict[str, Any]) -
     balance = format_money(safe_float(row.get("balance")))
     total_quantity = safe_int(summary.get("total_quantity"), 0)
     total_spent = format_money(safe_float(summary.get("total_spent")))
-    lines = [
-        f"{tg_custom_emoji(ADMIN_CHA_TITLE_EMOJI_ID, '🔎')} 用户查询结果",
-        "",
-        f"{tg_custom_emoji(ADMIN_CHA_USER_ID_EMOJI_ID, '👤')} 用户ID: <code>{int(row.get('user_id') or 0)}</code>",
-        f"{tg_custom_emoji(ADMIN_CHA_USERNAME_EMOJI_ID, '👤')} 用户名: {html.escape(username_text)}",
-        f"{tg_custom_emoji(ADMIN_CHA_NICKNAME_EMOJI_ID, '🏷')} 昵称: {html.escape(display_name)}",
-        f"{tg_custom_emoji(ADMIN_CHA_REGISTERED_AT_EMOJI_ID, '🕓')} 注册时间: {html.escape(created_at)}",
-        f"{tg_custom_emoji(ADMIN_CHA_BALANCE_EMOJI_ID, '🪙')} 余额: {balance} USDT",
-        f"{tg_custom_emoji(ADMIN_CHA_PURCHASE_COUNT_EMOJI_ID, '📊')} 购买数量: {total_quantity}",
-        f"{tg_custom_emoji(ADMIN_CHA_TOTAL_SPENT_EMOJI_ID, '🛡')} 累计消费: {total_spent} USDT",
-    ]
-    return "\n".join(lines)
+    parts: list[tuple[str, str | None]] = []
+    code_spans: list[tuple[int, int]] = []
+    offset = 0
+
+    def add_text(value: str, custom_emoji_id: str | None = None, code: bool = False) -> None:
+        nonlocal offset
+        parts.append((value, custom_emoji_id))
+        length = len(value)
+        if code:
+            code_spans.append((offset, length))
+        offset += length
+
+    add_text("🔎", ADMIN_CHA_TITLE_EMOJI_ID)
+    add_text(" 用户查询结果\n\n")
+    add_text("👤", ADMIN_CHA_USER_ID_EMOJI_ID)
+    add_text(" 用户ID: ")
+    add_text(str(int(row.get("user_id") or 0)), code=True)
+    add_text("\n")
+    add_text("👤", ADMIN_CHA_USERNAME_EMOJI_ID)
+    add_text(f" 用户名: {username_text}\n")
+    add_text("🏷", ADMIN_CHA_NICKNAME_EMOJI_ID)
+    add_text(f" 昵称: {display_name}\n")
+    add_text("🕓", ADMIN_CHA_REGISTERED_AT_EMOJI_ID)
+    add_text(f" 注册时间: {created_at}\n")
+    add_text("🪙", ADMIN_CHA_BALANCE_EMOJI_ID)
+    add_text(f" 余额: {balance} USDT\n")
+    add_text("📊", ADMIN_CHA_PURCHASE_COUNT_EMOJI_ID)
+    add_text(f" 购买数量: {total_quantity}\n")
+    add_text("🛡", ADMIN_CHA_TOTAL_SPENT_EMOJI_ID)
+    add_text(f" 累计消费: {total_spent} USDT")
+    return build_text_with_custom_emoji(parts, code_spans)
 
 
 def build_admin_cha_summary_keyboard(target_user_id: int, has_orders: bool) -> InlineKeyboardMarkup | None:
@@ -1389,19 +1408,25 @@ def build_admin_cha_summary_keyboard(target_user_id: int, has_orders: bool) -> I
     )
 
 
-def build_admin_cha_order_list_text(row: dict[str, Any], orders: list[dict[str, Any]]) -> str:
+def build_admin_cha_order_list_text(row: dict[str, Any], orders: list[dict[str, Any]]) -> tuple[str, tuple[MessageEntity, ...]]:
     username = str(row.get("username") or "").strip()
     username_text = f"@{username}" if username else str(int(row.get("user_id") or 0))
-    header = f"{tg_custom_emoji(ADMIN_CHA_ORDER_HISTORY_EMOJI_ID, '✉️')} 购买记录\n\n用户: {html.escape(username_text)}"
+    parts: list[tuple[str, str | None]] = [
+        ("✉️", ADMIN_CHA_ORDER_HISTORY_EMOJI_ID),
+        (" 购买记录\n\n", None),
+        (f"用户: {username_text}", None),
+    ]
     if not orders:
-        return f"{header}\n暂无购买记录"
-    lines = [header, "", "点击下面订单查看详情："]
+        parts.append(("\n暂无购买记录", None))
+        return build_text_with_custom_emoji(parts)
+    lines = ["", "", "点击下面订单查看详情："]
     for index, order in enumerate(orders, start=1):
         product_name = shorten(" ".join(str(order.get("product_name") or "").split()).strip() or "商品", 22)
         quantity = safe_int(order.get("quantity"), 0)
         spent = max(0.0, safe_float(order.get("total_price")) - safe_float(order.get("refund_amount")))
-        lines.append(f"{index}. {html.escape(product_name)} | x{quantity} | {format_money(spent)} USDT")
-    return "\n".join(lines)
+        lines.append(f"{index}. {product_name} | x{quantity} | {format_money(spent)} USDT")
+    parts.append(("\n".join(lines), None))
+    return build_text_with_custom_emoji(parts)
 
 
 def build_admin_cha_order_list_keyboard(target_user_id: int, orders: list[dict[str, Any]]) -> InlineKeyboardMarkup:
@@ -1414,7 +1439,7 @@ def build_admin_cha_order_list_keyboard(target_user_id: int, orders: list[dict[s
     return InlineKeyboardMarkup(buttons)
 
 
-def build_admin_cha_order_detail_text(order_row: dict[str, Any]) -> str:
+def build_admin_cha_order_detail_text(order_row: dict[str, Any]) -> tuple[str, tuple[MessageEntity, ...]]:
     task_id = str(order_row.get("task_id") or "").strip() or "-"
     product_name = " ".join(str(order_row.get("product_name") or "").split()).strip() or "商品"
     quantity = safe_int(order_row.get("quantity"), 0)
@@ -1426,22 +1451,33 @@ def build_admin_cha_order_detail_text(order_row: dict[str, Any]) -> str:
     created_at = format_user_created_at(order_row.get("created_at"))
     state = str(order_row.get("state") or "-").strip() or "-"
     file_status = "可下载" if str(order_row.get("file_url") or "").strip() else "暂无"
-    lines = [
-        "🧾 订单详情",
-        "",
-        f"订单号: <code>{html.escape(task_id)}</code>",
-        f"商品名: {html.escape(product_name)}",
-        f"数量: {quantity}",
-        f"成功数量: {quantity_success}",
-        f"单价: {unit_price} USDT",
-        f"订单金额: {total_price} USDT",
-        f"退款: {refund_amount} USDT",
-        f"实付: {paid_amount} USDT",
-        f"状态: {html.escape(state)}",
-        f"下单时间: {html.escape(created_at)}",
-        f"发货文件: {file_status}",
-    ]
-    return "\n".join(lines)
+    parts: list[tuple[str, str | None]] = []
+    code_spans: list[tuple[int, int]] = []
+    offset = 0
+
+    def add_text(value: str, custom_emoji_id: str | None = None, code: bool = False) -> None:
+        nonlocal offset
+        parts.append((value, custom_emoji_id))
+        length = len(value)
+        if code:
+            code_spans.append((offset, length))
+        offset += length
+
+    add_text("🧾 订单详情\n\n")
+    add_text("订单号: ")
+    add_text(task_id, code=True)
+    add_text("\n")
+    add_text(f"商品名: {product_name}\n")
+    add_text(f"数量: {quantity}\n")
+    add_text(f"成功数量: {quantity_success}\n")
+    add_text(f"单价: {unit_price} USDT\n")
+    add_text(f"订单金额: {total_price} USDT\n")
+    add_text(f"退款: {refund_amount} USDT\n")
+    add_text(f"实付: {paid_amount} USDT\n")
+    add_text(f"状态: {state}\n")
+    add_text(f"下单时间: {created_at}\n")
+    add_text(f"发货文件: {file_status}")
+    return build_text_with_custom_emoji(parts, code_spans)
 
 
 def build_admin_cha_order_detail_keyboard(target_user_id: int, order_index: int, has_file: bool) -> InlineKeyboardMarkup:
@@ -5764,9 +5800,9 @@ async def show_admin_cha_summary(update: Update, context: ContextTypes.DEFAULT_T
         return
     summary = await call_blocking(store.get_user_summary, target_user_id)
     orders = await call_blocking(store.list_user_orders, target_user_id, 10)
-    text = build_admin_cha_summary_text(row, summary)
+    text, entities = build_admin_cha_summary_text(row, summary)
     keyboard = build_admin_cha_summary_keyboard(target_user_id, bool(orders))
-    await reply_inline(update, text, reply_markup=keyboard, parse_mode="HTML")
+    await reply_inline(update, text, reply_markup=keyboard, entities=entities)
 
 
 async def show_admin_cha_orders(update: Update, context: ContextTypes.DEFAULT_TYPE, target_user_id: int) -> None:
@@ -5776,9 +5812,9 @@ async def show_admin_cha_orders(update: Update, context: ContextTypes.DEFAULT_TY
         await reply_inline(update, f"找不到用户 {target_user_id}。")
         return
     orders = await call_blocking(store.list_user_orders, target_user_id, 10)
-    text = build_admin_cha_order_list_text(row, orders)
+    text, entities = build_admin_cha_order_list_text(row, orders)
     keyboard = build_admin_cha_order_list_keyboard(target_user_id, orders)
-    await reply_inline(update, text, reply_markup=keyboard, parse_mode="HTML")
+    await reply_inline(update, text, reply_markup=keyboard, entities=entities)
 
 
 async def show_admin_cha_order_detail(
@@ -5793,13 +5829,13 @@ async def show_admin_cha_order_detail(
         await reply_inline(update, "这条购买记录不存在或已经超出最近 10 条。")
         return
     order_row = orders[order_index]
-    text = build_admin_cha_order_detail_text(order_row)
+    text, entities = build_admin_cha_order_detail_text(order_row)
     keyboard = build_admin_cha_order_detail_keyboard(
         target_user_id,
         order_index,
         bool(str(order_row.get("file_url") or "").strip()),
     )
-    await reply_inline(update, text, reply_markup=keyboard, parse_mode="HTML")
+    await reply_inline(update, text, reply_markup=keyboard, entities=entities)
 
 
 async def send_admin_cha_order_file(

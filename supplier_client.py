@@ -78,27 +78,50 @@ class SupplierClient:
         )
 
     def _parse_response(self, response: requests.Response) -> dict[str, Any]:
-        response.raise_for_status()
-        payload = response.json()
+        try:
+            response.raise_for_status()
+        except requests.HTTPError as exc:
+            payload: Any | None = None
+            try:
+                payload = response.json()
+            except ValueError:
+                payload = None
+            message = self._build_http_error_message(response, payload)
+            raise SupplierApiError(message, payload) from exc
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise SupplierApiError("supplier returned invalid JSON") from exc
         if not isinstance(payload, dict):
             raise SupplierApiError("supplier returned a non-object JSON payload", payload)
         if payload.get("success") is not True or int(payload.get("code", 0) or 0) != 200:
             raise SupplierApiError(str(payload.get("msg") or "supplier request failed"), payload)
         return payload
 
+    def _build_http_error_message(self, response: requests.Response, payload: Any | None) -> str:
+        if isinstance(payload, dict):
+            remote_message = str(payload.get("msg") or payload.get("message") or "").strip()
+            if remote_message:
+                return remote_message
+
+        reason = str(getattr(response, "reason", "") or "").strip()
+        if reason:
+            return f"HTTP {response.status_code} {reason}"
+        return f"HTTP {response.status_code}"
+
     def _get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         url = f"{self.settings.api_base_url}{path}"
         last_error: Exception | None = None
 
         for auth_value in self._auth_header_variants():
-            response = self.session.get(
-                url,
-                params=self._params(params),
-                headers=self._headers(auth_value),
-                timeout=self.settings.api_timeout_seconds,
-            )
-            payload: Any | None = None
             try:
+                response = self.session.get(
+                    url,
+                    params=self._params(params),
+                    headers=self._headers(auth_value),
+                    timeout=self.settings.api_timeout_seconds,
+                )
+                payload: Any | None = None
                 return self._parse_response(response)
             except SupplierApiError as exc:
                 payload = exc.payload
@@ -106,15 +129,9 @@ class SupplierClient:
                 if auth_value is not None and self._is_auth_failure(response, payload):
                     continue
                 raise
-            except requests.HTTPError as exc:
-                last_error = exc
-                try:
-                    payload = response.json()
-                except ValueError:
-                    payload = None
-                if auth_value is not None and self._is_auth_failure(response, payload):
-                    continue
-                raise
+            except requests.RequestException as exc:
+                last_error = SupplierApiError(str(exc))
+                raise last_error from exc
 
         if last_error is not None:
             raise last_error

@@ -1306,6 +1306,100 @@ def build_admin_cha_text(row: dict[str, Any], summary: dict[str, float], orders:
     return "\n".join(lines)
 
 
+def build_admin_cha_summary_text(row: dict[str, Any], summary: dict[str, Any]) -> str:
+    username = str(row.get("username") or "").strip()
+    username_text = f"@{username}" if username else "未设置"
+    display_name = " ".join(str(row.get("display_name") or "").split()).strip() or "未设置"
+    created_at = format_user_created_at(row.get("created_at"))
+    balance = format_money(safe_float(row.get("balance")))
+    total_quantity = safe_int(summary.get("total_quantity"), 0)
+    total_spent = format_money(safe_float(summary.get("total_spent")))
+    lines = [
+        "🔎 用户查询结果",
+        "",
+        f"👤 用户ID: <code>{int(row.get('user_id') or 0)}</code>",
+        f"👤 用户名: {html.escape(username_text)}",
+        f"🏷 昵称: {html.escape(display_name)}",
+        f"🕓 注册时间: {html.escape(created_at)}",
+        f"🪙 余额: {balance} USDT",
+        f"📊 购买数量: {total_quantity}",
+        f"🛡 累计消费: {total_spent} USDT",
+    ]
+    return "\n".join(lines)
+
+
+def build_admin_cha_summary_keyboard(target_user_id: int, has_orders: bool) -> InlineKeyboardMarkup | None:
+    if not has_orders:
+        return None
+    return InlineKeyboardMarkup(
+        [[InlineKeyboardButton("✉️ 购买记录", callback_data=f"cha:list:{int(target_user_id)}")]]
+    )
+
+
+def build_admin_cha_order_list_text(row: dict[str, Any], orders: list[dict[str, Any]]) -> str:
+    username = str(row.get("username") or "").strip()
+    username_text = f"@{username}" if username else str(int(row.get("user_id") or 0))
+    header = f"✉️ 购买记录\n\n用户: {html.escape(username_text)}"
+    if not orders:
+        return f"{header}\n暂无购买记录"
+    lines = [header, "", "点击下面订单查看详情："]
+    for index, order in enumerate(orders, start=1):
+        product_name = shorten(" ".join(str(order.get("product_name") or "").split()).strip() or "商品", 22)
+        quantity = safe_int(order.get("quantity"), 0)
+        spent = max(0.0, safe_float(order.get("total_price")) - safe_float(order.get("refund_amount")))
+        lines.append(f"{index}. {html.escape(product_name)} | x{quantity} | {format_money(spent)} USDT")
+    return "\n".join(lines)
+
+
+def build_admin_cha_order_list_keyboard(target_user_id: int, orders: list[dict[str, Any]]) -> InlineKeyboardMarkup:
+    buttons: list[list[InlineKeyboardButton]] = []
+    for index, order in enumerate(orders, start=1):
+        product_name = shorten(" ".join(str(order.get("product_name") or "").split()).strip() or "商品", 18)
+        quantity = safe_int(order.get("quantity"), 0)
+        buttons.append([InlineKeyboardButton(f"{index}. {product_name} x{quantity}", callback_data=f"cha:view:{int(target_user_id)}:{index - 1}")])
+    buttons.append([InlineKeyboardButton("返回用户信息", callback_data=f"cha:home:{int(target_user_id)}")])
+    return InlineKeyboardMarkup(buttons)
+
+
+def build_admin_cha_order_detail_text(order_row: dict[str, Any]) -> str:
+    task_id = str(order_row.get("task_id") or "").strip() or "-"
+    product_name = " ".join(str(order_row.get("product_name") or "").split()).strip() or "商品"
+    quantity = safe_int(order_row.get("quantity"), 0)
+    quantity_success = safe_int(order_row.get("quantity_success"), 0)
+    unit_price = format_money(safe_float(order_row.get("unit_price")))
+    total_price = format_money(safe_float(order_row.get("total_price")))
+    refund_amount = format_money(safe_float(order_row.get("refund_amount")))
+    paid_amount = format_money(max(0.0, safe_float(order_row.get("total_price")) - safe_float(order_row.get("refund_amount"))))
+    created_at = format_user_created_at(order_row.get("created_at"))
+    state = str(order_row.get("state") or "-").strip() or "-"
+    file_status = "可下载" if str(order_row.get("file_url") or "").strip() else "暂无"
+    lines = [
+        "🧾 订单详情",
+        "",
+        f"订单号: <code>{html.escape(task_id)}</code>",
+        f"商品名: {html.escape(product_name)}",
+        f"数量: {quantity}",
+        f"成功数量: {quantity_success}",
+        f"单价: {unit_price} USDT",
+        f"订单金额: {total_price} USDT",
+        f"退款: {refund_amount} USDT",
+        f"实付: {paid_amount} USDT",
+        f"状态: {html.escape(state)}",
+        f"下单时间: {html.escape(created_at)}",
+        f"发货文件: {file_status}",
+    ]
+    return "\n".join(lines)
+
+
+def build_admin_cha_order_detail_keyboard(target_user_id: int, order_index: int, has_file: bool) -> InlineKeyboardMarkup:
+    buttons: list[list[InlineKeyboardButton]] = []
+    if has_file:
+        buttons.append([InlineKeyboardButton("下载对应文件", callback_data=f"cha:file:{int(target_user_id)}:{int(order_index)}")])
+    buttons.append([InlineKeyboardButton("返回购买记录", callback_data=f"cha:list:{int(target_user_id)}")])
+    buttons.append([InlineKeyboardButton("返回用户信息", callback_data=f"cha:home:{int(target_user_id)}")])
+    return InlineKeyboardMarkup(buttons)
+
+
 def get_pending_purchase(context: ContextTypes.DEFAULT_TYPE) -> dict[str, int] | None:
     pending = context.user_data.get(PENDING_PURCHASE_KEY)
     return pending if isinstance(pending, dict) else None
@@ -5506,11 +5600,99 @@ async def cha(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     target_user_id = safe_int(row.get("user_id"), 0)
+    await call_blocking(store.log_admin_action, user.id, "cha_lookup", str(target_user_id), keyword)
+    await show_admin_cha_summary(update, context, target_user_id)
+
+
+async def show_admin_cha_summary(update: Update, context: ContextTypes.DEFAULT_TYPE, target_user_id: int) -> None:
+    _, store, _ = get_services(context)
+    row = await call_blocking(store.get_user, target_user_id)
+    if not row:
+        await reply_inline(update, f"找不到用户 {target_user_id}。")
+        return
     summary = await call_blocking(store.get_user_summary, target_user_id)
     orders = await call_blocking(store.list_user_orders, target_user_id, 10)
-    text = build_admin_cha_text(row, summary, orders)
-    await call_blocking(store.log_admin_action, user.id, "cha_lookup", str(target_user_id), keyword)
-    await update.message.reply_text(text, reply_markup=MENU_KEYBOARD, parse_mode="HTML")
+    text = build_admin_cha_summary_text(row, summary)
+    keyboard = build_admin_cha_summary_keyboard(target_user_id, bool(orders))
+    await reply_inline(update, text, reply_markup=keyboard, parse_mode="HTML")
+
+
+async def show_admin_cha_orders(update: Update, context: ContextTypes.DEFAULT_TYPE, target_user_id: int) -> None:
+    _, store, _ = get_services(context)
+    row = await call_blocking(store.get_user, target_user_id)
+    if not row:
+        await reply_inline(update, f"找不到用户 {target_user_id}。")
+        return
+    orders = await call_blocking(store.list_user_orders, target_user_id, 10)
+    text = build_admin_cha_order_list_text(row, orders)
+    keyboard = build_admin_cha_order_list_keyboard(target_user_id, orders)
+    await reply_inline(update, text, reply_markup=keyboard, parse_mode="HTML")
+
+
+async def show_admin_cha_order_detail(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    target_user_id: int,
+    order_index: int,
+) -> None:
+    _, store, _ = get_services(context)
+    orders = await call_blocking(store.list_user_orders, target_user_id, 10)
+    if order_index < 0 or order_index >= len(orders):
+        await reply_inline(update, "这条购买记录不存在或已经超出最近 10 条。")
+        return
+    order_row = orders[order_index]
+    text = build_admin_cha_order_detail_text(order_row)
+    keyboard = build_admin_cha_order_detail_keyboard(
+        target_user_id,
+        order_index,
+        bool(str(order_row.get("file_url") or "").strip()),
+    )
+    await reply_inline(update, text, reply_markup=keyboard, parse_mode="HTML")
+
+
+async def send_admin_cha_order_file(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    target_user_id: int,
+    order_index: int,
+) -> None:
+    settings, store, supplier = get_services(context)
+    query = update.callback_query
+    orders = await call_blocking(store.list_user_orders, target_user_id, 10)
+    if order_index < 0 or order_index >= len(orders):
+        await notify_inline(update, "这条购买记录不存在或已经超出最近 10 条。", show_alert=True)
+        return
+    order_row = orders[order_index]
+    if not str(order_row.get("file_url") or "").strip():
+        await notify_inline(update, "这个订单目前还没有可下载文件。", show_alert=True)
+        return
+    try:
+        zip_path, fresh_order = await download_delivery_file_with_refresh(context, supplier, order_row)
+        quantity = safe_int(fresh_order.get("quantity"))
+        product_name = str(fresh_order.get("product_name") or f"商品 {fresh_order.get('product_id')}")
+        media_write_timeout = max(20, int(settings.telegram_media_write_timeout_seconds))
+        media_read_timeout = max(20, int(settings.telegram_media_read_timeout_seconds))
+        caption = (
+            f"用户ID: {target_user_id}\n"
+            f"订单号: {fresh_order.get('task_id')}\n"
+            f"商品名: {product_name}\n"
+            f"数量: {quantity}"
+        )
+        if query is not None:
+            await answer_callback_query_safely(query, "正在发送文件…")
+        with zip_path.open("rb") as document_fp:
+            await context.bot.send_document(
+                chat_id=update.effective_user.id if update.effective_user is not None else target_user_id,
+                document=document_fp,
+                filename=delivery_display_filename(product_name, quantity, str(fresh_order.get("file_url") or "")),
+                caption=caption,
+                write_timeout=media_write_timeout,
+                read_timeout=media_read_timeout,
+                connect_timeout=min(media_read_timeout, 30),
+            )
+    except Exception:
+        logger.exception("管理员下载订单文件失败: user_id=%s order_index=%s", target_user_id, order_index)
+        await notify_inline(update, "文件发送失败，请稍后重试。", show_alert=True)
 
 
 async def route_menu_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -5791,6 +5973,31 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     if action == "adm":
         await handle_admin_callback(update, context, parts)
+        return
+
+    if action == "cha":
+        user = update.effective_user
+        if user is None or not is_admin(settings, user.id):
+            await answer_callback_query_safely(query, "只有管理员可以操作", show_alert=True)
+            return
+        subaction = parts[1] if len(parts) > 1 else ""
+        target_user_id = safe_int(parts[2], 0) if len(parts) > 2 else 0
+        if target_user_id <= 0:
+            await answer_callback_query_safely(query, "用户参数不正确", show_alert=True)
+            return
+        if subaction == "home":
+            await show_admin_cha_summary(update, context, target_user_id)
+            return
+        if subaction == "list":
+            await show_admin_cha_orders(update, context, target_user_id)
+            return
+        if subaction == "view" and len(parts) > 3:
+            await show_admin_cha_order_detail(update, context, target_user_id, safe_int(parts[3], -1))
+            return
+        if subaction == "file" and len(parts) > 3:
+            await send_admin_cha_order_file(update, context, target_user_id, safe_int(parts[3], -1))
+            return
+        await answer_callback_query_safely(query, "暂不支持这个查询按钮", show_alert=False)
         return
 
     if action == "nav" and len(parts) >= 2:

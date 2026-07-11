@@ -256,6 +256,7 @@ class Store:
     def debit_balance(self, user_id: int, amount: float, reason: str, ref_id: str = "", note: str = "") -> tuple[bool, float]:
         with self._lock, self._connect() as conn:
             ts = now_iso()
+            debit_amount = float(amount)
             conn.execute(
                 """
                 INSERT INTO users (user_id, username, display_name, balance, is_active, created_at, updated_at)
@@ -264,18 +265,25 @@ class Store:
                 """,
                 (int(user_id), ts, ts),
             )
-            conn.execute(
-                "UPDATE users SET balance = balance - ?, updated_at = ? WHERE user_id = ?",
-                (float(amount), ts, int(user_id)),
+            if debit_amount <= 0:
+                row = conn.execute("SELECT balance FROM users WHERE user_id = ?", (int(user_id),)).fetchone()
+                balance = float(row["balance"]) if row else 0.0
+                return False, balance
+            cursor = conn.execute(
+                "UPDATE users SET balance = balance - ?, updated_at = ? WHERE user_id = ? AND balance >= ?",
+                (debit_amount, ts, int(user_id), debit_amount),
             )
             row = conn.execute("SELECT balance FROM users WHERE user_id = ?", (int(user_id),)).fetchone()
             balance = float(row["balance"]) if row else 0.0
+            if cursor.rowcount <= 0:
+                conn.commit()
+                return False, balance
             conn.execute(
                 """
                 INSERT INTO wallet_ledger (user_id, amount, direction, reason, ref_id, note, created_at)
                 VALUES (?, ?, 'debit', ?, ?, ?, ?)
                 """,
-                (int(user_id), float(amount), reason, ref_id, note, ts),
+                (int(user_id), debit_amount, reason, ref_id, note, ts),
             )
             conn.commit()
             return True, balance

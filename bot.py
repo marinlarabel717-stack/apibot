@@ -1147,6 +1147,45 @@ def format_user_created_at(value: Any) -> str:
         return raw
 
 
+def parse_iso_datetime(value: Any) -> datetime | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    try:
+        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def get_order_age_seconds(order_row: dict[str, Any], now: datetime | None = None) -> int:
+    created_at = parse_iso_datetime(order_row.get("created_at"))
+    if created_at is None:
+        return 0
+    current = now or datetime.now(timezone.utc)
+    return max(0, int((current - created_at).total_seconds()))
+
+
+def is_missing_remote_order_error(exc: Exception) -> bool:
+    message = str(exc or "").strip().lower()
+    if not message:
+        return False
+    tokens = (
+        "not found",
+        "no such",
+        "不存在",
+        "未找到",
+        "查询不到",
+        "无此",
+        "订单不存在",
+        "taskid不存在",
+        "task id不存在",
+    )
+    return any(token in message for token in tokens)
+
+
 def format_topup_timestamp(value: Any) -> str:
     raw = str(value or "").strip()
     if not raw:
@@ -5310,6 +5349,37 @@ async def execute_purchase(
     return None
 
 
+async def finalize_failed_remote_order(
+    context: ContextTypes.DEFAULT_TYPE,
+    store: Store,
+    task_id: str,
+    total_price: float,
+    *,
+    file_url: str,
+    payload: dict[str, Any],
+    notify_user: bool,
+    lang: str,
+) -> tuple[str, str]:
+    final_row, changed = await call_blocking(
+        store.finalize_order,
+        task_id,
+        "failed",
+        0,
+        file_url,
+        total_price,
+        payload,
+    )
+    if changed and notify_user and final_row:
+        user_row = await call_blocking(store.get_user, int(final_row["user_id"])) or {}
+        notify_lang = normalize_lang_code(str(user_row.get("lang") or DEFAULT_LANG))
+        await context.bot.send_message(
+            chat_id=int(final_row["user_id"]),
+            text=ui_text("order_failed_auto_refund", notify_lang, task_id=task_id, amount=format_money(total_price)),
+            reply_markup=build_menu_keyboard(notify_lang),
+        )
+    return "failed", ui_text("order_failed_refunded", lang)
+
+
 async def buy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if await should_ignore_for_closed_business(update, context):
         return
@@ -5347,14 +5417,42 @@ async def finalize_remote_order(
     notify_user: bool,
     lang: str = DEFAULT_LANG,
 ) -> tuple[str, str]:
-    _, store, supplier = get_services(context)
+    settings, store, supplier = get_services(context)
     order = await call_blocking(store.get_order, task_id)
     if not order:
         return "missing", ui_text("local_order_missing", lang)
 
+    order_age_seconds = get_order_age_seconds(order)
+
     try:
         payload = await call_blocking(supplier.query_order, task_id)
     except SupplierApiError as exc:
+        if is_missing_remote_order_error(exc) or order_age_seconds >= settings.order_stuck_timeout_seconds:
+            logger.warning(
+                "上游订单查单异常，按失败退款: task_id=%s age=%ss error=%s",
+                task_id,
+                order_age_seconds,
+                exc,
+            )
+            failure_payload = {
+                "success": False,
+                "code": -1,
+                "msg": str(exc),
+                "data": {
+                    "taskId": task_id,
+                    "taskStatus": -1,
+                },
+            }
+            return await finalize_failed_remote_order(
+                context,
+                store,
+                task_id,
+                safe_float(order["total_price"]),
+                file_url="",
+                payload=failure_payload,
+                notify_user=notify_user,
+                lang=lang,
+            )
         return "error", f"Querying upstream order failed: {exc}" if lang == "en" else f"查询上游订单失败: {exc}"
 
     data = payload.get("data") or {}
@@ -5369,24 +5467,16 @@ async def finalize_remote_order(
         return "processing", ui_text("order_processing", lang)
 
     if status == 3:
-        final_row, changed = await call_blocking(
-            store.finalize_order,
+        return await finalize_failed_remote_order(
+            context,
+            store,
             task_id,
-            "failed",
-            0,
-            file_url,
             total_price,
-            payload,
+            file_url=file_url,
+            payload=payload,
+            notify_user=notify_user,
+            lang=lang,
         )
-        if changed and notify_user and final_row:
-            user_row = await call_blocking(store.get_user, int(final_row["user_id"])) or {}
-            notify_lang = normalize_lang_code(str(user_row.get("lang") or DEFAULT_LANG))
-            await context.bot.send_message(
-                chat_id=int(final_row["user_id"]),
-                text=ui_text("order_failed_auto_refund", notify_lang, task_id=task_id, amount=format_money(total_price)),
-                reply_markup=build_menu_keyboard(notify_lang),
-            )
-        return "failed", ui_text("order_failed_refunded", lang)
 
     if status == 1:
         refund_amount = 0.0
@@ -5431,7 +5521,27 @@ async def finalize_remote_order(
             summary = ui_text("order_completed_summary", lang, success=quantity_success, quantity=quantity)
         return final_state, summary
 
-    return "unknown", ui_text("unknown_order_status", lang, status=status)
+    logger.warning(
+        "上游订单状态异常: task_id=%s age=%ss status=%s quantity_success=%s has_file_url=%s",
+        task_id,
+        order_age_seconds,
+        status,
+        quantity_success,
+        bool(file_url),
+    )
+    if order_age_seconds >= settings.order_stuck_timeout_seconds:
+        logger.warning("上游订单状态异常超时，按失败退款: task_id=%s status=%s age=%ss", task_id, status, order_age_seconds)
+        return await finalize_failed_remote_order(
+            context,
+            store,
+            task_id,
+            total_price,
+            file_url=file_url,
+            payload=payload,
+            notify_user=notify_user,
+            lang=lang,
+        )
+    return "processing", ui_text("order_processing", lang)
 
 
 async def poll_single_processing_order(

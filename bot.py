@@ -285,7 +285,10 @@ UI_TEXTS.update(
         "trc20_paid_confirmed": {"zh": "TRC20 充值已确认到账，余额已经自动增加。", "en": "The TRC20 payment has been confirmed and your balance has been credited automatically."},
         "trc20_transfer_not_detected": {"zh": "暂时还没有检测到这笔 TRC20 转账，请付款后稍等几秒再点一次。", "en": "This TRC20 transfer has not been detected yet. Please wait a few seconds after paying and try again."},
         "stock_not_enough": {"zh": "库存不足。当前库存 {stock}，你要买 {quantity}", "en": "Insufficient stock. Current stock: {stock}, requested: {quantity}."},
-        "balance_not_enough": {"zh": "余额不足。\n当前余额: {balance} USDT\n本次需要: {total} USDT", "en": "Insufficient balance.\nCurrent balance: {balance} USDT\nRequired for this order: {total} USDT"},
+        "balance_not_enough": {
+            "zh": "余额不足，暂时不能购买。\n当前余额: {balance} USDT\n本次需要: {total} USDT\n请先充值后再下单。",
+            "en": "Insufficient balance. This purchase cannot continue.\nCurrent balance: {balance} USDT\nRequired for this order: {total} USDT\nPlease recharge before placing the order again.",
+        },
         "system_error_contact_support": {"zh": "系统错误：请咨询客服", "en": "System error: please contact support."},
         "balance_refunded": {"zh": "已退款", "en": "Refunded"},
         "order_processing": {"zh": "订单仍在处理中", "en": "The order is still being processed."},
@@ -3240,6 +3243,15 @@ def build_purchase_confirm_keyboard_localized(
     return InlineKeyboardMarkup(buttons)
 
 
+def build_balance_not_enough_keyboard(lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton(ui_text("profile_recharge", lang), callback_data="nav:recharge")],
+            [InlineKeyboardButton(ui_text("button_main_menu", lang), callback_data="nav:menu")],
+        ]
+    )
+
+
 def render_products_view(
     category_name: str,
     category_id: int,
@@ -5021,7 +5033,7 @@ async def execute_purchase(
     product_id: int,
     quantity: int,
     lang: str = DEFAULT_LANG,
-) -> tuple[str, tuple[MessageEntity, ...] | None] | None:
+) -> tuple[str, tuple[MessageEntity, ...] | None, InlineKeyboardMarkup | None] | None:
     settings, store, supplier = get_services(context)
     await call_blocking(store.ensure_user, user_id, username, display_name)
 
@@ -5035,7 +5047,7 @@ async def execute_purchase(
     total_price = unit_price * quantity
 
     if total_stock < quantity:
-        return ui_text("stock_not_enough", lang, stock=total_stock, quantity=quantity), None
+        return ui_text("stock_not_enough", lang, stock=total_stock, quantity=quantity), None, None
 
     ok, remain = await call_blocking(
         store.debit_balance,
@@ -5051,7 +5063,7 @@ async def execute_purchase(
             lang,
             balance=format_money(remain),
             total=format_money(total_price),
-        ), None
+        ), None, build_balance_not_enough_keyboard(lang)
 
     try:
         buy_payload = await call_blocking(supplier.buy_product, product_id, quantity)
@@ -5065,7 +5077,8 @@ async def execute_purchase(
             f"下单失败退款: {product_name}",
         )
         logger.warning("上游下单失败，已退款 user_id=%s product_id=%s quantity=%s error=%s", user_id, product_id, quantity, exc)
-        return build_purchase_refund_error_text_localized(total_price, refunded, lang)
+        refund_text, refund_entities = build_purchase_refund_error_text_localized(total_price, refunded, lang)
+        return refund_text, refund_entities, None
 
     data = buy_payload.get("data") or {}
     task_id = str(data.get("taskId") or "").strip()
@@ -5085,7 +5098,8 @@ async def execute_purchase(
             f"下单失败退款: {product_name}",
         )
         logger.warning("上游创建订单失败，已退款 user_id=%s product_id=%s quantity=%s reason=%s", user_id, product_id, quantity, upstream_reason)
-        return build_purchase_refund_error_text_localized(total_price, refunded, lang)
+        refund_text, refund_entities = build_purchase_refund_error_text_localized(total_price, refunded, lang)
+        return refund_text, refund_entities, None
 
     await call_blocking(
         store.record_order,
@@ -5139,8 +5153,8 @@ async def buy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(f"获取商品详情失败: {exc}")
         return
     if result:
-        result_text, result_entities = result
-        await update.message.reply_text(result_text, entities=result_entities, reply_markup=MENU_KEYBOARD)
+        result_text, result_entities, result_markup = result
+        await update.message.reply_text(result_text, entities=result_entities, reply_markup=result_markup or MENU_KEYBOARD)
     else:
         await update.message.reply_text(order_created_caption(), reply_markup=MENU_KEYBOARD, parse_mode="HTML")
 
@@ -5657,11 +5671,11 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                 await reply_inline(update, ui_text("fetch_product_detail_failed", lang, error=exc))
             return
         if result and query.message is not None:
-            result_text, result_entities = result
-            await query.message.reply_text(result_text, entities=result_entities, reply_markup=build_menu_keyboard(lang))
+            result_text, result_entities, result_markup = result
+            await query.message.reply_text(result_text, entities=result_entities, reply_markup=result_markup or build_menu_keyboard(lang))
         elif result:
-            result_text, result_entities = result
-            await reply_inline(update, result_text, entities=result_entities)
+            result_text, result_entities, result_markup = result
+            await reply_inline(update, result_text, entities=result_entities, reply_markup=result_markup)
         elif query.message is not None:
             await query.message.reply_text(ui_text("order_created", lang), reply_markup=build_menu_keyboard(lang))
         return
@@ -5857,11 +5871,11 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                 await reply_inline(update, ui_text("fetch_product_detail_failed", lang, error=exc))
             return
         if result and query.message is not None:
-            result_text, result_entities = result
-            await query.message.reply_text(result_text, entities=result_entities, reply_markup=build_menu_keyboard(lang))
+            result_text, result_entities, result_markup = result
+            await query.message.reply_text(result_text, entities=result_entities, reply_markup=result_markup or build_menu_keyboard(lang))
         elif result:
-            result_text, result_entities = result
-            await reply_inline(update, result_text, entities=result_entities)
+            result_text, result_entities, result_markup = result
+            await reply_inline(update, result_text, entities=result_entities, reply_markup=result_markup)
         elif query.message is not None:
             await query.message.reply_text(
                 order_created_caption_localized(lang),
@@ -6081,8 +6095,8 @@ async def buy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(ui_text("fetch_product_detail_failed", lang, error=exc), reply_markup=build_menu_keyboard(lang))
         return
     if result:
-        result_text, result_entities = result
-        await update.message.reply_text(result_text, entities=result_entities, reply_markup=build_menu_keyboard(lang))
+        result_text, result_entities, result_markup = result
+        await update.message.reply_text(result_text, entities=result_entities, reply_markup=result_markup or build_menu_keyboard(lang))
     else:
         await update.message.reply_text(ui_text("order_created", lang), reply_markup=build_menu_keyboard(lang))
 

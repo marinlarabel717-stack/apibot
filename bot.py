@@ -1260,6 +1260,52 @@ def build_orders_text_localized(rows: list[dict[str, Any]], lang: str) -> str:
     return "\n".join(text_lines)
 
 
+def build_admin_cha_orders_text(rows: list[dict[str, Any]]) -> list[str]:
+    if not rows:
+        return ["暂无购买订单记录"]
+    lines = ["购买订单记录（最近 10 条）"]
+    for index, row in enumerate(rows, start=1):
+        created_at = format_user_created_at(row.get("created_at"))
+        product_name = " ".join(str(row.get("product_name") or "").split()).strip() or "商品"
+        quantity = safe_int(row.get("quantity"), 0)
+        quantity_success = safe_int(row.get("quantity_success"), 0)
+        spent = max(0.0, safe_float(row.get("total_price")) - safe_float(row.get("refund_amount")))
+        task_id = str(row.get("task_id") or "-").strip() or "-"
+        state = str(row.get("state") or "-").strip() or "-"
+        lines.append(
+            f"{index}. {html.escape(created_at)} | {html.escape(product_name)} | "
+            f"{quantity_success}/{quantity} | {html.escape(state)} | {format_money(spent)} USDT"
+        )
+        lines.append(f"   订单号: <code>{html.escape(task_id)}</code>")
+    return lines
+
+
+def build_admin_cha_text(row: dict[str, Any], summary: dict[str, float], orders: list[dict[str, Any]]) -> str:
+    username = str(row.get("username") or "").strip()
+    username_text = f"@{username}" if username else "未设置"
+    display_name = " ".join(str(row.get("display_name") or "").split()).strip() or "未设置"
+    created_at = format_user_created_at(row.get("created_at"))
+    balance = format_money(safe_float(row.get("balance")))
+    total_quantity = safe_int(summary.get("total_quantity"), 0)
+    total_spent = format_money(safe_float(summary.get("total_spent")))
+    status_text = "活跃" if safe_int(row.get("is_active"), 1) == 1 else "失效"
+    lines = [
+        "用户查询结果",
+        "",
+        f"用户ID: <code>{int(row.get('user_id') or 0)}</code>",
+        f"用户名: {html.escape(username_text)}",
+        f"昵称: {html.escape(display_name)}",
+        f"注册时间: {html.escape(created_at)}",
+        f"余额: {balance} USDT",
+        f"购买数量: {total_quantity}",
+        f"累计消费: {total_spent} USDT",
+        f"状态: {status_text}",
+        "",
+    ]
+    lines.extend(build_admin_cha_orders_text(orders))
+    return "\n".join(lines)
+
+
 def get_pending_purchase(context: ContextTypes.DEFAULT_TYPE) -> dict[str, int] | None:
     pending = context.user_data.get(PENDING_PURCHASE_KEY)
     return pending if isinstance(pending, dict) else None
@@ -5427,6 +5473,46 @@ async def credit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(text, entities=text_entities, reply_markup=MENU_KEYBOARD)
 
 
+async def cha(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if await should_ignore_for_closed_business(update, context):
+        return
+    settings, store, _ = get_services(context)
+    user = update.effective_user
+    if user is None or update.message is None:
+        return
+    if not is_admin(settings, user.id):
+        await update.message.reply_text("只有管理员可以查询用户信息。", reply_markup=MENU_KEYBOARD)
+        return
+    if not context.args:
+        await update.message.reply_text(
+            "用法: /cha <用户ID或用户名>\n示例: /cha 1492477314 或 /cha @Q2_pb",
+            reply_markup=MENU_KEYBOARD,
+        )
+        return
+
+    keyword = " ".join(context.args).strip()
+    row = None
+    if keyword:
+        if re.fullmatch(r"\d+", keyword):
+            row = await call_blocking(store.get_user, int(keyword))
+        if row is None:
+            row = await call_blocking(store.get_user_by_username, keyword)
+    if not row:
+        await update.message.reply_text(
+            f"找不到用户: <code>{html.escape(keyword)}</code>",
+            reply_markup=MENU_KEYBOARD,
+            parse_mode="HTML",
+        )
+        return
+
+    target_user_id = safe_int(row.get("user_id"), 0)
+    summary = await call_blocking(store.get_user_summary, target_user_id)
+    orders = await call_blocking(store.list_user_orders, target_user_id, 10)
+    text = build_admin_cha_text(row, summary, orders)
+    await call_blocking(store.log_admin_action, user.id, "cha_lookup", str(target_user_id), keyword)
+    await update.message.reply_text(text, reply_markup=MENU_KEYBOARD, parse_mode="HTML")
+
+
 async def route_menu_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if await should_ignore_for_closed_business(update, context):
         return
@@ -6256,6 +6342,7 @@ def build_application(settings: Settings) -> Application:
     application.add_handler(CommandHandler("supplier_balance", supplier_balance))
     application.add_handler(CommandHandler("add", credit))
     application.add_handler(CommandHandler("credit", credit))
+    application.add_handler(CommandHandler("cha", cha))
     application.add_handler(CallbackQueryHandler(show_notice, pattern=r"^nav:notice$"))
     application.add_handler(CallbackQueryHandler(show_language, pattern=r"^nav:language$"))
     application.add_handler(CallbackQueryHandler(on_callback))

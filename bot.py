@@ -661,6 +661,11 @@ ADMIN_ADD_BALANCE_TITLE_EMOJI_ID = "6321041414067068140"
 ADMIN_ADD_BALANCE_USER_EMOJI_ID = "6273676592036191055"
 ADMIN_ADD_BALANCE_INCREASE_EMOJI_ID = "6320823470246600333"
 SYSTEM_ERROR_EMOJI_ID = "6321241559543062538"
+INSUFFICIENT_BALANCE_TITLE_EMOJI_ID = "6323147520000132727"
+INSUFFICIENT_BALANCE_CURRENT_EMOJI_ID = "6334575946938451719"
+INSUFFICIENT_BALANCE_REQUIRED_EMOJI_ID = "6334829912649631269"
+INSUFFICIENT_BALANCE_RECHARGE_HINT_EMOJI_ID = "6334793031765460638"
+INSUFFICIENT_BALANCE_HOME_EMOJI_ID = "6334564870217795443"
 ADMIN_NEW_ORDER_TITLE_EMOJI_ID = "5994502837327892086"
 ADMIN_NEW_ORDER_USER_EMOJI_ID = "5886412370347036129"
 ADMIN_NEW_ORDER_USER_ID_EMOJI_ID = "5771887475421090729"
@@ -3386,8 +3391,36 @@ def build_purchase_confirm_keyboard_localized(
 def build_balance_not_enough_keyboard(lang: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton(ui_text("profile_recharge", lang), callback_data="nav:recharge")],
-            [InlineKeyboardButton(ui_text("button_main_menu", lang), callback_data="nav:menu")],
+            [premium_inline_button(ui_text("button_recharge", lang), "nav:recharge", INSUFFICIENT_BALANCE_CURRENT_EMOJI_ID)],
+            [premium_inline_button(ui_text("button_main_menu", lang), "nav:menu", INSUFFICIENT_BALANCE_HOME_EMOJI_ID)],
+        ]
+    )
+
+
+def build_balance_not_enough_text(balance: str, total: str, lang: str) -> tuple[str, tuple[MessageEntity, ...]]:
+    if lang == "en":
+        return build_text_with_custom_emoji(
+            [
+                ("📛", INSUFFICIENT_BALANCE_TITLE_EMOJI_ID),
+                (" Insufficient balance. Purchase unavailable for now.\n", None),
+                ("💰", INSUFFICIENT_BALANCE_CURRENT_EMOJI_ID),
+                (f" Current balance: {balance} USDT\n", None),
+                ("💳", INSUFFICIENT_BALANCE_REQUIRED_EMOJI_ID),
+                (f" Required for this order: {total} USDT\n", None),
+                ("🪙", INSUFFICIENT_BALANCE_RECHARGE_HINT_EMOJI_ID),
+                (" Please recharge before placing the order.", None),
+            ]
+        )
+    return build_text_with_custom_emoji(
+        [
+            ("📛", INSUFFICIENT_BALANCE_TITLE_EMOJI_ID),
+            (" 余额不足，暂时不能购买。\n", None),
+            ("💰", INSUFFICIENT_BALANCE_CURRENT_EMOJI_ID),
+            (f" 当前余额: {balance} USDT\n", None),
+            ("💳", INSUFFICIENT_BALANCE_REQUIRED_EMOJI_ID),
+            (f" 本次需要: {total} USDT\n", None),
+            ("🪙", INSUFFICIENT_BALANCE_RECHARGE_HINT_EMOJI_ID),
+            (" 请先充值后再下单。", None),
         ]
     )
 
@@ -5198,12 +5231,12 @@ async def execute_purchase(
         f"{product_name} x{quantity}",
     )
     if not ok:
-        return ui_text(
-            "balance_not_enough",
+        text, entities = build_balance_not_enough_text(
+            format_money(remain),
+            format_money(total_price),
             lang,
-            balance=format_money(remain),
-            total=format_money(total_price),
-        ), None, build_balance_not_enough_keyboard(lang)
+        )
+        return text, entities, build_balance_not_enough_keyboard(lang)
 
     try:
         buy_payload = await call_blocking(supplier.buy_product, product_id, quantity)

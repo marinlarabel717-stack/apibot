@@ -673,6 +673,15 @@ ADMIN_NEW_ORDER_PRODUCT_EMOJI_ID = "5985472565508838112"
 ADMIN_NEW_ORDER_QUANTITY_EMOJI_ID = "5877485980901971030"
 ADMIN_NEW_ORDER_AMOUNT_EMOJI_ID = "5931546553868095844"
 ADMIN_NEW_ORDER_BALANCE_EMOJI_ID = "5992430854909989581"
+ADMIN_CHA_TITLE_EMOJI_ID = "5874960879434338403"
+ADMIN_CHA_USER_ID_EMOJI_ID = "5879770735999717115"
+ADMIN_CHA_USERNAME_EMOJI_ID = "5771887475421090729"
+ADMIN_CHA_NICKNAME_EMOJI_ID = "5985433648810171091"
+ADMIN_CHA_REGISTERED_AT_EMOJI_ID = "5776213190387961618"
+ADMIN_CHA_BALANCE_EMOJI_ID = "5992430854909989581"
+ADMIN_CHA_PURCHASE_COUNT_EMOJI_ID = "5877485980901971030"
+ADMIN_CHA_TOTAL_SPENT_EMOJI_ID = "5931409969613116639"
+ADMIN_CHA_ORDER_HISTORY_EMOJI_ID = "5951665980273858529"
 CATEGORY_BUTTON_EMOJI_IDS: dict[str, str] = {
     "asia": "6334321852378252986",
     "west": "6334717028024190508",
@@ -1320,15 +1329,15 @@ def build_admin_cha_summary_text(row: dict[str, Any], summary: dict[str, Any]) -
     total_quantity = safe_int(summary.get("total_quantity"), 0)
     total_spent = format_money(safe_float(summary.get("total_spent")))
     lines = [
-        "🔎 用户查询结果",
+        f"{tg_custom_emoji(ADMIN_CHA_TITLE_EMOJI_ID, '🔎')} 用户查询结果",
         "",
-        f"👤 用户ID: <code>{int(row.get('user_id') or 0)}</code>",
-        f"👤 用户名: {html.escape(username_text)}",
-        f"🏷 昵称: {html.escape(display_name)}",
-        f"🕓 注册时间: {html.escape(created_at)}",
-        f"🪙 余额: {balance} USDT",
-        f"📊 购买数量: {total_quantity}",
-        f"🛡 累计消费: {total_spent} USDT",
+        f"{tg_custom_emoji(ADMIN_CHA_USER_ID_EMOJI_ID, '👤')} 用户ID: <code>{int(row.get('user_id') or 0)}</code>",
+        f"{tg_custom_emoji(ADMIN_CHA_USERNAME_EMOJI_ID, '👤')} 用户名: {html.escape(username_text)}",
+        f"{tg_custom_emoji(ADMIN_CHA_NICKNAME_EMOJI_ID, '🏷')} 昵称: {html.escape(display_name)}",
+        f"{tg_custom_emoji(ADMIN_CHA_REGISTERED_AT_EMOJI_ID, '🕓')} 注册时间: {html.escape(created_at)}",
+        f"{tg_custom_emoji(ADMIN_CHA_BALANCE_EMOJI_ID, '🪙')} 余额: {balance} USDT",
+        f"{tg_custom_emoji(ADMIN_CHA_PURCHASE_COUNT_EMOJI_ID, '📊')} 购买数量: {total_quantity}",
+        f"{tg_custom_emoji(ADMIN_CHA_TOTAL_SPENT_EMOJI_ID, '🛡')} 累计消费: {total_spent} USDT",
     ]
     return "\n".join(lines)
 
@@ -1337,14 +1346,14 @@ def build_admin_cha_summary_keyboard(target_user_id: int, has_orders: bool) -> I
     if not has_orders:
         return None
     return InlineKeyboardMarkup(
-        [[InlineKeyboardButton("✉️ 购买记录", callback_data=f"cha:list:{int(target_user_id)}")]]
+        [[premium_inline_button("购买记录", f"cha:list:{int(target_user_id)}", ADMIN_CHA_ORDER_HISTORY_EMOJI_ID)]]
     )
 
 
 def build_admin_cha_order_list_text(row: dict[str, Any], orders: list[dict[str, Any]]) -> str:
     username = str(row.get("username") or "").strip()
     username_text = f"@{username}" if username else str(int(row.get("user_id") or 0))
-    header = f"✉️ 购买记录\n\n用户: {html.escape(username_text)}"
+    header = f"{tg_custom_emoji(ADMIN_CHA_ORDER_HISTORY_EMOJI_ID, '✉️')} 购买记录\n\n用户: {html.escape(username_text)}"
     if not orders:
         return f"{header}\n暂无购买记录"
     lines = [header, "", "点击下面订单查看详情："]

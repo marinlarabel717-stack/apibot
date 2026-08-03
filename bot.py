@@ -8,6 +8,7 @@ import json
 import logging
 import re
 import threading
+import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from datetime import datetime, timedelta, timezone
@@ -54,6 +55,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger("apibot")
 OKPAY_HTTP_LOCAL = threading.local()
+CATEGORY_CACHE_TTL_SECONDS = 20
+CATEGORY_LIST_CACHE: dict[int, tuple[float, list[dict[str, Any]]]] = {}
+CATEGORY_PRODUCTS_CACHE: dict[tuple[int, int], tuple[float, list[dict[str, Any]]]] = {}
 
 
 PRODUCTS_PER_PAGE = 30
@@ -3738,13 +3742,27 @@ def render_product_detail_view_configured(
 
 
 async def fetch_categories(supplier: SupplierClient) -> list[dict[str, Any]]:
+    cache_key = id(supplier)
+    now = time.monotonic()
+    cached = CATEGORY_LIST_CACHE.get(cache_key)
+    if cached and now - cached[0] < CATEGORY_CACHE_TTL_SECONDS:
+        return cached[1]
     payload = await call_blocking(supplier.get_categories)
-    return payload.get("data") or []
+    rows = payload.get("data") or []
+    CATEGORY_LIST_CACHE[cache_key] = (now, rows)
+    return rows
 
 
 async def fetch_category_products(supplier: SupplierClient, category_id: int) -> list[dict[str, Any]]:
+    cache_key = (id(supplier), int(category_id))
+    now = time.monotonic()
+    cached = CATEGORY_PRODUCTS_CACHE.get(cache_key)
+    if cached and now - cached[0] < CATEGORY_CACHE_TTL_SECONDS:
+        return cached[1]
     payload = await call_blocking(supplier.get_products, category_id)
-    return payload.get("data") or []
+    rows = payload.get("data") or []
+    CATEGORY_PRODUCTS_CACHE[cache_key] = (now, rows)
+    return rows
 
 
 async def build_main_menu_message(

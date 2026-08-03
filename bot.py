@@ -56,7 +56,7 @@ logger = logging.getLogger("apibot")
 OKPAY_HTTP_LOCAL = threading.local()
 
 
-PRODUCTS_PER_PAGE = 15
+PRODUCTS_PER_PAGE = 30
 SEARCH_RESULTS_LIMIT = 8
 ASSETS_DIR = Path(__file__).resolve().parent / "assets"
 PURCHASE_CONFIRM_IMAGE_PATH = ASSETS_DIR / "purchase-confirm.png"

@@ -67,6 +67,10 @@ class Settings:
     admin_user_ids: set[int]
     restock_channel: str
     customer_service_contact: str
+    telegram_connect_timeout_seconds: int
+    telegram_read_timeout_seconds: int
+    telegram_write_timeout_seconds: int
+    telegram_pool_timeout_seconds: int
     okpay_shop_id: str
     okpay_shop_token: str
     okpay_name: str
@@ -134,6 +138,10 @@ def load_settings() -> Settings:
         admin_user_ids=admin_user_ids,
         restock_channel=os.getenv("RESTOCK_CHANNEL", "@xxx").strip() or "@xxx",
         customer_service_contact=os.getenv("CUSTOMER_SERVICE_CONTACT", "@id2uu").strip() or "@id2uu",
+        telegram_connect_timeout_seconds=max(5, int(os.getenv("TELEGRAM_CONNECT_TIMEOUT_SECONDS", "15"))),
+        telegram_read_timeout_seconds=max(10, int(os.getenv("TELEGRAM_READ_TIMEOUT_SECONDS", "30"))),
+        telegram_write_timeout_seconds=max(10, int(os.getenv("TELEGRAM_WRITE_TIMEOUT_SECONDS", "30"))),
+        telegram_pool_timeout_seconds=max(1, int(os.getenv("TELEGRAM_POOL_TIMEOUT_SECONDS", "5"))),
         okpay_shop_id=os.getenv("OKPAY_SHOP_ID", "").strip(),
         okpay_shop_token=os.getenv("OKPAY_SHOP_TOKEN", "").strip(),
         okpay_name=os.getenv("OKPAY_NAME", "号铺").strip() or "号铺",

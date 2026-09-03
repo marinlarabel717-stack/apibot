@@ -33,7 +33,7 @@ from telegram import (
     Update,
 )
 from telegram.constants import KeyboardButtonStyle
-from telegram.error import BadRequest, Forbidden
+from telegram.error import BadRequest, Forbidden, TimedOut
 from telegram.ext import (
     Application,
     ApplicationBuilder,
@@ -2716,7 +2716,13 @@ async def reply_inline(
                 await query.edit_message_reply_markup(reply_markup=None)
             except BadRequest:
                 pass
-            await message.reply_text(text, reply_markup=reply_markup, parse_mode=parse_mode, entities=entities)
+            await reply_text_with_retry(
+                message,
+                text,
+                reply_markup=reply_markup,
+                parse_mode=parse_mode,
+                entities=entities,
+            )
             return
         try:
             await query.edit_message_text(text=text, reply_markup=reply_markup, parse_mode=parse_mode, entities=entities)
@@ -2724,7 +2730,95 @@ async def reply_inline(
             if "message is not modified" not in str(exc).lower():
                 raise
     elif update.message is not None:
-        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode=parse_mode, entities=entities)
+        await reply_text_with_retry(
+            update.message,
+            text,
+            reply_markup=reply_markup,
+            parse_mode=parse_mode,
+            entities=entities,
+        )
+
+
+async def run_telegram_request_with_retry(
+    request_name: str,
+    factory,
+    *,
+    retries: int = 1,
+    retry_delay_seconds: float = 1.5,
+):
+    for attempt in range(retries + 1):
+        try:
+            return await factory()
+        except TimedOut:
+            if attempt >= retries:
+                logger.warning("Telegram API è¯·æ±‚è¶…æ—¶ï¼Œä¸å†é‡è¯•: %s", request_name)
+                raise
+            wait_seconds = retry_delay_seconds * (attempt + 1)
+            logger.warning(
+                "Telegram API è¯·æ±‚è¶…æ—¶ï¼Œå‡†å¤‡é‡è¯•: %s attempt=%s/%s wait=%.1fs",
+                request_name,
+                attempt + 1,
+                retries,
+                wait_seconds,
+            )
+            await asyncio.sleep(wait_seconds)
+
+
+async def reply_text_with_retry(
+    message: Any,
+    text: str,
+    *,
+    reply_markup: Any | None = None,
+    parse_mode: str | None = None,
+    entities: tuple[MessageEntity, ...] | None = None,
+):
+    return await run_telegram_request_with_retry(
+        "reply_text",
+        lambda: message.reply_text(
+            text,
+            reply_markup=reply_markup,
+            parse_mode=parse_mode,
+            entities=entities,
+        ),
+    )
+
+
+async def reply_photo_with_retry(
+    message: Any,
+    photo: Any,
+    *,
+    caption: str | None = None,
+    caption_entities: tuple[MessageEntity, ...] | None = None,
+    reply_markup: Any | None = None,
+):
+    return await run_telegram_request_with_retry(
+        "reply_photo",
+        lambda: message.reply_photo(
+            photo=photo,
+            caption=caption,
+            caption_entities=caption_entities,
+            reply_markup=reply_markup,
+        ),
+    )
+
+
+async def send_message_with_retry(
+    bot: Any,
+    *,
+    chat_id: int,
+    text: str,
+    reply_markup: Any | None = None,
+    entities: tuple[MessageEntity, ...] | None = None,
+):
+    return await run_telegram_request_with_retry(
+        "send_message",
+        lambda: bot.send_message(
+            chat_id=chat_id,
+            text=text,
+            reply_markup=reply_markup,
+            entities=entities,
+        ),
+    )
 
 
 def is_callback_query_answer_expired(exc: BadRequest) -> bool:
@@ -2761,7 +2855,7 @@ async def notify_inline(update: Update, text: str, *, show_alert: bool = False) 
     if update.callback_query is not None:
         answered = await answer_callback_query_safely(update.callback_query, text=text, show_alert=show_alert)
         if not answered and update.callback_query.message is not None:
-            await update.callback_query.message.reply_text(text)
+            await reply_text_with_retry(update.callback_query.message, text)
         return
     await reply_inline(update, text)
 
@@ -2777,7 +2871,11 @@ async def notify_inline_with_fallback_message(
     if update.callback_query is not None:
         answered = await answer_callback_query_safely(update.callback_query, text=toast_text, show_alert=show_alert)
         if not answered and update.callback_query.message is not None:
-            await update.callback_query.message.reply_text(fallback_text, entities=fallback_entities)
+            await reply_text_with_retry(
+                update.callback_query.message,
+                fallback_text,
+                entities=fallback_entities,
+            )
         return
     await reply_inline(update, fallback_text, entities=fallback_entities)
 
@@ -2799,10 +2897,10 @@ async def send_progress_reply(update: Update, text: str) -> Any | None:
             except BadRequest:
                 pass
         if message is not None:
-            return await message.reply_text(text)
+            return await reply_text_with_retry(message, text)
         return None
     if update.message is not None:
-        return await update.message.reply_text(text)
+        return await reply_text_with_retry(update.message, text)
     return None
 
 
@@ -3833,6 +3931,66 @@ async def show_start_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await update.message.reply_text(text, entities=text_entities, reply_markup=main_menu_inline)
     elif update.callback_query is not None and update.callback_query.message is not None:
         await update.callback_query.message.reply_text(text, entities=text_entities, reply_markup=main_menu_inline)
+
+
+async def refresh_bottom_menu_keyboard(update: Update) -> None:
+    if update.message is not None:
+        await reply_text_with_retry(update.message, "底部菜单已刷新。", reply_markup=MENU_KEYBOARD)
+
+
+async def refresh_bottom_menu_keyboard_localized(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    lang = await ensure_user_with_lang(context, update.effective_user)
+    if update.message is not None:
+        await reply_text_with_retry(
+            update.message,
+            ui_text("bottom_menu_refreshed", lang),
+            reply_markup=build_menu_keyboard(lang),
+        )
+    elif update.callback_query is not None and update.callback_query.message is not None:
+        await reply_text_with_retry(
+            update.callback_query.message,
+            ui_text("bottom_menu_refreshed", lang),
+            reply_markup=build_menu_keyboard(lang),
+        )
+
+
+async def show_start_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user = update.effective_user
+    if user is None:
+        return
+    text, text_entities, main_menu_inline = await build_main_menu_message(context, user)
+    if update.callback_query is not None:
+        await answer_callback_query_safely(update.callback_query)
+    await refresh_bottom_menu_keyboard_localized(update, context)
+    start_menu_image_path = START_MENU_IMAGE_PATH if START_MENU_IMAGE_PATH.exists() else LEGACY_START_MENU_IMAGE_PATH
+    if start_menu_image_path.exists():
+        with start_menu_image_path.open("rb") as photo_fp:
+            if update.message is not None:
+                await reply_photo_with_retry(
+                    update.message,
+                    photo_fp,
+                    caption=text,
+                    caption_entities=text_entities,
+                    reply_markup=main_menu_inline,
+                )
+            elif update.callback_query is not None and update.callback_query.message is not None:
+                await reply_photo_with_retry(
+                    update.callback_query.message,
+                    photo_fp,
+                    caption=text,
+                    caption_entities=text_entities,
+                    reply_markup=main_menu_inline,
+                )
+        return
+    if update.message is not None:
+        await reply_text_with_retry(update.message, text, entities=text_entities, reply_markup=main_menu_inline)
+    elif update.callback_query is not None and update.callback_query.message is not None:
+        await reply_text_with_retry(
+            update.callback_query.message,
+            text,
+            entities=text_entities,
+            reply_markup=main_menu_inline,
+        )
 
 
 async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -6756,8 +6914,21 @@ async def on_application_post_init(application: Application) -> None:
 def build_application(settings: Settings) -> Application:
     store = Store(settings.database_path)
     supplier = SupplierClient(settings)
-
-    application = ApplicationBuilder().token(settings.bot_token).post_init(on_application_post_init).build()
+    application = (
+        ApplicationBuilder()
+        .token(settings.bot_token)
+        .connect_timeout(float(settings.telegram_connect_timeout_seconds))
+        .read_timeout(float(settings.telegram_read_timeout_seconds))
+        .write_timeout(float(settings.telegram_write_timeout_seconds))
+        .pool_timeout(float(settings.telegram_pool_timeout_seconds))
+        .media_write_timeout(float(max(settings.telegram_media_write_timeout_seconds, settings.telegram_write_timeout_seconds)))
+        .get_updates_connect_timeout(float(settings.telegram_connect_timeout_seconds))
+        .get_updates_read_timeout(float(settings.telegram_read_timeout_seconds))
+        .get_updates_write_timeout(float(settings.telegram_write_timeout_seconds))
+        .get_updates_pool_timeout(float(settings.telegram_pool_timeout_seconds))
+        .post_init(on_application_post_init)
+        .build()
+    )
     application.bot_data["settings"] = settings
     application.bot_data["store"] = store
     application.bot_data["supplier"] = supplier

@@ -690,6 +690,7 @@ ADMIN_HOME_ACTIVE_USERS_EMOJI_ID = "5942877472163892475"
 ADMIN_HOME_BUSINESS_STATUS_EMOJI_ID = "5951665890079544884"
 ADMIN_HOME_INCOME_EMOJI_ID = "5985630530111020079"
 ADMIN_HOME_TOTAL_BALANCE_EMOJI_ID = "5931415565955503486"
+BEIJING_TIMEZONE = timezone(timedelta(hours=8))
 CATEGORY_BUTTON_EMOJI_IDS: dict[str, str] = {
     "asia": "6334321852378252986",
     "west": "6334717028024190508",
@@ -5035,12 +5036,23 @@ async def show_admin_home(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
     clear_pending_admin_action(context)
     total_users = await call_blocking(store.count_users, True)
-    now_utc = datetime.now(timezone.utc)
-    today_start = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
-    yesterday_start = today_start - timedelta(days=1)
-    tomorrow_start = today_start + timedelta(days=1)
-    today_income = await call_blocking(store.get_order_income_between, today_start.isoformat(), tomorrow_start.isoformat())
-    yesterday_income = await call_blocking(store.get_order_income_between, yesterday_start.isoformat(), today_start.isoformat())
+    now_bj = datetime.now(BEIJING_TIMEZONE)
+    today_start_bj = now_bj.replace(hour=0, minute=0, second=0, microsecond=0)
+    yesterday_start_bj = today_start_bj - timedelta(days=1)
+    tomorrow_start_bj = today_start_bj + timedelta(days=1)
+    today_start_utc = today_start_bj.astimezone(timezone.utc)
+    yesterday_start_utc = yesterday_start_bj.astimezone(timezone.utc)
+    tomorrow_start_utc = tomorrow_start_bj.astimezone(timezone.utc)
+    today_income = await call_blocking(
+        store.get_paid_topup_amount_between,
+        today_start_utc.isoformat(),
+        tomorrow_start_utc.isoformat(),
+    )
+    yesterday_income = await call_blocking(
+        store.get_paid_topup_amount_between,
+        yesterday_start_utc.isoformat(),
+        today_start_utc.isoformat(),
+    )
     total_balance = await call_blocking(store.get_total_balance)
     text, entities = build_admin_home_text(
         total_users,

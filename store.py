@@ -360,15 +360,16 @@ class Store:
             row = conn.execute("SELECT COALESCE(SUM(balance), 0) AS total FROM users").fetchone()
             return float(row["total"]) if row else 0.0
 
-    def get_order_income_between(self, start_at: str, end_at: str) -> float:
+    def get_paid_topup_amount_between(self, start_at: str, end_at: str) -> float:
         with self._connect() as conn:
             row = conn.execute(
                 """
-                SELECT COALESCE(SUM(total_price - refund_amount), 0) AS total
-                FROM orders
-                WHERE state != 'failed'
-                  AND created_at >= ?
-                  AND created_at < ?
+                SELECT COALESCE(SUM(amount), 0) AS total
+                FROM topup_orders
+                WHERE state = 'paid'
+                  AND paid_at != ''
+                  AND paid_at >= ?
+                  AND paid_at < ?
                 """,
                 (str(start_at), str(end_at)),
             ).fetchone()

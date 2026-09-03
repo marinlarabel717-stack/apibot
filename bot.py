@@ -686,6 +686,10 @@ ADMIN_CHA_BALANCE_EMOJI_ID = "5992430854909989581"
 ADMIN_CHA_PURCHASE_COUNT_EMOJI_ID = "5877485980901971030"
 ADMIN_CHA_TOTAL_SPENT_EMOJI_ID = "5931409969613116639"
 ADMIN_CHA_ORDER_HISTORY_EMOJI_ID = "5951665980273858529"
+ADMIN_HOME_ACTIVE_USERS_EMOJI_ID = "5942877472163892475"
+ADMIN_HOME_BUSINESS_STATUS_EMOJI_ID = "5951665890079544884"
+ADMIN_HOME_INCOME_EMOJI_ID = "5985630530111020079"
+ADMIN_HOME_TOTAL_BALANCE_EMOJI_ID = "5931415565955503486"
 CATEGORY_BUTTON_EMOJI_IDS: dict[str, str] = {
     "asia": "6334321852378252986",
     "west": "6334717028024190508",
@@ -4958,6 +4962,29 @@ def build_admin_home_keyboard() -> InlineKeyboardMarkup:
     )
 
 
+def build_admin_home_text(
+    active_users: int,
+    business_status: str,
+    today_income: float,
+    yesterday_income: float,
+    total_balance: float,
+) -> tuple[str, tuple[MessageEntity, ...]]:
+    parts: list[tuple[str, str | None]] = [
+        ("管理员后台\n\n", None),
+        ("👥", ADMIN_HOME_ACTIVE_USERS_EMOJI_ID),
+        (f"活跃用户 ：{int(active_users)}\n", None),
+        ("✅", ADMIN_HOME_BUSINESS_STATUS_EMOJI_ID),
+        (f"营业状态：{business_status}\n", None),
+        ("💬", ADMIN_HOME_INCOME_EMOJI_ID),
+        (f"今日收入：{format_money(today_income)}U\n", None),
+        ("💬", ADMIN_HOME_INCOME_EMOJI_ID),
+        (f"昨日收入：{format_money(yesterday_income)}U\n", None),
+        ("🤖", ADMIN_HOME_TOTAL_BALANCE_EMOJI_ID),
+        (f"总余额：{format_money(total_balance)}U", None),
+    ]
+    return build_text_with_custom_emoji(parts)
+
+
 def build_admin_broadcast_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
@@ -4996,6 +5023,33 @@ async def show_admin_home(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         f"补货频道：{effective_restock_channel(context, settings)}"
     )
     await reply_inline(update, text, build_admin_home_keyboard())
+
+
+async def show_admin_home(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    settings, store, _ = get_services(context)
+    user = update.effective_user
+    if user is None:
+        return
+    if not is_admin(settings, user.id):
+        await send_menu_message(update, "只有管理员可以使用 /admin。")
+        return
+    clear_pending_admin_action(context)
+    total_users = await call_blocking(store.count_users, True)
+    now_utc = datetime.now(timezone.utc)
+    today_start = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
+    yesterday_start = today_start - timedelta(days=1)
+    tomorrow_start = today_start + timedelta(days=1)
+    today_income = await call_blocking(store.get_order_income_between, today_start.isoformat(), tomorrow_start.isoformat())
+    yesterday_income = await call_blocking(store.get_order_income_between, yesterday_start.isoformat(), today_start.isoformat())
+    total_balance = await call_blocking(store.get_total_balance)
+    text, entities = build_admin_home_text(
+        total_users,
+        business_status_label(context),
+        today_income,
+        yesterday_income,
+        total_balance,
+    )
+    await reply_inline(update, text, build_admin_home_keyboard(), entities=entities)
 
 
 async def show_admin_users(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 0) -> None:

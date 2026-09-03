@@ -3993,6 +3993,125 @@ async def show_start_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         )
 
 
+async def answer_callback_query_safely(
+    query: Any | None,
+    text: str | None = None,
+    *,
+    show_alert: bool = False,
+) -> bool:
+    if query is None:
+        return False
+    try:
+        await run_telegram_request_with_retry(
+            "answer_callback_query",
+            lambda: query.answer(text=text, show_alert=show_alert),
+        )
+        return True
+    except BadRequest as exc:
+        if is_callback_query_answer_expired(exc):
+            logger.info("skip expired callback answer: %s", exc)
+            return False
+        raise
+    except TimedOut:
+        logger.warning("answer_callback_query timed out; skip transient callback response")
+        return False
+
+
+async def send_callback_feedback(update: Update, text: str, *, entities: tuple[MessageEntity, ...] | None = None) -> None:
+    if update.callback_query is not None and update.callback_query.message is not None:
+        await reply_text_with_retry(update.callback_query.message, text, entities=entities)
+        return
+    await reply_inline(update, text, entities=entities)
+
+
+async def check_okpay_topup_order(update: Update, context: ContextTypes.DEFAULT_TYPE, order_id: str) -> None:
+    settings, store, _ = get_services(context)
+    user = update.effective_user
+    if user is None:
+        return
+    lang = await ensure_user_with_lang(context, user)
+    order = await call_blocking(store.get_topup_order, order_id)
+    if order is None or str(order.get("channel") or "") != "okpay":
+        await send_callback_feedback(update, ui_text("recharge_order_not_found_okpay", lang))
+        return
+    if safe_int(order.get("user_id")) != user.id:
+        await send_callback_feedback(update, ui_text("recharge_order_not_yours", lang))
+        return
+    if str(order.get("state") or "") == "paid":
+        await send_callback_feedback(update, ui_text("recharge_order_already_paid", lang))
+        return
+    if str(order.get("state") or "") != "pending":
+        await send_callback_feedback(update, ui_text("recharge_order_expired", lang))
+        return
+
+    await answer_callback_query_safely(update.callback_query, ui_text("checking_payment_status", lang))
+    await send_callback_feedback(update, ui_text("checking_payment_status", lang))
+
+    okpay_config = effective_okpay_settings(context, settings)
+    if not okpay_enabled(okpay_config):
+        await send_callback_feedback(update, ui_text("okpay_unavailable", lang))
+        return
+
+    try:
+        result = await call_blocking(okpay_check_deposit, okpay_config, order_id)
+    except Exception as exc:
+        await send_callback_feedback(update, ui_text("okpay_check_failed", lang, error=exc))
+        return
+
+    payload = okpay_normalize_check_result(result)
+    ok, status, fresh_order = process_okpay_topup(context.application, payload, source="manual_check")
+    if ok and fresh_order is not None:
+        paid_text, paid_entities = build_okpay_paid_confirmed_text(lang)
+        await send_callback_feedback(update, paid_text, entities=paid_entities)
+        return
+    if status == "already_paid":
+        await send_callback_feedback(update, ui_text("recharge_order_already_paid", lang))
+        return
+    if status in {"expired", "canceled"}:
+        await send_callback_feedback(update, ui_text("recharge_order_expired", lang))
+        return
+    unpaid_text, unpaid_entities = build_okpay_unpaid_notice_text(lang)
+    await send_callback_feedback(update, unpaid_text, entities=unpaid_entities)
+
+
+async def check_trc20_topup_order(update: Update, context: ContextTypes.DEFAULT_TYPE, order_id: str) -> None:
+    _, store, _ = get_services(context)
+    user = update.effective_user
+    if user is None:
+        return
+    lang = await ensure_user_with_lang(context, user)
+    await call_blocking(store.expire_topup_orders, "trc20")
+    order = await call_blocking(store.get_topup_order, order_id)
+    if order is None or str(order.get("channel") or "") != "trc20":
+        await send_callback_feedback(update, ui_text("recharge_order_not_found_trc20", lang))
+        return
+    if safe_int(order.get("user_id")) != user.id:
+        await send_callback_feedback(update, ui_text("recharge_order_not_yours", lang))
+        return
+    if str(order.get("state") or "") == "paid":
+        await send_callback_feedback(update, ui_text("recharge_order_already_paid", lang))
+        return
+    if str(order.get("state") or "") != "pending":
+        await send_callback_feedback(update, ui_text("recharge_order_expired", lang))
+        return
+
+    await answer_callback_query_safely(update.callback_query, ui_text("checking_payment_status", lang))
+    await send_callback_feedback(update, ui_text("checking_payment_status", lang))
+
+    await poll_trc20_topups_once(context.application)
+    fresh_order = await call_blocking(store.get_topup_order, order_id)
+    if fresh_order is None:
+        await send_callback_feedback(update, ui_text("recharge_order_not_found_trc20", lang))
+        return
+    if str(fresh_order.get("state") or "") == "paid":
+        await send_callback_feedback(update, f"✅ {ui_text('trc20_paid_confirmed', lang)}")
+        return
+    if str(fresh_order.get("state") or "") != "pending":
+        await send_callback_feedback(update, ui_text("recharge_order_expired", lang))
+        return
+    await send_callback_feedback(update, ui_text("trc20_transfer_not_detected", lang))
+
+
 async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
     if user is None:

@@ -5035,7 +5035,6 @@ async def show_admin_home(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await send_menu_message(update, "只有管理员可以使用 /admin。")
         return
     clear_pending_admin_action(context)
-    total_users = await call_blocking(store.count_users, True)
     now_bj = datetime.now(BEIJING_TIMEZONE)
     today_start_bj = now_bj.replace(hour=0, minute=0, second=0, microsecond=0)
     yesterday_start_bj = today_start_bj - timedelta(days=1)
@@ -5043,23 +5042,19 @@ async def show_admin_home(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     today_start_utc = today_start_bj.astimezone(timezone.utc)
     yesterday_start_utc = yesterday_start_bj.astimezone(timezone.utc)
     tomorrow_start_utc = tomorrow_start_bj.astimezone(timezone.utc)
-    today_income = await call_blocking(
-        store.get_paid_topup_amount_between,
+    stats = await call_blocking(
+        store.get_admin_home_stats,
         today_start_utc.isoformat(),
         tomorrow_start_utc.isoformat(),
-    )
-    yesterday_income = await call_blocking(
-        store.get_paid_topup_amount_between,
         yesterday_start_utc.isoformat(),
         today_start_utc.isoformat(),
     )
-    total_balance = await call_blocking(store.get_total_balance)
     text, entities = build_admin_home_text(
-        total_users,
+        safe_int(stats.get("active_users")),
         business_status_label(context),
-        today_income,
-        yesterday_income,
-        total_balance,
+        safe_float(stats.get("today_income")),
+        safe_float(stats.get("yesterday_income")),
+        safe_float(stats.get("total_balance")),
     )
     await reply_inline(update, text, build_admin_home_keyboard(), entities=entities)
 

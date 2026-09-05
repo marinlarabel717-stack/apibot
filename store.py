@@ -9,6 +9,8 @@ from decimal import Decimal, ROUND_DOWN
 from pathlib import Path
 from typing import Any
 
+SQLITE_BUSY_TIMEOUT_SECONDS = 30.0
+
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
@@ -22,8 +24,12 @@ class Store:
         self._init_db()
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=SQLITE_BUSY_TIMEOUT_SECONDS)
         conn.row_factory = sqlite3.Row
+        conn.execute(f"PRAGMA busy_timeout = {int(SQLITE_BUSY_TIMEOUT_SECONDS * 1000)}")
+        conn.execute("PRAGMA journal_mode = WAL")
+        conn.execute("PRAGMA synchronous = NORMAL")
+        conn.execute("PRAGMA temp_store = MEMORY")
         return conn
 
     @staticmethod
@@ -172,8 +178,10 @@ class Store:
             if "txid" not in topup_columns:
                 conn.execute("ALTER TABLE topup_orders ADD COLUMN txid TEXT NOT NULL DEFAULT ''")
             conn.execute("UPDATE topup_orders SET requested_amount = amount WHERE requested_amount <= 0")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_users_active ON users(is_active)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_topup_pending_channel ON topup_orders(state, channel, user_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_topup_trc20_match ON topup_orders(channel, state, pay_address, amount)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_topup_paid_state_paid_at ON topup_orders(state, paid_at)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_trc20_transfer_state ON trc20_transfers(state, to_address, block_timestamp)")
             conn.commit()
 
@@ -374,6 +382,50 @@ class Store:
                 (str(start_at), str(end_at)),
             ).fetchone()
             return float(row["total"]) if row else 0.0
+
+    def get_admin_home_stats(
+        self,
+        today_start_at: str,
+        today_end_at: str,
+        yesterday_start_at: str,
+        yesterday_end_at: str,
+    ) -> dict[str, float]:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT
+                    (SELECT COUNT(*) FROM users WHERE is_active = 1) AS active_users,
+                    (SELECT COALESCE(SUM(balance), 0) FROM users) AS total_balance,
+                    (
+                        SELECT COALESCE(SUM(amount), 0)
+                        FROM topup_orders
+                        WHERE state = 'paid'
+                          AND paid_at != ''
+                          AND paid_at >= ?
+                          AND paid_at < ?
+                    ) AS today_income,
+                    (
+                        SELECT COALESCE(SUM(amount), 0)
+                        FROM topup_orders
+                        WHERE state = 'paid'
+                          AND paid_at != ''
+                          AND paid_at >= ?
+                          AND paid_at < ?
+                    ) AS yesterday_income
+                """,
+                (
+                    str(today_start_at),
+                    str(today_end_at),
+                    str(yesterday_start_at),
+                    str(yesterday_end_at),
+                ),
+            ).fetchone()
+            return {
+                "active_users": float(row["active_users"]) if row else 0.0,
+                "total_balance": float(row["total_balance"]) if row else 0.0,
+                "today_income": float(row["today_income"]) if row else 0.0,
+                "yesterday_income": float(row["yesterday_income"]) if row else 0.0,
+            }
 
     def list_users(self, limit: int = 20, offset: int = 0, active_only: bool = True) -> list[dict[str, Any]]:
         with self._connect() as conn:

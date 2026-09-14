@@ -606,6 +606,10 @@ RUNTIME_KEY_OKPAY_API_URL = "okpay_api_url"
 RUNTIME_KEY_CUSTOMER_SERVICE = "customer_service_contact"
 RUNTIME_KEY_RESTOCK_CHANNEL = "restock_channel"
 RUNTIME_KEY_BUSINESS_STATUS = "business_status"
+RUNTIME_KEY_SELL_PRICE_MODE = "sell_price_mode"
+RUNTIME_KEY_SELL_PRICE_VALUE = "sell_price_value"
+ADMIN_SETTING_SELL_PRICE_PERCENT = "__sell_price_percent__"
+ADMIN_SETTING_SELL_PRICE_ADD = "__sell_price_add__"
 START_MENU_EMOJI_USDT_ID = "6334575946938451719"
 START_MENU_EMOJI_SPENT_ID = "6334456344984159861"
 START_MENU_EMOJI_QUANTITY_ID = "6334602442591700514"
@@ -815,6 +819,63 @@ def business_status_label(context: ContextTypes.DEFAULT_TYPE) -> str:
     return "营业中" if effective_business_open(context) else "已停止"
 
 
+def normalize_sell_price_mode(raw_value: str, default: str = "fixed_add") -> str:
+    normalized = str(raw_value or "").strip().lower()
+    alias_map = {
+        "fixed": "fixed_add",
+        "fixed_add": "fixed_add",
+        "add": "fixed_add",
+        "diff": "fixed_add",
+        "difference": "fixed_add",
+        "profit": "profit_percent",
+        "profit_percent": "profit_percent",
+        "percent": "profit_percent",
+        "percentage": "profit_percent",
+        "rate": "profit_percent",
+    }
+    return alias_map.get(normalized, default)
+
+
+def sanitize_sell_price_config(mode: str, value: float) -> dict[str, Any]:
+    normalized_mode = normalize_sell_price_mode(mode)
+    normalized_value = max(0.0, safe_float(value, 0.0))
+    return {"mode": normalized_mode, "value": normalized_value}
+
+
+def resolve_sell_price_config(runtime_config: dict[str, str], settings: Settings) -> dict[str, Any]:
+    fallback = sanitize_sell_price_config(settings.sell_price_mode, settings.sell_price_value)
+    runtime_mode = str(runtime_config.get(RUNTIME_KEY_SELL_PRICE_MODE) or "").strip()
+    runtime_value = str(runtime_config.get(RUNTIME_KEY_SELL_PRICE_VALUE) or "").strip()
+    if not runtime_mode and not runtime_value:
+        return fallback
+    mode = normalize_sell_price_mode(runtime_mode, fallback["mode"])
+    value = fallback["value"] if not runtime_value else safe_float(runtime_value, fallback["value"])
+    return sanitize_sell_price_config(mode, value)
+
+
+def apply_runtime_sell_price_settings(settings: Settings, runtime_config: dict[str, str]) -> dict[str, Any]:
+    config = resolve_sell_price_config(runtime_config, settings)
+    settings.sell_price_mode = str(config["mode"])
+    settings.sell_price_value = safe_float(config["value"], 0.0)
+    return config
+
+
+def effective_sell_price_config(context: ContextTypes.DEFAULT_TYPE, settings: Settings) -> dict[str, Any]:
+    return resolve_sell_price_config(get_runtime_config(context), settings)
+
+
+def sell_price_mode_label(mode: str) -> str:
+    return "利润百分比" if normalize_sell_price_mode(mode) == "profit_percent" else "固定差价"
+
+
+def format_sell_price_value(mode: str, value: float) -> str:
+    normalized_mode = normalize_sell_price_mode(mode)
+    normalized_value = max(0.0, safe_float(value, 0.0))
+    if normalized_mode == "profit_percent":
+        return f"{normalized_value:.2f}%"
+    return f"{format_money(normalized_value)} USDT"
+
+
 def effective_okpay_config(context: ContextTypes.DEFAULT_TYPE) -> str:
     return runtime_value(context, RUNTIME_KEY_OKPAY_CONFIG, "")
 
@@ -959,6 +1020,35 @@ def build_okpay_config_keyboard() -> InlineKeyboardMarkup:
             [
                 InlineKeyboardButton("设置API地址", callback_data="adm:set:okapi"),
                 InlineKeyboardButton("整段配置", callback_data="adm:set:okpay"),
+            ],
+            [InlineKeyboardButton("返回后台", callback_data="adm:home")],
+        ]
+    )
+
+
+def build_sell_price_config_text(config: dict[str, Any]) -> str:
+    mode = str(config.get("mode") or "fixed_add")
+    value = safe_float(config.get("value"), 0.0)
+    if normalize_sell_price_mode(mode) == "profit_percent":
+        formula = "最终售价 = 源头价格 x (1 + 利润百分比 / 100)"
+    else:
+        formula = "最终售价 = 源头价格 + 固定差价"
+    return (
+        "售价配置\n\n"
+        f"当前模式：{sell_price_mode_label(mode)}\n"
+        f"当前值：{format_sell_price_value(mode, value)}\n"
+        f"计算方式：{formula}\n"
+        "保护规则：最终售价不会低于源头价格\n\n"
+        "利润百分比 / 固定差价 二选一，保存新值时会自动切换。"
+    )
+
+
+def build_sell_price_config_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("利润百分比", callback_data="adm:set:pricepct"),
+                InlineKeyboardButton("固定差价", callback_data="adm:set:priceadd"),
             ],
             [InlineKeyboardButton("返回后台", callback_data="adm:home")],
         ]
@@ -1594,20 +1684,25 @@ def build_price_match_text(row: dict[str, Any]) -> str:
     ).lower()
 
 
-def resolve_sell_price(settings: Settings, row: dict[str, Any]) -> float:
+def resolve_sell_price(price_config_or_settings: Settings | dict[str, Any], row: dict[str, Any]) -> float:
     base_price = safe_float(row.get("price"))
-    add = settings.sell_price_add
-    multiplier = 1.0
-    match_text = build_price_match_text(row)
-    for rule in settings.sell_price_rules:
-        keyword = str(rule.get("keyword") or "").strip().lower()
-        if keyword and keyword in match_text:
-            if rule.get("multiplier") is not None:
-                multiplier = safe_float(rule.get("multiplier"), multiplier)
-            if rule.get("add") is not None:
-                add = safe_float(rule.get("add"), add)
-            break
-    return round(max(0.0, base_price * multiplier + add), 4)
+    if isinstance(price_config_or_settings, Settings):
+        price_config = sanitize_sell_price_config(
+            price_config_or_settings.sell_price_mode,
+            price_config_or_settings.sell_price_value,
+        )
+    else:
+        price_config = sanitize_sell_price_config(
+            str(price_config_or_settings.get("mode") or "fixed_add"),
+            safe_float(price_config_or_settings.get("value"), 0.0),
+        )
+    mode = str(price_config["mode"])
+    value = safe_float(price_config["value"], 0.0)
+    if mode == "profit_percent":
+        sell_price = base_price * (1.0 + value / 100.0)
+    else:
+        sell_price = base_price + value
+    return round(max(0.0, base_price, sell_price), 4)
 
 
 def resolve_button_icon(settings: Settings, name: str) -> tuple[str, str | None]:
@@ -4956,9 +5051,10 @@ def build_admin_home_keyboard() -> InlineKeyboardMarkup:
                 InlineKeyboardButton("OKPAY配置", callback_data="adm:cfg:okpay"),
             ],
             [
+                InlineKeyboardButton("售价配置", callback_data="adm:cfg:pricing"),
                 InlineKeyboardButton("客服/补货", callback_data="adm:cfg:contact"),
-                InlineKeyboardButton("取消当前操作", callback_data="adm:cancel"),
             ],
+            [InlineKeyboardButton("取消当前操作", callback_data="adm:cancel")],
         ]
     )
 
@@ -5049,12 +5145,18 @@ async def show_admin_home(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         yesterday_start_utc.isoformat(),
         today_start_utc.isoformat(),
     )
+    sell_price_config = effective_sell_price_config(context, settings)
     text, entities = build_admin_home_text(
         safe_int(stats.get("active_users")),
         business_status_label(context),
         safe_float(stats.get("today_income")),
         safe_float(stats.get("yesterday_income")),
         safe_float(stats.get("total_balance")),
+    )
+    text = (
+        f"{text}\n"
+        f"售价模式：{sell_price_mode_label(str(sell_price_config.get('mode') or 'fixed_add'))}\n"
+        f"当前加价：{format_sell_price_value(str(sell_price_config.get('mode') or 'fixed_add'), safe_float(sell_price_config.get('value'), 0.0))}"
     )
     await reply_inline(update, text, build_admin_home_keyboard(), entities=entities)
 
@@ -5165,6 +5267,9 @@ async def show_admin_config_page(update: Update, context: ContextTypes.DEFAULT_T
         okpay_config = effective_okpay_settings(context, settings)
         text = build_okpay_config_text(okpay_config)
         keyboard = build_okpay_config_keyboard()
+    elif section == "pricing":
+        text = build_sell_price_config_text(effective_sell_price_config(context, settings))
+        keyboard = build_sell_price_config_keyboard()
     else:
         text = (
             "客服 / 补货配置\n\n"
@@ -5205,6 +5310,24 @@ async def prompt_admin_broadcast_button(update: Update, context: ContextTypes.DE
 
 async def prompt_admin_setting_edit(update: Update, context: ContextTypes.DEFAULT_TYPE, key: str, title: str) -> None:
     set_pending_admin_action(context, {"kind": "setting_edit", "setting_key": key, "setting_title": title})
+    if key == ADMIN_SETTING_SELL_PRICE_PERCENT:
+        await send_menu_message(
+            update,
+            "请输入利润百分比，只发数字即可。\n"
+            "例如：10 表示在源头价格基础上加 10%\n"
+            "不能小于 0，发 0 或 - 都是不加价。\n"
+            "保存后会自动切换成利润百分比模式。",
+        )
+        return
+    if key == ADMIN_SETTING_SELL_PRICE_ADD:
+        await send_menu_message(
+            update,
+            "请输入固定差价，只发数字即可。\n"
+            "例如：0.3 表示每件都在源头价格上加 0.3 USDT\n"
+            "不能小于 0，发 0 或 - 都是不加价。\n"
+            "保存后会自动切换成固定差价模式。",
+        )
+        return
     if key == RUNTIME_KEY_OKPAY_CONFIG:
         await send_menu_message(
             update,
@@ -5319,6 +5442,30 @@ async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_
         setting_title = str(pending.get("setting_title") or "配置")
         value = "" if text.strip() == "-" else text.strip()
         runtime_config = get_runtime_config(context)
+        if setting_key in {ADMIN_SETTING_SELL_PRICE_PERCENT, ADMIN_SETTING_SELL_PRICE_ADD}:
+            raw_number = "0" if not value else value
+            try:
+                numeric_value = float(raw_number)
+            except ValueError:
+                await send_menu_message(update, "请输入数字，支持整数或小数。")
+                return True
+            if numeric_value < 0:
+                await send_menu_message(update, "不能低于 0，否则售价会低于源头价格。")
+                return True
+            mode = "profit_percent" if setting_key == ADMIN_SETTING_SELL_PRICE_PERCENT else "fixed_add"
+            saved_value = f"{numeric_value:g}"
+            await call_blocking(store.set_runtime_setting, RUNTIME_KEY_SELL_PRICE_MODE, mode, user.id)
+            await call_blocking(store.set_runtime_setting, RUNTIME_KEY_SELL_PRICE_VALUE, saved_value, user.id)
+            runtime_config[RUNTIME_KEY_SELL_PRICE_MODE] = mode
+            runtime_config[RUNTIME_KEY_SELL_PRICE_VALUE] = saved_value
+            apply_runtime_sell_price_settings(settings, runtime_config)
+            await call_blocking(store.log_admin_action, user.id, "admin_setting_update", mode, saved_value)
+            clear_pending_admin_action(context)
+            await send_menu_message(
+                update,
+                f"{setting_title} 已更新。\n当前模式：{sell_price_mode_label(mode)}\n当前值：{format_sell_price_value(mode, numeric_value)}",
+            )
+            return True
         okpay_field_map = {
             RUNTIME_KEY_OKPAY_SHOP_ID: "shop_id",
             RUNTIME_KEY_OKPAY_SHOP_TOKEN: "shop_token",
@@ -5571,6 +5718,8 @@ async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
             "okname": (RUNTIME_KEY_OKPAY_NAME, "OKPay 名称"),
             "okcallback": (RUNTIME_KEY_OKPAY_CALLBACK_URL, "OKPay 回调地址"),
             "okapi": (RUNTIME_KEY_OKPAY_API_URL, "OKPay API 地址"),
+            "pricepct": (ADMIN_SETTING_SELL_PRICE_PERCENT, "利润百分比"),
+            "priceadd": (ADMIN_SETTING_SELL_PRICE_ADD, "固定差价"),
             "cs": (RUNTIME_KEY_CUSTOMER_SERVICE, "客服联系方式"),
             "restock": (RUNTIME_KEY_RESTOCK_CHANNEL, "补货频道"),
         }
@@ -7113,6 +7262,7 @@ def build_application(settings: Settings) -> Application:
     application.bot_data["store"] = store
     application.bot_data["supplier"] = supplier
     application.bot_data["runtime_config"] = store.get_runtime_settings()
+    apply_runtime_sell_price_settings(settings, application.bot_data["runtime_config"])
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("menu", menu))

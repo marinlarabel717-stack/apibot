@@ -119,7 +119,9 @@ OKPAY_CALLBACK_URL=
 OKPAY_CALLBACK_PORT=8088
 TRONGRID_API_KEY=
 TRONGRID_POLL_SECONDS=6
+SELL_PRICE_MODE=fixed_add
 SELL_PRICE_ADD=0.2
+SELL_PRICE_PERCENT=
 API_AUTH_HEADER_NAME=Authorization
 API_AUTH_HEADER_VALUE=
 API_AUTH_TRY_BEARER_VARIANTS=true
@@ -137,7 +139,7 @@ API_AUTH_TRY_BEARER_VARIANTS=true
 - `OKPAY_NAME`
 - `OKPAY_CALLBACK_URL`
 - `TRONGRID_API_KEY`
-- 如果要微调利润，再改 `SELL_PRICE_ADD` 和 `SELL_PRICE_RULES_JSON`
+- 如果要微调利润，只改一组：`SELL_PRICE_MODE=fixed_add` + `SELL_PRICE_ADD`，或者 `SELL_PRICE_MODE=profit_percent` + `SELL_PRICE_PERCENT`
 
 ### 3. 启动
 
@@ -171,9 +173,15 @@ API_EXTRA_QUERY_JSON={"uid":"10001"}
 
 ## 可配置项
 
+- `SELL_PRICE_MODE`
+  - 售价模式，只能二选一：`fixed_add` 或 `profit_percent`
 - `SELL_PRICE_ADD`
-  - 全局固定差价，最终售价 = 上游价格 + 这里的金额
-  - 例如 `SELL_PRICE_ADD=0.2`，上游 `1.3` 会卖 `1.5`
+  - 固定差价模式使用，最终售价 = 上游价格 + 这里的金额
+  - 例如 `SELL_PRICE_MODE=fixed_add` 且 `SELL_PRICE_ADD=0.2`，上游 `1.3` 会卖 `1.5`
+- `SELL_PRICE_PERCENT`
+  - 利润百分比模式使用，最终售价 = 上游价格 x `(1 + 百分比 / 100)`
+  - 例如 `SELL_PRICE_MODE=profit_percent` 且 `SELL_PRICE_PERCENT=10`，上游 `1.3` 会卖 `1.43`
+  - 不允许低于 `0`，程序也会额外保护最终售价不低于上游价格
 - `OKPAY_SHOP_ID` / `OKPAY_SHOP_TOKEN`
   - OKPay 商户配置，缺一不可
 - `OKPAY_CALLBACK_URL`
@@ -186,9 +194,6 @@ API_EXTRA_QUERY_JSON={"uid":"10001"}
   - TRC20 充值轮询间隔，默认 `6`
 - `TRC20_USDT_CONTRACT`
   - USDT TRC20 合约地址，默认主网 `TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t`
-- `SELL_PRICE_RULES_JSON`
-  - 按关键字单独覆盖固定差价
-  - 示例：`{"VIP":{"add":0.5},"Spam":{"add":0.1},"7年":{"add":0.8}}`
 - `INLINE_BUTTON_CUSTOM_EMOJI_ENABLED`
   - 是否启用 Telegram custom emoji 按钮图标
 - `BUTTON_CUSTOM_EMOJI_IDS_JSON`

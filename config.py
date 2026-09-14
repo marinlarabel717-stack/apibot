@@ -4,8 +4,6 @@ import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
-
 from dotenv import load_dotenv
 
 
@@ -30,35 +28,51 @@ def _parse_float(raw: str, field_name: str, default: float) -> float:
         raise ValueError(f"{field_name} is not a valid number: {raw}") from exc
 
 
-def _parse_price_rules(raw: str, field_name: str) -> list[dict[str, Any]]:
-    raw = (raw or "").strip() or "{}"
-    try:
-        value = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"{field_name} is not valid JSON: {exc}") from exc
-    if not isinstance(value, dict):
-        raise ValueError(f"{field_name} must be a JSON object")
+def _parse_sell_price_mode(raw: str, field_name: str, default: str = "fixed_add") -> str:
+    normalized = str(raw or "").strip().lower()
+    if not normalized:
+        return default
+    alias_map = {
+        "fixed": "fixed_add",
+        "fixed_add": "fixed_add",
+        "add": "fixed_add",
+        "diff": "fixed_add",
+        "difference": "fixed_add",
+        "profit": "profit_percent",
+        "profit_percent": "profit_percent",
+        "percent": "profit_percent",
+        "percentage": "profit_percent",
+        "rate": "profit_percent",
+    }
+    mode = alias_map.get(normalized)
+    if mode is None:
+        raise ValueError(f"{field_name} must be fixed_add or profit_percent")
+    return mode
 
-    rules: list[dict[str, Any]] = []
-    for keyword, rule_value in value.items():
-        entry: dict[str, Any] = {
-            "keyword": str(keyword).strip(),
-            "add": None,
-            "multiplier": None,
-        }
-        if not entry["keyword"]:
-            continue
-        if isinstance(rule_value, (int, float)):
-            entry["add"] = float(rule_value)
-        elif isinstance(rule_value, dict):
-            if "multiplier" in rule_value and rule_value["multiplier"] is not None:
-                entry["multiplier"] = float(rule_value["multiplier"])
-            if "add" in rule_value and rule_value["add"] is not None:
-                entry["add"] = float(rule_value["add"])
-        else:
-            raise ValueError(f"{field_name} rule for {keyword} must be a number or object")
-        rules.append(entry)
-    return rules
+
+def _resolve_sell_price_env() -> tuple[str, float]:
+    mode_raw = os.getenv("SELL_PRICE_MODE", "")
+    add_raw = os.getenv("SELL_PRICE_ADD", "")
+    percent_raw = os.getenv("SELL_PRICE_PERCENT", "")
+    add_value = _parse_float(add_raw, "SELL_PRICE_ADD", 0.0)
+    percent_value = _parse_float(percent_raw, "SELL_PRICE_PERCENT", 0.0)
+    configured_values: list[tuple[str, float]] = []
+    if str(add_raw).strip():
+        configured_values.append(("fixed_add", add_value))
+    if str(percent_raw).strip():
+        configured_values.append(("profit_percent", percent_value))
+    if len(configured_values) > 1:
+        raise ValueError("SELL_PRICE_ADD and SELL_PRICE_PERCENT cannot both be configured")
+
+    mode = _parse_sell_price_mode(mode_raw, "SELL_PRICE_MODE", "")
+    if configured_values:
+        configured_mode, configured_value = configured_values[0]
+        if mode and mode != configured_mode:
+            raise ValueError("SELL_PRICE_MODE conflicts with configured sell price value")
+        return configured_mode, max(0.0, configured_value)
+    if mode:
+        return mode, 0.0
+    return "fixed_add", max(0.0, add_value)
 
 
 @dataclass(slots=True)
@@ -92,8 +106,8 @@ class Settings:
     trongrid_max_pages: int
     trongrid_lookback_minutes: int
     trc20_usdt_contract: str
-    sell_price_add: float
-    sell_price_rules: list[dict[str, Any]]
+    sell_price_mode: str
+    sell_price_value: float
     inline_button_custom_emoji_enabled: bool
     button_custom_emoji_ids: dict[str, str]
     api_base_url: str
@@ -133,6 +147,8 @@ def load_settings() -> Settings:
 
     database_path = Path(os.getenv("DATABASE_PATH", "data/apibot.db")).resolve()
 
+    sell_price_mode, sell_price_value = _resolve_sell_price_env()
+
     return Settings(
         bot_token=bot_token,
         admin_user_ids=admin_user_ids,
@@ -163,8 +179,8 @@ def load_settings() -> Settings:
         trongrid_max_pages=max(1, int(os.getenv("TRONGRID_MAX_PAGES", "20"))),
         trongrid_lookback_minutes=max(1, int(os.getenv("TRONGRID_LOOKBACK_MINUTES", "30"))),
         trc20_usdt_contract=os.getenv("TRC20_USDT_CONTRACT", "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t").strip(),
-        sell_price_add=_parse_float(os.getenv("SELL_PRICE_ADD", "0"), "SELL_PRICE_ADD", 0.0),
-        sell_price_rules=_parse_price_rules(os.getenv("SELL_PRICE_RULES_JSON", "{}"), "SELL_PRICE_RULES_JSON"),
+        sell_price_mode=sell_price_mode,
+        sell_price_value=sell_price_value,
         inline_button_custom_emoji_enabled=os.getenv("INLINE_BUTTON_CUSTOM_EMOJI_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"},
         button_custom_emoji_ids=_parse_json_map(os.getenv("BUTTON_CUSTOM_EMOJI_IDS_JSON", "{}"), "BUTTON_CUSTOM_EMOJI_IDS_JSON"),
         api_base_url=os.getenv("API_BASE_URL", "https://onlinestore-fx-api.add4533.com").rstrip("/"),

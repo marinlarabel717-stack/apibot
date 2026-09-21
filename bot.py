@@ -55,9 +55,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger("apibot")
 OKPAY_HTTP_LOCAL = threading.local()
-CATEGORY_CACHE_TTL_SECONDS = 20
+CATEGORY_CACHE_TTL_SECONDS = 300
+PRODUCT_DETAIL_CACHE_TTL_SECONDS = 300
+SEARCH_CACHE_TTL_SECONDS = 180
 CATEGORY_LIST_CACHE: dict[int, tuple[float, list[dict[str, Any]]]] = {}
 CATEGORY_PRODUCTS_CACHE: dict[tuple[int, int], tuple[float, list[dict[str, Any]]]] = {}
+PRODUCT_DETAIL_CACHE: dict[tuple[int, int], tuple[float, dict[str, Any]]] = {}
+SEARCH_RESULTS_CACHE: dict[tuple[int, str], tuple[float, list[dict[str, Any]]]] = {}
+CATALOG_SEARCH_CACHE: dict[int, tuple[float, list[dict[str, Any]]]] = {}
 
 
 PRODUCTS_PER_PAGE = 30
@@ -744,12 +749,16 @@ def normalize_search_keyword(value: str) -> str:
     return " ".join(str(value or "").split())
 
 
+def compact_search_text(value: str) -> str:
+    return re.sub(r"\s+", "", str(value or "").strip().lower())
+
+
 def should_trigger_product_search(keyword: str) -> bool:
     normalized = normalize_search_keyword(keyword)
     if not normalized or normalized in NON_SEARCH_BUTTON_TEXTS:
         return False
 
-    compact = normalized.replace(" ", "")
+    compact = compact_search_text(normalized)
     if re.fullmatch(r"\+\d{1,4}(?:[^\d].*)?", compact):
         return True
 
@@ -3963,6 +3972,108 @@ async def fetch_category_products(supplier: SupplierClient, category_id: int) ->
     return rows
 
 
+async def fetch_product_detail_cached(supplier: SupplierClient, product_id: int) -> dict[str, Any]:
+    cache_key = (id(supplier), int(product_id))
+    now = time.monotonic()
+    cached = PRODUCT_DETAIL_CACHE.get(cache_key)
+    if cached and now - cached[0] < PRODUCT_DETAIL_CACHE_TTL_SECONDS:
+        return cached[1]
+    payload = await call_blocking(supplier.get_product_detail, product_id)
+    row = payload.get("data") or {}
+    PRODUCT_DETAIL_CACHE[cache_key] = (now, row)
+    return row
+
+
+async def build_catalog_search_rows(supplier: SupplierClient) -> list[dict[str, Any]]:
+    cache_key = id(supplier)
+    now = time.monotonic()
+    cached = CATALOG_SEARCH_CACHE.get(cache_key)
+    if cached and now - cached[0] < CATEGORY_CACHE_TTL_SECONDS:
+        return cached[1]
+
+    categories = await fetch_categories(supplier)
+    rows_by_category = await asyncio.gather(
+        *(fetch_category_products(supplier, safe_int(row.get("categoryId"))) for row in categories if safe_int(row.get("categoryId")) > 0)
+    )
+    category_names = {
+        safe_int(row.get("categoryId")): str(row.get("categoryName") or "")
+        for row in categories
+        if safe_int(row.get("categoryId")) > 0
+    }
+    search_rows: list[dict[str, Any]] = []
+    for category_rows in rows_by_category:
+        for row in category_rows:
+            item = dict(row)
+            category_id = safe_int(item.get("categoryId"))
+            if category_id > 0 and category_names.get(category_id):
+                item.setdefault("categoryName", category_names[category_id])
+            search_rows.append(item)
+    CATALOG_SEARCH_CACHE[cache_key] = (now, search_rows)
+    return search_rows
+
+
+def search_products_locally(rows: list[dict[str, Any]], keyword: str) -> list[dict[str, Any]]:
+    normalized = normalize_search_keyword(keyword)
+    compact_keyword = compact_search_text(normalized)
+    if not compact_keyword:
+        return []
+    code_keyword = compact_keyword[1:] if compact_keyword.startswith("+") else compact_keyword
+
+    scored_rows: list[tuple[int, int, int, dict[str, Any]]] = []
+    seen_product_ids: set[int] = set()
+    for row in rows:
+        product_id = safe_int(row.get("productId"))
+        if product_id <= 0 or product_id in seen_product_ids:
+            continue
+        raw_name = str(row.get("productName") or "")
+        raw_category = str(row.get("categoryName") or "")
+        haystack = compact_search_text(f"{raw_name} {raw_category}")
+        if not haystack:
+            continue
+        exact_match = haystack == compact_keyword or haystack == code_keyword
+        prefix_match = haystack.startswith(compact_keyword) or haystack.startswith(code_keyword)
+        contains_match = compact_keyword in haystack or code_keyword in haystack
+        if not (exact_match or prefix_match or contains_match):
+            continue
+        stock = max(0, safe_int(row.get("totalStock")))
+        position = haystack.find(compact_keyword)
+        if position < 0 and code_keyword != compact_keyword:
+            position = haystack.find(code_keyword)
+        if position < 0:
+            position = 9999
+        score = 0 if exact_match else 1 if prefix_match else 2
+        scored_rows.append((score, position, -stock, row))
+        seen_product_ids.add(product_id)
+
+    scored_rows.sort(key=lambda item: (item[0], item[1], item[2], safe_int(item[3].get("productId"))))
+    return [row for _, _, _, row in scored_rows]
+
+
+async def search_products_cached(supplier: SupplierClient, keyword: str) -> list[dict[str, Any]]:
+    normalized = normalize_search_keyword(keyword)
+    cache_key = (id(supplier), normalized)
+    now = time.monotonic()
+    cached = SEARCH_RESULTS_CACHE.get(cache_key)
+    if cached and now - cached[0] < SEARCH_CACHE_TTL_SECONDS:
+        return cached[1]
+
+    search_rows = await build_catalog_search_rows(supplier)
+    rows = search_products_locally(search_rows, normalized)
+    if not rows:
+        payload = await call_blocking(supplier.search_products, normalized)
+        rows = payload.get("data") or []
+    SEARCH_RESULTS_CACHE[cache_key] = (now, rows)
+    return rows
+
+
+async def warm_supplier_catalog(context: ContextTypes.DEFAULT_TYPE) -> None:
+    _, _, supplier = get_services(context)
+    try:
+        await build_catalog_search_rows(supplier)
+    except Exception:
+        logger.exception("supplier catalog warmup failed")
+
+
 async def build_main_menu_message(
     context: ContextTypes.DEFAULT_TYPE,
     user: Any,
@@ -5821,8 +5932,7 @@ async def execute_purchase(
     settings, store, supplier = get_services(context)
     await call_blocking(store.ensure_user, user_id, username, display_name)
 
-    detail_payload = await call_blocking(supplier.get_product_detail, product_id)
-    row = detail_payload.get("data") or {}
+    row = await fetch_product_detail_cached(supplier, product_id)
     unit_price = resolve_sell_price(settings, row)
     total_stock = safe_int(row.get("totalStock"))
     product_name = str(row.get("productName") or f"商品 {product_id}")
@@ -6610,11 +6720,10 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             await reply_inline(update, ui_text("product_param_invalid", lang))
             return
         try:
-            payload = await call_blocking(supplier.get_product_detail, product_id)
+            row = await fetch_product_detail_cached(supplier, product_id)
         except SupplierApiError as exc:
             await reply_inline(update, ui_text("fetch_product_detail_failed", lang, error=exc))
             return
-        row = payload.get("data") or {}
         text, entities, keyboard = render_product_detail_view_configured_localized(settings, row, category_id, page, lang)
         await reply_inline(update, text, keyboard, entities=entities)
         return
@@ -6835,11 +6944,10 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             await reply_inline(update, ui_text("product_param_invalid", lang))
             return
         try:
-            payload = await call_blocking(supplier.get_product_detail, product_id)
+            row = await fetch_product_detail_cached(supplier, product_id)
         except SupplierApiError as exc:
             await reply_inline(update, ui_text("fetch_product_detail_failed", lang, error=exc))
             return
-        row = payload.get("data") or {}
         text, entities, keyboard = render_product_detail_view_configured_localized(settings, row, category_id, page, lang)
         await reply_inline(update, text, keyboard, entities=entities)
         return
@@ -6959,11 +7067,10 @@ async def search_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
     lang = await ensure_user_with_lang(context, update.effective_user)
     try:
-        payload = await call_blocking(supplier.search_products, keyword)
+        rows = await search_products_cached(supplier, keyword)
     except SupplierApiError as exc:
         await update.message.reply_text(ui_text("search_failed", lang, error=exc))
         return
-    rows = payload.get("data") or []
     if not rows:
         await update.message.reply_text(ui_text("search_empty", lang), reply_markup=build_menu_keyboard(lang))
         return
@@ -7026,11 +7133,10 @@ async def search_text_rich(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         category_id = safe_int(pending_purchase.get("category_id"), 0)
         page = safe_int(pending_purchase.get("page"), 0)
         try:
-            payload = await call_blocking(supplier.get_product_detail, product_id)
+            row = await fetch_product_detail_cached(supplier, product_id)
         except SupplierApiError as exc:
             await update.message.reply_text(ui_text("fetch_product_detail_failed", lang, error=exc), reply_markup=build_menu_keyboard(lang))
             return
-        row = payload.get("data") or {}
         product_name = str(row.get("productName") or f"商品 {product_id}")
         unit_price = resolve_sell_price(settings, row)
         caption, caption_entities = build_purchase_confirm_text_localized(product_name, unit_price, quantity, lang)
@@ -7049,11 +7155,10 @@ async def search_text_rich(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if not should_trigger_product_search(keyword):
         return
     try:
-        payload = await call_blocking(supplier.search_products, keyword)
+        rows = await search_products_cached(supplier, keyword)
     except SupplierApiError as exc:
         await update.message.reply_text(ui_text("search_failed", lang, error=exc))
         return
-    rows = payload.get("data") or []
     if not rows:
         await update.message.reply_text(ui_text("search_empty", lang), reply_markup=build_menu_keyboard(lang))
         return
@@ -7185,11 +7290,10 @@ async def product(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(ui_text("product_id_number", lang), reply_markup=build_menu_keyboard(lang))
         return
     try:
-        payload = await call_blocking(supplier.get_product_detail, product_id)
+        row = await fetch_product_detail_cached(supplier, product_id)
     except SupplierApiError as exc:
         await update.message.reply_text(ui_text("fetch_product_detail_failed", lang, error=exc), reply_markup=build_menu_keyboard(lang))
         return
-    row = payload.get("data") or {}
     text, entities, keyboard = render_product_detail_view_configured_localized(settings, row, category_id=0, page=0, lang=lang)
     await update.message.reply_text(text, entities=entities, reply_markup=keyboard)
 
@@ -7288,6 +7392,17 @@ def build_application(settings: Settings) -> Application:
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, search_text_rich))
 
     if application.job_queue is not None:
+        application.job_queue.run_once(
+            warm_supplier_catalog,
+            when=5,
+            name="warm_supplier_catalog_initial",
+        )
+        application.job_queue.run_repeating(
+            warm_supplier_catalog,
+            interval=max(120, CATEGORY_CACHE_TTL_SECONDS - 60),
+            first=max(120, CATEGORY_CACHE_TTL_SECONDS - 60),
+            name="warm_supplier_catalog",
+        )
         application.job_queue.run_repeating(
             poll_processing_orders,
             interval=settings.order_poll_seconds,

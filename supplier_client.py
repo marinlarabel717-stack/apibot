@@ -5,6 +5,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 from config import Settings
 
@@ -21,7 +23,23 @@ class SupplierClient:
     session: requests.Session = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
-        self.session = requests.Session()
+        self.session = self._build_session()
+
+    def _build_session(self) -> requests.Session:
+        session = requests.Session()
+        retry = Retry(
+            total=1,
+            connect=1,
+            read=1,
+            backoff_factor=0.2,
+            allowed_methods=frozenset({"GET"}),
+            status_forcelist=(502, 503, 504),
+            raise_on_status=False,
+        )
+        adapter = HTTPAdapter(pool_connections=8, pool_maxsize=16, max_retries=retry)
+        session.mount("https://", adapter)
+        session.mount("http://", adapter)
+        return session
 
     def _base_headers(self) -> dict[str, str]:
         headers: dict[str, str] = {
@@ -130,8 +148,23 @@ class SupplierClient:
                     continue
                 raise
             except requests.RequestException as exc:
-                last_error = SupplierApiError(str(exc))
-                raise last_error from exc
+                # Idle upstream keep-alive sockets occasionally go stale; rebuild once and retry.
+                self.session.close()
+                self.session = self._build_session()
+                try:
+                    response = self.session.get(
+                        url,
+                        params=self._params(params),
+                        headers=self._headers(auth_value),
+                        timeout=self.settings.api_timeout_seconds,
+                    )
+                    return self._parse_response(response)
+                except SupplierApiError as retry_exc:
+                    last_error = retry_exc
+                    raise retry_exc
+                except requests.RequestException as retry_request_exc:
+                    last_error = SupplierApiError(str(retry_request_exc))
+                    raise last_error from retry_request_exc
 
         if last_error is not None:
             raise last_error

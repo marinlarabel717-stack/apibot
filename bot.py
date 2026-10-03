@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import hashlib
 import html
 import io
@@ -67,6 +68,7 @@ CATALOG_SEARCH_CACHE: dict[int, tuple[float, list[dict[str, Any]]]] = {}
 
 PRODUCTS_PER_PAGE = 30
 SEARCH_RESULTS_LIMIT = 8
+BROADCAST_PROGRESS_UPDATE_EVERY = 10
 ASSETS_DIR = Path(__file__).resolve().parent / "assets"
 PURCHASE_CONFIRM_IMAGE_PATH = ASSETS_DIR / "purchase-confirm.png"
 DELIVERY_READY_IMAGE_PATH = ASSETS_DIR / "delivery-ready.png"
@@ -794,6 +796,33 @@ def get_or_create_admin_broadcast_draft(context: ContextTypes.DEFAULT_TYPE) -> d
     }
     set_pending_admin_action(context, pending)
     return pending
+
+
+def get_running_admin_broadcast_task(application: Application) -> asyncio.Task | None:
+    task = application.bot_data.get("admin_broadcast_task")
+    return task if isinstance(task, asyncio.Task) and not task.done() else None
+
+
+def clear_running_admin_broadcast_task(application: Application) -> None:
+    application.bot_data.pop("admin_broadcast_task", None)
+
+
+def format_admin_broadcast_progress_text(
+    total: int,
+    sent: int,
+    failed: int,
+    cleared: int,
+    processed: int,
+    *,
+    running: bool,
+) -> str:
+    title = "群发进行中" if running else "群发完成"
+    return (
+        f"{title}：{processed}/{total}\n"
+        f"成功：{sent}\n"
+        f"失败：{failed}\n"
+        f"已清理失效用户：{cleared}"
+    )
 
 
 def get_runtime_config(context: ContextTypes.DEFAULT_TYPE) -> dict[str, str]:
@@ -5482,21 +5511,85 @@ async def send_admin_preview(update: Update, context: ContextTypes.DEFAULT_TYPE,
         await target_message.reply_text(str(payload.get("text") or "（空文本）"), reply_markup=reply_markup)
 
 
-async def deliver_admin_payload(context: ContextTypes.DEFAULT_TYPE, user_id: int, payload: dict[str, Any]) -> None:
+async def deliver_admin_payload(bot, user_id: int, payload: dict[str, Any]) -> None:
     reply_markup = admin_send_button_markup(payload)
     if payload.get("content_type") == "photo" and payload.get("photo_file_id"):
-        await context.bot.send_photo(
+        await bot.send_photo(
             chat_id=int(user_id),
             photo=payload["photo_file_id"],
             caption=str(payload.get("text") or "").strip() or None,
             reply_markup=reply_markup,
         )
         return
-    await context.bot.send_message(
+    await bot.send_message(
         chat_id=int(user_id),
         text=str(payload.get("text") or "").strip() or " ",
         reply_markup=reply_markup,
     )
+
+
+async def run_admin_broadcast_task(
+    application: Application,
+    *,
+    admin_user_id: int,
+    payload: dict[str, Any],
+    progress_chat_id: int,
+    progress_message_id: int,
+) -> None:
+    store: Store = application.bot_data["store"]
+    users = await call_blocking(store.list_users, 100000, 0, True)
+    total = len(users)
+    sent = 0
+    failed = 0
+    cleared = 0
+    try:
+        for index, row in enumerate(users, start=1):
+            target_user_id = safe_int(row.get("user_id"))
+            if target_user_id <= 0:
+                failed += 1
+            else:
+                try:
+                    await deliver_admin_payload(application.bot, target_user_id, payload)
+                    sent += 1
+                except Exception as exc:
+                    failed += 1
+                    if is_delivery_failure(exc):
+                        await call_blocking(store.mark_user_inactive, target_user_id)
+                        cleared += 1
+                    else:
+                        logger.warning("群发发送失败: user_id=%s error=%s", target_user_id, exc)
+            if index == total or index % BROADCAST_PROGRESS_UPDATE_EVERY == 0:
+                try:
+                    await application.bot.edit_message_text(
+                        chat_id=progress_chat_id,
+                        message_id=progress_message_id,
+                        text=format_admin_broadcast_progress_text(total, sent, failed, cleared, index, running=True),
+                    )
+                except BadRequest:
+                    pass
+                await asyncio.sleep(0)
+        await call_blocking(
+            store.log_admin_action,
+            admin_user_id,
+            "admin_broadcast",
+            str(total),
+            f"sent={sent},failed={failed},cleared={cleared}",
+        )
+        final_text = format_admin_broadcast_progress_text(total, sent, failed, cleared, total, running=False)
+        try:
+            await application.bot.edit_message_text(
+                chat_id=progress_chat_id,
+                message_id=progress_message_id,
+                text=final_text,
+            )
+        except BadRequest:
+            pass
+        await application.bot.send_message(chat_id=progress_chat_id, text=final_text)
+    except Exception:
+        logger.exception("群发任务异常中断")
+        await application.bot.send_message(chat_id=progress_chat_id, text="群发任务异常中断，请稍后重试。")
+    finally:
+        clear_running_admin_broadcast_task(application)
 
 
 async def execute_admin_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -5511,35 +5604,42 @@ async def execute_admin_broadcast(update: Update, context: ContextTypes.DEFAULT_
         await send_menu_message(update, "还没有设置群发内容，先点 图文设置。")
         return
 
+    running_task = get_running_admin_broadcast_task(context.application)
+    if running_task is not None:
+        await send_menu_message(update, "已有群发任务在运行，等这一轮完成后再发新的。")
+        return
+
     users = await call_blocking(store.list_users, 100000, 0, True)
     total = len(users)
-    sent = 0
-    failed = 0
-    cleared = 0
-    progress_message = None
-    if update.callback_query is not None and update.callback_query.message is not None:
-        progress_message = await update.callback_query.message.reply_text(f"群发进度：0/{total}")
-    elif update.message is not None:
-        progress_message = await update.message.reply_text(f"群发进度：0/{total}")
-    for index, row in enumerate(users, start=1):
-        try:
-            await deliver_admin_payload(context, safe_int(row.get("user_id")), payload)
-            sent += 1
-        except Exception as exc:
-            failed += 1
-            if is_delivery_failure(exc):
-                await call_blocking(store.mark_user_inactive, safe_int(row.get("user_id")))
-                cleared += 1
-        if progress_message is not None and (index == total or index % 10 == 0):
-            try:
-                await progress_message.edit_text(f"群发进度：{index}/{total}\n成功：{sent}\n失败：{failed}\n已清理失效用户：{cleared}")
-            except BadRequest:
-                pass
-    await call_blocking(store.log_admin_action, user.id, "admin_broadcast", str(total), f"sent={sent},failed={failed},cleared={cleared}")
+    if total <= 0:
+        await send_menu_message(update, "当前没有可群发的活跃用户。")
+        return
+
+    target_message = update.callback_query.message if update.callback_query is not None else update.message
+    progress_text = (
+        f"群发已转后台执行，会继续正常响应私信。\n"
+        f"本轮目标：{total}\n"
+        f"群发进行中：0/{total}\n"
+        f"成功：0\n失败：0\n已清理失效用户：0"
+    )
+    if target_message is not None:
+        progress_message = await target_message.reply_text(progress_text)
+    else:
+        progress_message = await context.bot.send_message(chat_id=user.id, text=progress_text)
+
     pending["kind"] = "broadcast_idle"
     set_pending_admin_action(context, pending)
-    await send_menu_message(update, f"群发完成。\n总数：{total}\n成功：{sent}\n失败：{failed}\n已清理失效用户：{cleared}")
-
+    task = asyncio.create_task(
+        run_admin_broadcast_task(
+            context.application,
+            admin_user_id=user.id,
+            payload=copy.deepcopy(payload),
+            progress_chat_id=progress_message.chat_id,
+            progress_message_id=progress_message.message_id,
+        )
+    )
+    context.application.bot_data["admin_broadcast_task"] = task
+    return
 
 async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> bool:
     settings, store, _ = get_services(context)
@@ -7350,6 +7450,7 @@ def build_application(settings: Settings) -> Application:
     application = (
         ApplicationBuilder()
         .token(settings.bot_token)
+        .concurrent_updates(32)
         .connect_timeout(float(settings.telegram_connect_timeout_seconds))
         .read_timeout(float(settings.telegram_read_timeout_seconds))
         .write_timeout(float(settings.telegram_write_timeout_seconds))

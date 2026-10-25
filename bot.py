@@ -5601,30 +5601,28 @@ async def execute_admin_broadcast(update: Update, context: ContextTypes.DEFAULT_
     if user is None or not is_admin(settings, user.id):
         return
     if not has_content:
-        await send_menu_message(update, "还没有设置群发内容，先点 图文设置。")
+        await notify_inline(update, "还没有设置群发内容，先点 图文设置。", show_alert=True)
         return
 
     running_task = get_running_admin_broadcast_task(context.application)
     if running_task is not None:
-        await send_menu_message(update, "已有群发任务在运行，等这一轮完成后再发新的。")
+        await notify_inline(update, "已有群发任务在运行，等这一轮完成后再发新的。", show_alert=True)
         return
 
     users = await call_blocking(store.list_users, 100000, 0, True)
     total = len(users)
     if total <= 0:
-        await send_menu_message(update, "当前没有可群发的活跃用户。")
+        await notify_inline(update, "当前没有可群发的活跃用户。", show_alert=True)
         return
 
-    target_message = update.callback_query.message if update.callback_query is not None else update.message
     progress_text = (
         f"群发已转后台执行，会继续正常响应私信。\n"
         f"本轮目标：{total}\n"
         f"群发进行中：0/{total}\n"
         f"成功：0\n失败：0\n已清理失效用户：0"
     )
-    if target_message is not None:
-        progress_message = await target_message.reply_text(progress_text)
-    else:
+    progress_message = await send_progress_reply(update, progress_text)
+    if progress_message is None:
         progress_message = await context.bot.send_message(chat_id=user.id, text=progress_text)
 
     pending["kind"] = "broadcast_idle"

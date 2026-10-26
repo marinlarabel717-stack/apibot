@@ -194,6 +194,10 @@ API_EXTRA_QUERY_JSON={"uid":"10001"}
   - TRC20 充值轮询间隔，默认 `6`
 - `TRC20_USDT_CONTRACT`
   - USDT TRC20 合约地址，默认主网 `TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t`
+- `SUPPLIER_BALANCE_ALERT_THRESHOLD`
+  - 上游余额低于多少 USDT 时提醒管理员，默认 `50`
+- `SUPPLIER_BALANCE_ALERT_POLL_SECONDS`
+  - 上游余额预警轮询间隔，默认 `60`
 - `INLINE_BUTTON_CUSTOM_EMOJI_ENABLED`
   - 是否启用 Telegram custom emoji 按钮图标
 - `BUTTON_CUSTOM_EMOJI_IDS_JSON`

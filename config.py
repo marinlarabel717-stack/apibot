@@ -119,6 +119,8 @@ class Settings:
     api_auth_query_value: str
     api_extra_headers: dict[str, str]
     api_extra_query: dict[str, str]
+    supplier_balance_alert_threshold: float
+    supplier_balance_alert_poll_seconds: int
     database_path: Path
     order_poll_seconds: int
     order_poll_first_seconds: int
@@ -192,6 +194,8 @@ def load_settings() -> Settings:
         api_auth_query_value=os.getenv("API_AUTH_QUERY_VALUE", "").strip(),
         api_extra_headers=_parse_json_map(os.getenv("API_EXTRA_HEADERS_JSON", "{}"), "API_EXTRA_HEADERS_JSON"),
         api_extra_query=_parse_json_map(os.getenv("API_EXTRA_QUERY_JSON", "{}"), "API_EXTRA_QUERY_JSON"),
+        supplier_balance_alert_threshold=max(0.0, _parse_float(os.getenv("SUPPLIER_BALANCE_ALERT_THRESHOLD", "50"), "SUPPLIER_BALANCE_ALERT_THRESHOLD", 50.0)),
+        supplier_balance_alert_poll_seconds=max(30, int(os.getenv("SUPPLIER_BALANCE_ALERT_POLL_SECONDS", "60"))),
         database_path=database_path,
         order_poll_seconds=max(3, int(os.getenv("ORDER_POLL_SECONDS", "5"))),
         order_poll_first_seconds=max(1, int(os.getenv("ORDER_POLL_FIRST_SECONDS", "2"))),

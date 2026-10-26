@@ -2260,6 +2260,23 @@ async def notify_admin_new_purchase(
             logger.exception("发送管理员新订单提醒失败: admin=%s buyer=%s", admin_user_id, buyer_user_id)
 
 
+def build_supplier_low_balance_alert_text(
+    *,
+    threshold: float,
+    balance: float,
+    user_id: str,
+    user_name: str,
+) -> str:
+    return (
+        "上游余额预警\n\n"
+        f"当前余额：{format_money(balance)} U\n"
+        f"提醒阈值：{format_money(threshold)} U\n"
+        f"userId：{user_id or '-'}\n"
+        f"userName：{user_name or '-'}\n\n"
+        "请尽快充值。"
+    )
+
+
 def build_start_menu_text(
     settings: Settings,
     user: Any,
@@ -6420,6 +6437,55 @@ async def supplier_balance(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     )
 
 
+async def poll_supplier_balance_alert(context: ContextTypes.DEFAULT_TYPE) -> None:
+    application = context.application
+    settings, _, supplier = get_services(context)
+    threshold = max(0.0, settings.supplier_balance_alert_threshold)
+    if threshold <= 0 or not settings.admin_user_ids:
+        return
+
+    poll_lock = application.bot_data.setdefault("supplier_balance_alert_lock", asyncio.Lock())
+    if poll_lock.locked():
+        return
+
+    async with poll_lock:
+        try:
+            payload = await call_blocking(supplier.query_balance)
+        except SupplierApiError as exc:
+            logger.warning("上游余额轮询失败: %s", exc)
+            return
+
+        data = payload.get("data") or {}
+        balance = safe_float(data.get("accountBalance"))
+        state = application.bot_data.setdefault(
+            "supplier_balance_alert_state",
+            {"alerted": False},
+        )
+
+        if balance >= threshold:
+            state["alerted"] = False
+            state["last_balance"] = balance
+            return
+
+        if state.get("alerted"):
+            state["last_balance"] = balance
+            return
+
+        text = build_supplier_low_balance_alert_text(
+            threshold=threshold,
+            balance=balance,
+            user_id=str(data.get("userId") or ""),
+            user_name=str(data.get("userName") or ""),
+        )
+        for admin_user_id in sorted(settings.admin_user_ids):
+            try:
+                await application.bot.send_message(chat_id=admin_user_id, text=text)
+            except Exception:
+                logger.exception("发送上游余额预警失败: admin=%s", admin_user_id)
+        state["alerted"] = True
+        state["last_balance"] = balance
+
+
 async def credit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if await should_ignore_for_closed_business(update, context):
         return
@@ -7513,6 +7579,12 @@ def build_application(settings: Settings) -> Application:
             interval=settings.trongrid_poll_seconds,
             first=5,
             name="poll_trc20_topups",
+        )
+        application.job_queue.run_repeating(
+            poll_supplier_balance_alert,
+            interval=settings.supplier_balance_alert_poll_seconds,
+            first=10,
+            name="poll_supplier_balance_alert",
         )
     return application
 

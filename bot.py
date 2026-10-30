@@ -226,7 +226,10 @@ UI_TEXTS: dict[str, dict[str, str]] = {
     "recharge_channel_trc20": {"zh": "USDT充值|TRC20", "en": "USDT Recharge | TRC20"},
     "recharge_channel_okpay": {"zh": "OKPay充值|秒到账", "en": "OKPay Recharge | Fast Credit"},
     "contact_customer_service": {"zh": "联系客服：{contact}", "en": "Contact support: {contact}"},
-    "purchase_notice_text": {"zh": "📖 购买须知\n\n1. 首次购买建议先少量测试。\n2. 虚拟商品请及时验货。\n3. 已发货商品默认不支持无理由退换。\n4. 如遇问题请尽快联系管理员处理。", "en": "📖 Purchase Notice\n\n1. Place a small test order first if needed.\n2. Please check virtual goods promptly after delivery.\n3. Delivered goods are generally not refundable without cause.\n4. Contact support as soon as possible if you have any issues."},
+    "purchase_notice_text": {
+        "zh": "📖 购买须知\n\n✔️售后规则：账号在发货之前出问题的包售后，出库后出现冻结封禁的 不受理！\n\n✔️购买后机器人会自动检查账号，错误账号自动退款！\n\n⚠️新客户请先少量测试，避免不必要的争执\n⚠️本店商品仅供娱乐测试，请遵守当地法律",
+        "en": "📖 Purchase Notice\n\n✔️ After-sales rule: issues found before delivery are covered. Frozen or banned accounts after delivery are not accepted.\n\n✔️ After purchase, the bot will automatically check the accounts, and invalid accounts will be refunded automatically.\n\n⚠️ New customers should test with a small quantity first to avoid unnecessary disputes.\n⚠️ All products are for entertainment/testing only. Please follow your local laws.",
+    },
     "recent_orders": {"zh": "最近订单", "en": "Recent Orders"},
     "no_orders": {"zh": "暂无订单", "en": "No orders yet"},
     "order_created": {"zh": "订单已创建，正在检查账号存活并打包，请稍后...", "en": "Order created. Accounts are being checked and packed, please wait..."},

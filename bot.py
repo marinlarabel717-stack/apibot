@@ -67,6 +67,7 @@ SEARCH_RESULTS_CACHE: dict[tuple[int, str], tuple[float, list[dict[str, Any]]]] 
 CATALOG_SEARCH_CACHE: dict[int, tuple[float, list[dict[str, Any]]]] = {}
 DAXI_PRODUCTS_CACHE: dict[tuple[int, str], tuple[float, list[dict[str, Any]]]] = {}
 DAXI_PRODUCT_DETAIL_CACHE: dict[tuple[int, str], tuple[float, dict[str, Any]]] = {}
+DAXI_GROUPS_CACHE: dict[int, tuple[float, list[dict[str, Any]]]] = {}
 
 
 PRODUCTS_PER_PAGE = 30
@@ -4842,12 +4843,12 @@ async def show_daxi_categories(
 ) -> None:
     supplier = get_daxi_supplier(context)
     lang = await ensure_user_with_lang(context, update.effective_user)
+    await answer_callback_query_safely(update.callback_query)
     try:
-        rows = await fetch_daxi_products(supplier)
+        groups = await fetch_daxi_groups(supplier)
     except SupplierApiError as exc:
         await reply_inline(update, ui_text("fetch_account_list_2_failed", lang, error=exc))
         return
-    groups = group_daxi_products(rows)
     if not groups:
         await reply_inline(update, ui_text("no_categories_in_account_list_2", lang))
         return
@@ -4864,12 +4865,12 @@ async def show_daxi_products(
     settings, _, _ = get_services(context)
     supplier = get_daxi_supplier(context)
     lang = await ensure_user_with_lang(context, update.effective_user)
+    await answer_callback_query_safely(update.callback_query)
     try:
-        rows = await fetch_daxi_products(supplier)
+        groups = await fetch_daxi_groups(supplier)
     except SupplierApiError as exc:
         await reply_inline(update, ui_text("fetch_account_list_2_failed", lang, error=exc))
         return
-    groups = group_daxi_products(rows)
     if not groups:
         await reply_inline(update, ui_text("no_categories_in_account_list_2", lang))
         return
@@ -4945,7 +4946,7 @@ async def fetch_daxi_products(
     cache_key = (id(supplier), normalized_query)
     now = time.monotonic()
     cached = DAXI_PRODUCTS_CACHE.get(cache_key)
-    if cached and now - cached[0] < CATEGORY_CACHE_TTL_SECONDS:
+    if cached and (now - cached[0] < CATEGORY_CACHE_TTL_SECONDS or not normalized_query):
         return cached[1]
     payload = await call_blocking(supplier.get_products, normalized_query)
     rows = [
@@ -4954,7 +4955,24 @@ async def fetch_daxi_products(
         if not is_hidden_daxi_product(normalized_row)
     ]
     DAXI_PRODUCTS_CACHE[cache_key] = (now, rows)
+    if not normalized_query:
+        DAXI_GROUPS_CACHE[id(supplier)] = (now, group_daxi_products(rows))
     return rows
+
+
+async def fetch_daxi_groups(supplier: DaxiSupplierClient) -> list[dict[str, Any]]:
+    cache_key = id(supplier)
+    now = time.monotonic()
+    cached = DAXI_GROUPS_CACHE.get(cache_key)
+    if cached and now - cached[0] < CATEGORY_CACHE_TTL_SECONDS:
+        return cached[1]
+    rows = await fetch_daxi_products(supplier)
+    cached = DAXI_GROUPS_CACHE.get(cache_key)
+    if cached:
+        return cached[1]
+    groups = group_daxi_products(rows)
+    DAXI_GROUPS_CACHE[cache_key] = (now, groups)
+    return groups
 
 
 async def fetch_daxi_product_detail_cached(
@@ -5109,6 +5127,8 @@ async def warm_supplier_catalog(context: ContextTypes.DEFAULT_TYPE) -> None:
 async def warm_daxi_catalog(context: ContextTypes.DEFAULT_TYPE) -> None:
     supplier = get_daxi_supplier(context)
     try:
+        DAXI_PRODUCTS_CACHE.pop((id(supplier), ""), None)
+        DAXI_GROUPS_CACHE.pop(id(supplier), None)
         await fetch_daxi_products(supplier)
     except Exception:
         logger.exception("daxi catalog warmup failed")
@@ -5381,6 +5401,7 @@ async def show_categories(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
     settings, _, supplier = get_services(context)
     lang = await ensure_user_with_lang(context, update.effective_user)
+    await answer_callback_query_safely(update.callback_query)
     try:
         rows = await fetch_categories(supplier)
     except SupplierApiError as exc:
@@ -5415,6 +5436,7 @@ async def show_products(
         return
     settings, _, supplier = get_services(context)
     lang = await ensure_user_with_lang(context, update.effective_user)
+    await answer_callback_query_safely(update.callback_query)
     try:
         categories = await fetch_categories(supplier)
         rows = await fetch_category_products(supplier, category_id)

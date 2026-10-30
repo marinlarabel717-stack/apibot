@@ -4216,9 +4216,9 @@ def build_daxi_products_intro_text_localized(lang: str) -> tuple[str, tuple[Mess
         [
             ("📂", MAIN_MENU_EMOJI_ACCOUNT_LIST_ID),
             (f" {ui_text('account_list_2_intro', lang)}\n\n", None),
-            ("🧪", PRODUCTS_TEST_EMOJI_ID),
+            ("🧪", PRODUCT_LIST_EMOJI_ID),
             (f" {ui_text('first_buy_notice', lang)}\n", None),
-            ("⚠️", PRODUCTS_WARNING_EMOJI_ID),
+            ("⚠️", PRODUCT_LIST_ALERT_EMOJI_ID),
             (f" {ui_text('buy_test_notice', lang)}", None),
         ]
     )

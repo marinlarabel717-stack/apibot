@@ -47,7 +47,7 @@ from telegram.ext import (
 
 from config import Settings, load_settings
 from store import Store
-from supplier_client import SupplierApiError, SupplierClient
+from supplier_client import DaxiSupplierClient, SupplierApiError, SupplierClient
 
 
 logging.basicConfig(
@@ -64,6 +64,8 @@ CATEGORY_PRODUCTS_CACHE: dict[tuple[int, int], tuple[float, list[dict[str, Any]]
 PRODUCT_DETAIL_CACHE: dict[tuple[int, int], tuple[float, dict[str, Any]]] = {}
 SEARCH_RESULTS_CACHE: dict[tuple[int, str], tuple[float, list[dict[str, Any]]]] = {}
 CATALOG_SEARCH_CACHE: dict[int, tuple[float, list[dict[str, Any]]]] = {}
+DAXI_PRODUCTS_CACHE: dict[tuple[int, str], tuple[float, list[dict[str, Any]]]] = {}
+DAXI_PRODUCT_DETAIL_CACHE: dict[tuple[int, str], tuple[float, dict[str, Any]]] = {}
 
 
 PRODUCTS_PER_PAGE = 30
@@ -94,6 +96,7 @@ BUTTON_MAIN_MENU = "主菜单"
 BUTTON_PROFILE = "个人中心"
 BUTTON_RECHARGE = "我要充值"
 BUTTON_ACCOUNT_LIST = "账号列表"
+BUTTON_ACCOUNT_LIST_2 = "账号列表2"
 BUTTON_RECHARGE_BALANCE = "充值余额"
 BUTTON_PURCHASE_NOTICE = "购买须知"
 BUTTON_ORDER_HISTORY = "购买记录"
@@ -103,6 +106,7 @@ BUTTON_MAIN_MENU_EN = "Main Menu"
 BUTTON_PROFILE_EN = "Profile"
 BUTTON_RECHARGE_EN = "Recharge"
 BUTTON_ACCOUNT_LIST_EN = "Account List"
+BUTTON_ACCOUNT_LIST_2_EN = "Account List 2"
 BUTTON_RECHARGE_BALANCE_EN = "Balance"
 BUTTON_PURCHASE_NOTICE_EN = "Purchase Notice"
 BUTTON_ORDER_HISTORY_EN = "Order History"
@@ -126,11 +130,13 @@ MENU_BUTTON_TEXTS = {
 }
 LEGACY_MENU_BUTTON_TEXTS = {
     BUTTON_ACCOUNT_LIST,
+    BUTTON_ACCOUNT_LIST_2,
     BUTTON_RECHARGE_BALANCE,
     BUTTON_PURCHASE_NOTICE,
     BUTTON_ORDER_HISTORY,
     BUTTON_SWITCH_LANGUAGE,
     BUTTON_ACCOUNT_LIST_EN,
+    BUTTON_ACCOUNT_LIST_2_EN,
     BUTTON_RECHARGE_BALANCE_EN,
     BUTTON_PURCHASE_NOTICE_EN,
     BUTTON_ORDER_HISTORY_EN,
@@ -146,6 +152,8 @@ NON_SEARCH_BUTTON_TEXTS = MENU_BUTTON_TEXTS | LEGACY_MENU_BUTTON_TEXTS | {
     BUTTON_PROFILE_EN,
     BUTTON_RECHARGE_EN,
 }
+LEGACY_SOURCE = "legacy"
+DAXI_SOURCE = "daxi"
 DEFAULT_LANG = "zh"
 SUPPORTED_LANGS = {"zh", "en"}
 UI_TEXTS: dict[str, dict[str, str]] = {
@@ -154,6 +162,7 @@ UI_TEXTS: dict[str, dict[str, str]] = {
     "button_profile": {"zh": BUTTON_PROFILE, "en": BUTTON_PROFILE_EN},
     "button_recharge": {"zh": BUTTON_RECHARGE, "en": BUTTON_RECHARGE_EN},
     "button_account_list": {"zh": BUTTON_ACCOUNT_LIST, "en": BUTTON_ACCOUNT_LIST_EN},
+    "button_account_list_2": {"zh": BUTTON_ACCOUNT_LIST_2, "en": BUTTON_ACCOUNT_LIST_2_EN},
     "button_recharge_balance": {"zh": BUTTON_RECHARGE_BALANCE, "en": BUTTON_RECHARGE_BALANCE_EN},
     "button_purchase_notice": {"zh": BUTTON_PURCHASE_NOTICE, "en": BUTTON_PURCHASE_NOTICE_EN},
     "button_order_history": {"zh": BUTTON_ORDER_HISTORY, "en": BUTTON_ORDER_HISTORY_EN},
@@ -234,6 +243,10 @@ UI_TEXTS.update(
         "product_list_stock": {"zh": "{name} 库存 [{stock}]", "en": "{name} Stock [{stock}]"},
         "product_row_price": {"zh": "{name} 库存 [{stock}] - ${price}", "en": "{name} Stock [{stock}] - ${price}"},
         "view_product": {"zh": "查看 {name}", "en": "View {name}"},
+        "account_list_2_intro": {"zh": "这是账号列表2，当前已接入大喜 API。请选择需要的商品：", "en": "This is Account List 2 powered by the Daxi API. Please choose a product:"},
+        "back_account_list_2": {"zh": "返回账号列表2", "en": "Back to Account List 2"},
+        "no_products_in_account_list_2": {"zh": "账号列表2 当前没有商品。", "en": "Account List 2 has no products right now."},
+        "fetch_account_list_2_failed": {"zh": "获取账号列表2失败: {error}", "en": "Failed to load Account List 2: {error}"},
         "previous_page": {"zh": "上一页", "en": "Previous"},
         "next_page": {"zh": "下一页", "en": "Next"},
         "no_categories": {"zh": "当前没有分类。", "en": "No categories available right now."},
@@ -1626,21 +1639,23 @@ def build_admin_cha_order_detail_keyboard(target_user_id: int, order_index: int,
     return InlineKeyboardMarkup(buttons)
 
 
-def get_pending_purchase(context: ContextTypes.DEFAULT_TYPE) -> dict[str, int] | None:
+def get_pending_purchase(context: ContextTypes.DEFAULT_TYPE) -> dict[str, Any] | None:
     pending = context.user_data.get(PENDING_PURCHASE_KEY)
     return pending if isinstance(pending, dict) else None
 
 
 def set_pending_purchase(
     context: ContextTypes.DEFAULT_TYPE,
-    product_id: int,
+    product_id: Any,
     category_id: int,
     page: int,
+    source: str = LEGACY_SOURCE,
 ) -> None:
     context.user_data[PENDING_PURCHASE_KEY] = {
         "product_id": product_id,
         "category_id": category_id,
         "page": page,
+        "source": normalize_order_source(source),
     }
 
 
@@ -2652,6 +2667,11 @@ def order_created_caption_localized(lang: str) -> str:
     return premium_text_prefix(PACKED_DONE_EMOJI_ID, "✅", ui_text("order_created", lang))
 
 
+def build_client_out_order_id(user_id: int, product_id: Any) -> str:
+    product_token = re.sub(r"[^0-9A-Za-z_-]+", "", str(product_id or ""))[:24] or "product"
+    return f"tg-{int(user_id)}-{int(time.time() * 1000)}-{product_token}"
+
+
 def delivery_storage_filename(task_id: str, file_url: str) -> str:
     parsed = urlparse(file_url)
     candidate = Path(unquote(parsed.path)).name.strip()
@@ -2683,7 +2703,19 @@ def download_delivery_file(supplier: SupplierClient, task_id: str, file_url: str
         return target_path
 
     temp_path = target_path.with_suffix(target_path.suffix + ".part")
-    with supplier.session.get(file_url, timeout=supplier.settings.api_timeout_seconds, stream=True) as response:
+    download_url = supplier.resolve_download_url(file_url)
+    download_headers = supplier.build_download_headers()
+    timeout_seconds = (
+        supplier.settings.daxi_api_timeout_seconds
+        if isinstance(supplier, DaxiSupplierClient)
+        else supplier.settings.api_timeout_seconds
+    )
+    with supplier.session.get(
+        download_url,
+        headers=download_headers or None,
+        timeout=timeout_seconds,
+        stream=True,
+    ) as response:
         response.raise_for_status()
         with temp_path.open("wb") as handle:
             for chunk in response.iter_content(chunk_size=65536):
@@ -2709,6 +2741,16 @@ def is_delivery_file_url_expired(file_url: str, now: datetime | None = None) -> 
     return current >= issued_at + timedelta(seconds=max(0, expires_after - 30))
 
 
+def extract_daxi_file_url(payload: dict[str, Any]) -> str:
+    data = payload.get("data") or {}
+    files = data.get("files") or []
+    for row in files:
+        file_url = str((row or {}).get("downloadUrl") or "").strip()
+        if file_url:
+            return file_url
+    return ""
+
+
 async def refresh_delivery_file_url(
     context: ContextTypes.DEFAULT_TYPE,
     supplier: SupplierClient,
@@ -2718,9 +2760,15 @@ async def refresh_delivery_file_url(
     _, store, _ = get_services(context)
     payload = await call_blocking(supplier.query_order, task_id)
     data = payload.get("data") or {}
-    status = safe_int(data.get("taskStatus"))
-    file_url = str(data.get("fileUrl") or "").strip()
-    if status != 1 or not file_url:
+    if isinstance(supplier, DaxiSupplierClient):
+        status = str(data.get("status") or "").strip().lower()
+        file_url = extract_daxi_file_url(payload)
+        ready = status in {"completed", "partial"} and bool(file_url)
+    else:
+        status = str(safe_int(data.get("taskStatus")))
+        file_url = str(data.get("fileUrl") or "").strip()
+        ready = safe_int(data.get("taskStatus")) == 1 and bool(file_url)
+    if not ready:
         logger.warning(
             "刷新订单 zip 下载链接失败: task_id=%s status=%s has_file_url=%s",
             task_id,
@@ -3564,6 +3612,23 @@ def get_services(context: ContextTypes.DEFAULT_TYPE) -> tuple[Settings, Store, S
     return settings, store, supplier
 
 
+def get_daxi_supplier(context: ContextTypes.DEFAULT_TYPE) -> DaxiSupplierClient:
+    return context.application.bot_data["supplier_daxi"]
+
+
+def normalize_order_source(value: Any) -> str:
+    return DAXI_SOURCE if str(value or "").strip().lower() == DAXI_SOURCE else LEGACY_SOURCE
+
+
+def get_supplier_for_source(
+    context: ContextTypes.DEFAULT_TYPE,
+    source: str,
+) -> SupplierClient | DaxiSupplierClient:
+    if normalize_order_source(source) == DAXI_SOURCE:
+        return get_daxi_supplier(context)
+    return get_services(context)[2]
+
+
 async def should_ignore_for_closed_business(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     settings, _, _ = get_services(context)
     user = update.effective_user
@@ -3609,6 +3674,9 @@ def build_main_menu_inline(settings: Settings) -> InlineKeyboardMarkup:
         [
             [
                 build_main_menu_button(settings, BUTTON_ACCOUNT_LIST, "nav:cats", MAIN_MENU_EMOJI_ACCOUNT_LIST_ID, "📂"),
+                build_main_menu_button(settings, BUTTON_ACCOUNT_LIST_2, "nav:cats2", MAIN_MENU_EMOJI_ACCOUNT_LIST_ID, "🧩"),
+            ],
+            [
                 build_main_menu_button(settings, BUTTON_RECHARGE_BALANCE, "nav:recharge", MAIN_MENU_EMOJI_RECHARGE_BALANCE_ID, "💰"),
             ],
             [
@@ -3625,6 +3693,9 @@ def build_main_menu_inline_localized(settings: Settings, lang: str) -> InlineKey
         [
             [
                 build_main_menu_button(settings, ui_text("button_account_list", lang), "nav:cats", MAIN_MENU_EMOJI_ACCOUNT_LIST_ID, "📂"),
+                build_main_menu_button(settings, ui_text("button_account_list_2", lang), "nav:cats2", MAIN_MENU_EMOJI_ACCOUNT_LIST_ID, "🧩"),
+            ],
+            [
                 build_main_menu_button(settings, ui_text("button_recharge_balance", lang), "nav:recharge", MAIN_MENU_EMOJI_RECHARGE_BALANCE_ID, "💰"),
             ],
             [
@@ -3994,6 +4065,116 @@ def render_product_detail_view_configured(
     return text, entities, build_product_detail_keyboard(product_id, category_id, page)
 
 
+def build_daxi_product_keyboard_localized(
+    settings: Settings,
+    rows: list[dict[str, Any]],
+    page: int,
+    lang: str,
+) -> InlineKeyboardMarkup:
+    total_pages = max(1, (len(rows) + PRODUCTS_PER_PAGE - 1) // PRODUCTS_PER_PAGE)
+    page = max(0, min(page, total_pages - 1))
+    start = page * PRODUCTS_PER_PAGE
+    page_rows = rows[start : start + PRODUCTS_PER_PAGE]
+    buttons: list[list[InlineKeyboardButton]] = []
+    for row in page_rows:
+        product_id = str(row.get("productId") or "").strip()
+        product_name = shorten(translate_product_name(str(row.get("productName") or product_id or "商品"), lang), 28)
+        stock = safe_int(row.get("totalStock"))
+        price = resolve_sell_price(settings, row)
+        buttons.append(
+            [
+                plain_catalog_button(
+                    ui_text("product_row_price", lang, name=product_name, stock=stock, price=f"{price:.2f}"),
+                    f"prd2:{product_id}:{page}",
+                )
+            ]
+        )
+    nav_row: list[InlineKeyboardButton] = []
+    if page > 0:
+        nav_row.append(InlineKeyboardButton(ui_text("previous_page", lang), callback_data=f"cat2:{page - 1}"))
+    nav_row.append(InlineKeyboardButton(f"{page + 1}/{total_pages}", callback_data=f"cat2:{page}"))
+    if page < total_pages - 1:
+        nav_row.append(InlineKeyboardButton(ui_text("next_page", lang), callback_data=f"cat2:{page + 1}"))
+    buttons.append(nav_row)
+    buttons.append([premium_inline_button(ui_text("button_main_menu", lang), "nav:menu", HOME_EMOJI_ID)])
+    return InlineKeyboardMarkup(buttons)
+
+
+def build_daxi_product_detail_keyboard_localized(product_id: str, page: int, lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [premium_inline_button(ui_text("confirm_purchase", lang), f"qbuy2:{product_id}:{page}", BUY_BUTTON_EMOJI_ID)],
+            [
+                premium_inline_button(ui_text("button_main_menu", lang), "nav:menu", HOME_EMOJI_ID),
+                premium_inline_button(ui_text("back_account_list_2", lang), f"cat2:{page}", BACK_EMOJI_ID),
+            ],
+        ]
+    )
+
+
+def build_daxi_purchase_confirm_keyboard_localized(product_id: str, quantity: int, page: int, lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [premium_inline_button(ui_text("confirm_purchase", lang), f"cbuy2:{product_id}:{quantity}", BUY_BUTTON_EMOJI_ID)],
+            [
+                premium_inline_button(ui_text("button_main_menu", lang), "nav:menu", HOME_EMOJI_ID),
+                premium_inline_button(ui_text("back_product", lang), f"prd2:{product_id}:{page}", BACK_EMOJI_ID),
+            ],
+        ]
+    )
+
+
+def build_daxi_products_intro_text_localized(lang: str) -> tuple[str, tuple[MessageEntity, ...]]:
+    return build_text_with_custom_emoji(
+        [
+            ("📂", MAIN_MENU_EMOJI_ACCOUNT_LIST_ID),
+            (f" {ui_text('account_list_2_intro', lang)}\n\n", None),
+            ("🧪", PRODUCTS_TEST_EMOJI_ID),
+            (f" {ui_text('first_buy_notice', lang)}\n", None),
+            ("⚠️", PRODUCTS_WARNING_EMOJI_ID),
+            (f" {ui_text('buy_test_notice', lang)}", None),
+        ]
+    )
+
+
+def render_daxi_product_detail_view_localized(
+    settings: Settings,
+    row: dict[str, Any],
+    page: int,
+    lang: str,
+) -> tuple[str, tuple[MessageEntity, ...], InlineKeyboardMarkup]:
+    product_id = str(row.get("productId") or "").strip()
+    product_name = str(row.get("productName") or product_id or "商品")
+    sell_price = resolve_sell_price(settings, row)
+    text, entities = build_product_detail_text_localized(
+        product_name,
+        sell_price,
+        safe_int(row.get("totalStock")),
+        lang,
+    )
+    return text, entities, build_daxi_product_detail_keyboard_localized(product_id, page, lang)
+
+
+async def show_daxi_products(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    page: int = 0,
+) -> None:
+    settings, _, _ = get_services(context)
+    supplier = get_daxi_supplier(context)
+    lang = await ensure_user_with_lang(context, update.effective_user)
+    try:
+        rows = await fetch_daxi_products(supplier)
+    except SupplierApiError as exc:
+        await reply_inline(update, ui_text("fetch_account_list_2_failed", lang, error=exc))
+        return
+    if not rows:
+        await reply_inline(update, ui_text("no_products_in_account_list_2", lang))
+        return
+    text, entities = build_daxi_products_intro_text_localized(lang)
+    await reply_inline(update, text, build_daxi_product_keyboard_localized(settings, rows, page, lang), entities=entities)
+
+
 async def fetch_categories(supplier: SupplierClient) -> list[dict[str, Any]]:
     cache_key = id(supplier)
     now = time.monotonic()
@@ -4027,6 +4208,47 @@ async def fetch_product_detail_cached(supplier: SupplierClient, product_id: int)
     payload = await call_blocking(supplier.get_product_detail, product_id)
     row = payload.get("data") or {}
     PRODUCT_DETAIL_CACHE[cache_key] = (now, row)
+    return row
+
+
+def normalize_daxi_product_row(row: dict[str, Any]) -> dict[str, Any]:
+    item = dict(row)
+    item["productId"] = str(item.get("productId") or "").strip()
+    item["productName"] = str(item.get("productName") or item["productId"] or "商品").strip()
+    item["totalStock"] = safe_int(item.get("stock"))
+    item["categoryName"] = BUTTON_ACCOUNT_LIST_2
+    return item
+
+
+async def fetch_daxi_products(
+    supplier: DaxiSupplierClient,
+    query: str = "",
+) -> list[dict[str, Any]]:
+    normalized_query = normalize_search_keyword(query)
+    cache_key = (id(supplier), normalized_query)
+    now = time.monotonic()
+    cached = DAXI_PRODUCTS_CACHE.get(cache_key)
+    if cached and now - cached[0] < CATEGORY_CACHE_TTL_SECONDS:
+        return cached[1]
+    payload = await call_blocking(supplier.get_products, normalized_query)
+    rows = [normalize_daxi_product_row(row) for row in (payload.get("data") or [])]
+    DAXI_PRODUCTS_CACHE[cache_key] = (now, rows)
+    return rows
+
+
+async def fetch_daxi_product_detail_cached(
+    supplier: DaxiSupplierClient,
+    product_id: str,
+) -> dict[str, Any]:
+    normalized_product_id = str(product_id or "").strip()
+    cache_key = (id(supplier), normalized_product_id)
+    now = time.monotonic()
+    cached = DAXI_PRODUCT_DETAIL_CACHE.get(cache_key)
+    if cached and now - cached[0] < PRODUCT_DETAIL_CACHE_TTL_SECONDS:
+        return cached[1]
+    payload = await call_blocking(supplier.get_product_detail, normalized_product_id)
+    row = normalize_daxi_product_row(payload.get("data") or {})
+    DAXI_PRODUCT_DETAIL_CACHE[cache_key] = (now, row)
     return row
 
 
@@ -4118,6 +4340,14 @@ async def warm_supplier_catalog(context: ContextTypes.DEFAULT_TYPE) -> None:
         await build_catalog_search_rows(supplier)
     except Exception:
         logger.exception("supplier catalog warmup failed")
+
+
+async def warm_daxi_catalog(context: ContextTypes.DEFAULT_TYPE) -> None:
+    supplier = get_daxi_supplier(context)
+    try:
+        await fetch_daxi_products(supplier)
+    except Exception:
+        logger.exception("daxi catalog warmup failed")
 
 
 async def build_main_menu_message(
@@ -6040,14 +6270,20 @@ async def execute_purchase(
     user_id: int,
     username: str,
     display_name: str,
-    product_id: int,
+    product_id: Any,
     quantity: int,
     lang: str = DEFAULT_LANG,
+    source: str = LEGACY_SOURCE,
 ) -> tuple[str, tuple[MessageEntity, ...] | None, InlineKeyboardMarkup | None] | None:
-    settings, store, supplier = get_services(context)
+    settings, store, legacy_supplier = get_services(context)
+    normalized_source = normalize_order_source(source)
+    if normalized_source == DAXI_SOURCE:
+        supplier: SupplierClient | DaxiSupplierClient = get_daxi_supplier(context)
+        row = await fetch_daxi_product_detail_cached(supplier, str(product_id))
+    else:
+        supplier = legacy_supplier
+        row = await fetch_product_detail_cached(supplier, int(product_id))
     await call_blocking(store.ensure_user, user_id, username, display_name)
-
-    row = await fetch_product_detail_cached(supplier, product_id)
     unit_price = resolve_sell_price(settings, row)
     total_stock = safe_int(row.get("totalStock"))
     product_name = str(row.get("productName") or f"商品 {product_id}")
@@ -6075,7 +6311,15 @@ async def execute_purchase(
         return text, entities, build_balance_not_enough_keyboard(lang)
 
     try:
-        buy_payload = await call_blocking(supplier.buy_product, product_id, quantity)
+        if normalized_source == DAXI_SOURCE:
+            buy_payload = await call_blocking(
+                supplier.buy_product,
+                str(product_id),
+                quantity,
+                build_client_out_order_id(user_id, product_id),
+            )
+        else:
+            buy_payload = await call_blocking(supplier.buy_product, int(product_id), quantity)
     except SupplierApiError as exc:
         refunded = await call_blocking(
             store.add_balance,
@@ -6090,14 +6334,18 @@ async def execute_purchase(
         return refund_text, refund_entities, None
 
     data = buy_payload.get("data") or {}
-    task_id = str(data.get("taskId") or "").strip()
+    task_id_value = data.get("orderId") if normalized_source == DAXI_SOURCE else data.get("taskId")
+    task_id = str(task_id_value or "").strip()
     if not task_id:
-        reason_map = {
-            "1": "上游余额不足",
-            "2": "上游库存不足",
-            "3": "上游创建订单失败",
-        }
-        upstream_reason = reason_map.get(str(data.get("type") or ""), "上游未返回 taskId")
+        if normalized_source == DAXI_SOURCE:
+            upstream_reason = str(data.get("reason") or buy_payload.get("message") or buy_payload.get("msg") or "上游未返回 orderId")
+        else:
+            reason_map = {
+                "1": "上游余额不足",
+                "2": "上游库存不足",
+                "3": "上游创建订单失败",
+            }
+            upstream_reason = reason_map.get(str(data.get("type") or ""), "上游未返回 taskId")
         refunded = await call_blocking(
             store.add_balance,
             user_id,
@@ -6121,6 +6369,7 @@ async def execute_purchase(
         unit_price,
         total_price,
         buy_payload,
+        normalized_source,
     )
     await notify_admin_new_purchase(
         context,
@@ -6205,10 +6454,11 @@ async def finalize_remote_order(
     notify_user: bool,
     lang: str = DEFAULT_LANG,
 ) -> tuple[str, str]:
-    settings, store, supplier = get_services(context)
+    settings, store, _ = get_services(context)
     order = await call_blocking(store.get_order, task_id)
     if not order:
         return "missing", ui_text("local_order_missing", lang)
+    supplier = get_supplier_for_source(context, str(order.get("source") or LEGACY_SOURCE))
 
     order_age_seconds = get_order_age_seconds(order)
 
@@ -6244,87 +6494,146 @@ async def finalize_remote_order(
         return "error", f"Querying upstream order failed: {exc}" if lang == "en" else f"查询上游订单失败: {exc}"
 
     data = payload.get("data") or {}
-    status = safe_int(data.get("taskStatus"))
-    quantity_success = safe_int(data.get("quantitySuccess"))
-    file_url = str(data.get("fileUrl") or "").strip()
     quantity = safe_int(order["quantity"])
     unit_price = safe_float(order["unit_price"])
     total_price = safe_float(order["total_price"])
-
-    if status == 2:
-        return "processing", ui_text("order_processing", lang)
-
-    if status == 3:
-        return await finalize_failed_remote_order(
-            context,
-            store,
-            task_id,
-            total_price,
-            file_url=file_url,
-            payload=payload,
-            notify_user=notify_user,
-            lang=lang,
-        )
-
-    if status == 1:
-        refund_amount = 0.0
-        final_state = "completed"
-        if 0 <= quantity_success < quantity:
-            refund_amount = (quantity - quantity_success) * unit_price
-            final_state = "partial"
-        final_row, changed = await call_blocking(
-            store.finalize_order,
-            task_id,
-            final_state,
-            quantity_success,
-            file_url,
-            refund_amount,
-            payload,
-        )
-        if changed and notify_user and final_row:
-            user_row = await call_blocking(store.get_user, int(final_row["user_id"])) or {}
-            notify_lang = normalize_lang_code(str(user_row.get("lang") or DEFAULT_LANG))
-            lines = [
-                f"Order ID: {task_id}" if notify_lang == "en" else f"订单号: {task_id}",
-                ui_text("successful_quantity", notify_lang, success=quantity_success, quantity=quantity),
-            ]
-            if refund_amount > 0:
-                lines.append(ui_text("refund_amount_label", notify_lang, amount=format_money(refund_amount)))
-            await context.bot.send_message(
-                chat_id=int(final_row["user_id"]),
-                text="\n".join(lines),
-                reply_markup=build_menu_keyboard(notify_lang),
-            )
-        if final_row and file_url and not str(final_row.get("delivery_sent_at") or "").strip():
-            await deliver_order_file(
+    if isinstance(supplier, DaxiSupplierClient):
+        status = str(data.get("status") or "").strip().lower()
+        quantity_success = safe_int(data.get("quantityDelivered"))
+        file_url = extract_daxi_file_url(payload)
+        if status == "processing":
+            return "processing", ui_text("order_processing", lang)
+        if status == "failed":
+            return await finalize_failed_remote_order(
                 context,
-                final_row,
-                supplier,
-                include_ready_photo=notify_user,
-                notify_failure=notify_user,
+                store,
+                task_id,
+                total_price,
+                file_url=file_url,
+                payload=payload,
+                notify_user=notify_user,
+                lang=lang,
             )
-        if refund_amount > 0:
-            summary = ui_text("order_completed_summary_refund", lang, success=quantity_success, quantity=quantity, amount=format_money(refund_amount))
-        else:
-            summary = ui_text("order_completed_summary", lang, success=quantity_success, quantity=quantity)
-        return final_state, summary
+        if status in {"completed", "partial"}:
+            refund_amount = safe_float(data.get("amountRefunded"))
+            if refund_amount <= 0 and 0 <= quantity_success < quantity:
+                refund_amount = (quantity - quantity_success) * unit_price
+            final_row, changed = await call_blocking(
+                store.finalize_order,
+                task_id,
+                status,
+                quantity_success,
+                file_url,
+                refund_amount,
+                payload,
+            )
+            if changed and notify_user and final_row:
+                user_row = await call_blocking(store.get_user, int(final_row["user_id"])) or {}
+                notify_lang = normalize_lang_code(str(user_row.get("lang") or DEFAULT_LANG))
+                lines = [
+                    f"Order ID: {task_id}" if notify_lang == "en" else f"订单号: {task_id}",
+                    ui_text("successful_quantity", notify_lang, success=quantity_success, quantity=quantity),
+                ]
+                if refund_amount > 0:
+                    lines.append(ui_text("refund_amount_label", notify_lang, amount=format_money(refund_amount)))
+                await context.bot.send_message(
+                    chat_id=int(final_row["user_id"]),
+                    text="\n".join(lines),
+                    reply_markup=build_menu_keyboard(notify_lang),
+                )
+            if final_row and file_url and not str(final_row.get("delivery_sent_at") or "").strip():
+                await deliver_order_file(
+                    context,
+                    final_row,
+                    supplier,
+                    include_ready_photo=notify_user,
+                    notify_failure=notify_user,
+                )
+            if refund_amount > 0:
+                summary = ui_text("order_completed_summary_refund", lang, success=quantity_success, quantity=quantity, amount=format_money(refund_amount))
+            else:
+                summary = ui_text("order_completed_summary", lang, success=quantity_success, quantity=quantity)
+            return status, summary
+    else:
+        status = safe_int(data.get("taskStatus"))
+        quantity_success = safe_int(data.get("quantitySuccess"))
+        file_url = str(data.get("fileUrl") or "").strip()
+        if status == 2:
+            return "processing", ui_text("order_processing", lang)
+        if status == 3:
+            return await finalize_failed_remote_order(
+                context,
+                store,
+                task_id,
+                total_price,
+                file_url=file_url,
+                payload=payload,
+                notify_user=notify_user,
+                lang=lang,
+            )
+        if status == 1:
+            refund_amount = 0.0
+            final_state = "completed"
+            if 0 <= quantity_success < quantity:
+                refund_amount = (quantity - quantity_success) * unit_price
+                final_state = "partial"
+            final_row, changed = await call_blocking(
+                store.finalize_order,
+                task_id,
+                final_state,
+                quantity_success,
+                file_url,
+                refund_amount,
+                payload,
+            )
+            if changed and notify_user and final_row:
+                user_row = await call_blocking(store.get_user, int(final_row["user_id"])) or {}
+                notify_lang = normalize_lang_code(str(user_row.get("lang") or DEFAULT_LANG))
+                lines = [
+                    f"Order ID: {task_id}" if notify_lang == "en" else f"订单号: {task_id}",
+                    ui_text("successful_quantity", notify_lang, success=quantity_success, quantity=quantity),
+                ]
+                if refund_amount > 0:
+                    lines.append(ui_text("refund_amount_label", notify_lang, amount=format_money(refund_amount)))
+                await context.bot.send_message(
+                    chat_id=int(final_row["user_id"]),
+                    text="\n".join(lines),
+                    reply_markup=build_menu_keyboard(notify_lang),
+                )
+            if final_row and file_url and not str(final_row.get("delivery_sent_at") or "").strip():
+                await deliver_order_file(
+                    context,
+                    final_row,
+                    supplier,
+                    include_ready_photo=notify_user,
+                    notify_failure=notify_user,
+                )
+            if refund_amount > 0:
+                summary = ui_text("order_completed_summary_refund", lang, success=quantity_success, quantity=quantity, amount=format_money(refund_amount))
+            else:
+                summary = ui_text("order_completed_summary", lang, success=quantity_success, quantity=quantity)
+            return final_state, summary
 
     logger.warning(
-        "上游订单状态异常: task_id=%s age=%ss status=%s quantity_success=%s has_file_url=%s",
+        "上游订单状态异常: task_id=%s age=%ss status=%s has_file_url=%s",
         task_id,
         order_age_seconds,
-        status,
-        quantity_success,
-        bool(file_url),
+        data.get("status") if isinstance(supplier, DaxiSupplierClient) else data.get("taskStatus"),
+        bool(extract_daxi_file_url(payload) if isinstance(supplier, DaxiSupplierClient) else str(data.get("fileUrl") or "").strip()),
     )
     if order_age_seconds >= settings.order_stuck_timeout_seconds:
-        logger.warning("上游订单状态异常超时，按失败退款: task_id=%s status=%s age=%ss", task_id, status, order_age_seconds)
+        logger.warning(
+            "上游订单状态异常超时，按失败退款: task_id=%s status=%s age=%ss",
+            task_id,
+            data.get("status") if isinstance(supplier, DaxiSupplierClient) else data.get("taskStatus"),
+            order_age_seconds,
+        )
         return await finalize_failed_remote_order(
             context,
             store,
             task_id,
             total_price,
-            file_url=file_url,
+            file_url=extract_daxi_file_url(payload) if isinstance(supplier, DaxiSupplierClient) else str(data.get("fileUrl") or "").strip(),
             payload=payload,
             notify_user=notify_user,
             lang=lang,
@@ -6367,7 +6676,7 @@ def schedule_fast_order_probe(context: ContextTypes.DEFAULT_TYPE, task_id: str) 
 async def order(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if await should_ignore_for_closed_business(update, context):
         return
-    _, store, supplier = get_services(context)
+    _, store, _ = get_services(context)
     if update.message is None:
         return
     if not context.args:
@@ -6381,6 +6690,7 @@ async def order(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     _, summary = await finalize_remote_order(context, task_id, notify_user=False)
     local_order = await call_blocking(store.get_order, task_id) or local_order
     if local_order.get("file_url") and not str(local_order.get("delivery_sent_at") or "").strip():
+        supplier = get_supplier_for_source(context, str(local_order.get("source") or LEGACY_SOURCE))
         await deliver_order_file(
             context,
             local_order,
@@ -6645,7 +6955,7 @@ async def send_admin_cha_order_file(
     target_user_id: int,
     order_index: int,
 ) -> None:
-    settings, store, supplier = get_services(context)
+    settings, store, _ = get_services(context)
     query = update.callback_query
     orders = await call_blocking(store.list_user_orders, target_user_id, 10)
     if order_index < 0 or order_index >= len(orders):
@@ -6656,6 +6966,7 @@ async def send_admin_cha_order_file(
         await notify_inline(update, "这个订单目前还没有可下载文件。", show_alert=True)
         return
     try:
+        supplier = get_supplier_for_source(context, str(order_row.get("source") or LEGACY_SOURCE))
         zip_path, fresh_order = await download_delivery_file_with_refresh(context, supplier, order_row)
         quantity = safe_int(fresh_order.get("quantity"))
         product_name = str(fresh_order.get("product_name") or f"商品 {fresh_order.get('product_id')}")
@@ -7005,6 +7316,9 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         if target == "cats":
             await show_categories(update, context)
             return
+        if target == "cats2":
+            await show_daxi_products(update, context, 0)
+            return
         if target == "menu":
             await show_start_menu(update, context)
             return
@@ -7098,6 +7412,12 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await show_products(update, context, category_id, page)
         return
 
+    if action == "cat2" and len(parts) == 2:
+        clear_pending_purchase(context)
+        page = safe_int(parts[1], 0)
+        await show_daxi_products(update, context, page)
+        return
+
     if action == "prd" and len(parts) == 4:
         clear_pending_purchase(context)
         product_id = safe_int(parts[1], -1)
@@ -7116,6 +7436,23 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await reply_inline(update, text, keyboard, entities=entities)
         return
 
+    if action == "prd2" and len(parts) == 3:
+        clear_pending_purchase(context)
+        product_id = str(parts[1] or "").strip()
+        page = safe_int(parts[2], 0)
+        lang = await ensure_user_with_lang(context, update.effective_user)
+        if not product_id:
+            await reply_inline(update, ui_text("product_param_invalid", lang))
+            return
+        try:
+            row = await fetch_daxi_product_detail_cached(get_daxi_supplier(context), product_id)
+        except SupplierApiError as exc:
+            await reply_inline(update, ui_text("fetch_product_detail_failed", lang, error=exc))
+            return
+        text, entities, keyboard = render_daxi_product_detail_view_localized(settings, row, page, lang)
+        await reply_inline(update, text, keyboard, entities=entities)
+        return
+
     if action == "qbuy" and len(parts) == 5:
         product_id = safe_int(parts[1], -1)
         category_id = safe_int(parts[3], 0)
@@ -7125,6 +7462,17 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             await reply_inline(update, ui_text("quick_buy_param_invalid", lang))
             return
         set_pending_purchase(context, product_id, category_id, page)
+        await reply_inline(update, ui_text("quick_buy_prompt", lang))
+        return
+
+    if action == "qbuy2" and len(parts) == 3:
+        product_id = str(parts[1] or "").strip()
+        page = safe_int(parts[2], 0)
+        lang = await ensure_user_with_lang(context, update.effective_user)
+        if not product_id:
+            await reply_inline(update, ui_text("quick_buy_param_invalid", lang))
+            return
+        set_pending_purchase(context, product_id, 0, page, source=DAXI_SOURCE)
         await reply_inline(update, ui_text("quick_buy_prompt", lang))
         return
 
@@ -7144,6 +7492,51 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             pass
         try:
             result = await execute_purchase(context, user.id, user.username or "", user.full_name or "", product_id, quantity, lang)
+        except SupplierApiError as exc:
+            if query.message is not None:
+                await query.message.reply_text(ui_text("fetch_product_detail_failed", lang, error=exc), reply_markup=build_menu_keyboard(lang))
+            else:
+                await reply_inline(update, ui_text("fetch_product_detail_failed", lang, error=exc))
+            return
+        if result and query.message is not None:
+            result_text, result_entities, result_markup = result
+            await query.message.reply_text(result_text, entities=result_entities, reply_markup=result_markup or build_menu_keyboard(lang))
+        elif result:
+            result_text, result_entities, result_markup = result
+            await reply_inline(update, result_text, entities=result_entities, reply_markup=result_markup)
+        elif query.message is not None:
+            await query.message.reply_text(
+                order_created_caption_localized(lang),
+                reply_markup=build_menu_keyboard(lang),
+                parse_mode="HTML",
+            )
+        return
+
+    if action == "cbuy2" and len(parts) == 3:
+        clear_pending_purchase(context)
+        user = update.effective_user
+        product_id = str(parts[1] or "").strip()
+        quantity = safe_int(parts[2], 0)
+        lang = await ensure_user_with_lang(context, user)
+        if user is None or not product_id or quantity <= 0:
+            await reply_inline(update, ui_text("quick_buy_param_invalid", lang))
+            return
+        await answer_callback_query_safely(query, ui_text("creating_order", lang))
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except BadRequest:
+            pass
+        try:
+            result = await execute_purchase(
+                context,
+                user.id,
+                user.username or "",
+                user.full_name or "",
+                product_id,
+                quantity,
+                lang,
+                source=DAXI_SOURCE,
+            )
         except SupplierApiError as exc:
             if query.message is not None:
                 await query.message.reply_text(ui_text("fetch_product_detail_failed", lang, error=exc), reply_markup=build_menu_keyboard(lang))
@@ -7190,6 +7583,11 @@ async def route_menu_text(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         clear_pending_purchase(context)
         clear_pending_recharge(context)
         await show_categories(update, context)
+        return
+    if button_matches(text, "button_account_list_2"):
+        clear_pending_purchase(context)
+        clear_pending_recharge(context)
+        await show_daxi_products(update, context, 0)
         return
     if button_matches(text, "button_main_menu", "bottom_main_menu"):
         clear_pending_purchase(context)
@@ -7293,18 +7691,27 @@ async def search_text_rich(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             await update.message.reply_text(ui_text("enter_quantity", lang), reply_markup=build_menu_keyboard(lang))
             return
         clear_pending_purchase(context)
-        product_id = safe_int(pending_purchase.get("product_id"), -1)
+        source = normalize_order_source(pending_purchase.get("source"))
+        raw_product_id = pending_purchase.get("product_id")
         category_id = safe_int(pending_purchase.get("category_id"), 0)
         page = safe_int(pending_purchase.get("page"), 0)
         try:
-            row = await fetch_product_detail_cached(supplier, product_id)
+            if source == DAXI_SOURCE:
+                product_id = str(raw_product_id or "").strip()
+                row = await fetch_daxi_product_detail_cached(get_daxi_supplier(context), product_id)
+            else:
+                product_id = safe_int(raw_product_id, -1)
+                row = await fetch_product_detail_cached(supplier, product_id)
         except SupplierApiError as exc:
             await update.message.reply_text(ui_text("fetch_product_detail_failed", lang, error=exc), reply_markup=build_menu_keyboard(lang))
             return
         product_name = str(row.get("productName") or f"商品 {product_id}")
         unit_price = resolve_sell_price(settings, row)
         caption, caption_entities = build_purchase_confirm_text_localized(product_name, unit_price, quantity, lang)
-        keyboard = build_purchase_confirm_keyboard_localized(product_id, quantity, category_id, page, lang)
+        if source == DAXI_SOURCE:
+            keyboard = build_daxi_purchase_confirm_keyboard_localized(str(product_id), quantity, page, lang)
+        else:
+            keyboard = build_purchase_confirm_keyboard_localized(product_id, quantity, category_id, page, lang)
         if PURCHASE_CONFIRM_IMAGE_PATH.exists():
             with PURCHASE_CONFIRM_IMAGE_PATH.open("rb") as photo_fp:
                 await update.message.reply_photo(
@@ -7381,7 +7788,7 @@ async def buy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def order(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if await should_ignore_for_closed_business(update, context):
         return
-    _, store, supplier = get_services(context)
+    _, store, _ = get_services(context)
     if update.message is None:
         return
     lang = await ensure_user_with_lang(context, update.effective_user)
@@ -7396,6 +7803,7 @@ async def order(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     _, summary = await finalize_remote_order(context, task_id, notify_user=False, lang=lang)
     local_order = await call_blocking(store.get_order, task_id) or local_order
     if local_order.get("file_url") and not str(local_order.get("delivery_sent_at") or "").strip():
+        supplier = get_supplier_for_source(context, str(local_order.get("source") or LEGACY_SOURCE))
         await deliver_order_file(
             context,
             local_order,
@@ -7490,10 +7898,11 @@ async def poll_processing_orders(context: ContextTypes.DEFAULT_TYPE) -> None:
 
         async def run_delivery_row(row: dict[str, Any]) -> None:
             async with semaphore:
+                row_supplier = get_supplier_for_source(context, str(row.get("source") or LEGACY_SOURCE))
                 await deliver_order_file(
                     context,
                     row,
-                    supplier,
+                    row_supplier,
                     include_ready_photo=True,
                     notify_failure=False,
                 )
@@ -7511,6 +7920,7 @@ async def on_application_post_init(application: Application) -> None:
 def build_application(settings: Settings) -> Application:
     store = Store(settings.database_path)
     supplier = SupplierClient(settings)
+    supplier_daxi = DaxiSupplierClient(settings)
     application = (
         ApplicationBuilder()
         .token(settings.bot_token)
@@ -7530,6 +7940,7 @@ def build_application(settings: Settings) -> Application:
     application.bot_data["settings"] = settings
     application.bot_data["store"] = store
     application.bot_data["supplier"] = supplier
+    application.bot_data["supplier_daxi"] = supplier_daxi
     application.bot_data["runtime_config"] = store.get_runtime_settings()
     apply_runtime_sell_price_settings(settings, application.bot_data["runtime_config"])
 
@@ -7567,6 +7978,17 @@ def build_application(settings: Settings) -> Application:
             interval=max(120, CATEGORY_CACHE_TTL_SECONDS - 60),
             first=max(120, CATEGORY_CACHE_TTL_SECONDS - 60),
             name="warm_supplier_catalog",
+        )
+        application.job_queue.run_once(
+            warm_daxi_catalog,
+            when=8,
+            name="warm_daxi_catalog_initial",
+        )
+        application.job_queue.run_repeating(
+            warm_daxi_catalog,
+            interval=max(120, CATEGORY_CACHE_TTL_SECONDS - 60),
+            first=max(120, CATEGORY_CACHE_TTL_SECONDS - 40),
+            name="warm_daxi_catalog",
         )
         application.job_queue.run_repeating(
             poll_processing_orders,

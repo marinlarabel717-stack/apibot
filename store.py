@@ -92,6 +92,7 @@ class Store:
                     total_price REAL NOT NULL,
                     refund_amount REAL NOT NULL DEFAULT 0,
                     state TEXT NOT NULL,
+                    source TEXT NOT NULL DEFAULT 'legacy',
                     file_url TEXT NOT NULL DEFAULT '',
                     delivery_ready_sent_at TEXT NOT NULL DEFAULT '',
                     delivery_sent_at TEXT NOT NULL DEFAULT '',
@@ -164,6 +165,8 @@ class Store:
             if "is_active" not in user_columns:
                 conn.execute("ALTER TABLE users ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1")
             order_columns = {row["name"] for row in conn.execute("PRAGMA table_info(orders)").fetchall()}
+            if "source" not in order_columns:
+                conn.execute("ALTER TABLE orders ADD COLUMN source TEXT NOT NULL DEFAULT 'legacy'")
             if "delivery_ready_sent_at" not in order_columns:
                 conn.execute("ALTER TABLE orders ADD COLUMN delivery_ready_sent_at TEXT NOT NULL DEFAULT ''")
             if "delivery_sent_at" not in order_columns:
@@ -301,12 +304,13 @@ class Store:
         task_id: str,
         user_id: int,
         username: str,
-        product_id: int,
+        product_id: Any,
         product_name: str,
         quantity: int,
         unit_price: float,
         total_price: float,
         payload: dict[str, Any],
+        source: str = "legacy",
     ) -> None:
         with self._lock, self._connect() as conn:
             ts = now_iso()
@@ -314,19 +318,20 @@ class Store:
                 """
                 INSERT OR REPLACE INTO orders (
                     task_id, user_id, username, product_id, product_name, quantity,
-                    quantity_success, unit_price, total_price, refund_amount, state,
+                    quantity_success, unit_price, total_price, refund_amount, state, source,
                     file_url, delivery_ready_sent_at, delivery_sent_at, delivery_error, raw_payload, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, 0, 'processing', '', '', '', '', ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, 0, 'processing', ?, '', '', '', '', ?, ?, ?)
                 """,
                 (
                     str(task_id),
                     int(user_id),
                     username or "",
-                    int(product_id),
+                    str(product_id),
                     product_name,
                     int(quantity),
                     float(unit_price),
                     float(total_price),
+                    str(source or "legacy"),
                     json.dumps(payload, ensure_ascii=False),
                     ts,
                     ts,

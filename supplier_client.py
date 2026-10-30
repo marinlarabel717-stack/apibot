@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import urljoin
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -203,3 +204,121 @@ class SupplierClient:
 
     def query_balance(self) -> dict[str, Any]:
         return self._get("/tgapi/queryBalance")
+
+    def resolve_download_url(self, file_url: str) -> str:
+        return str(file_url or "").strip()
+
+    def build_download_headers(self) -> dict[str, str]:
+        return {}
+
+
+@dataclass(slots=True)
+class DaxiSupplierClient(SupplierClient):
+    def _headers(self) -> dict[str, str]:
+        headers = {
+            "User-Agent": "apibot/0.1",
+            "Accept": "application/json",
+        }
+        api_key = str(self.settings.daxi_api_key or "").strip()
+        if api_key:
+            headers["X-API-Key"] = api_key
+        return headers
+
+    def _parse_response(self, response: requests.Response) -> dict[str, Any]:
+        try:
+            response.raise_for_status()
+        except requests.HTTPError as exc:
+            payload: Any | None = None
+            try:
+                payload = response.json()
+            except ValueError:
+                payload = None
+            raise SupplierApiError(self._build_http_error_message(response, payload), payload) from exc
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise SupplierApiError("supplier returned invalid JSON") from exc
+        if not isinstance(payload, dict):
+            raise SupplierApiError("supplier returned a non-object JSON payload", payload)
+        if payload.get("success") is not True:
+            raise SupplierApiError(str(payload.get("message") or payload.get("msg") or "supplier request failed"), payload)
+        return payload
+
+    def _request_json(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        json_body: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        url = f"{self.settings.daxi_api_base_url}{path}"
+        headers = self._headers()
+        timeout = self.settings.daxi_api_timeout_seconds
+        try:
+            response = self.session.request(
+                method=method.upper(),
+                url=url,
+                params=params,
+                json=json_body,
+                headers=headers,
+                timeout=timeout,
+            )
+            return self._parse_response(response)
+        except requests.RequestException as exc:
+            self.session.close()
+            self.session = self._build_session()
+            try:
+                response = self.session.request(
+                    method=method.upper(),
+                    url=url,
+                    params=params,
+                    json=json_body,
+                    headers=headers,
+                    timeout=timeout,
+                )
+                return self._parse_response(response)
+            except SupplierApiError:
+                raise
+            except requests.RequestException as retry_exc:
+                raise SupplierApiError(str(retry_exc)) from retry_exc
+
+    def get_products(self, query: str = "") -> dict[str, Any]:
+        params = {"query": str(query).strip()} if str(query).strip() else None
+        return self._request_json("GET", "/api/v1/products", params=params)
+
+    def get_product_detail(self, product_id: str) -> dict[str, Any]:
+        payload = self.get_products()
+        product_id_text = str(product_id or "").strip()
+        for row in payload.get("data") or []:
+            if str(row.get("productId") or "").strip() == product_id_text:
+                return {"success": True, "data": row}
+        raise SupplierApiError(f"product not found: {product_id_text}", payload)
+
+    def search_products(self, text: str) -> dict[str, Any]:
+        return self.get_products(text)
+
+    def buy_product(self, product_id: str, quantity: int, out_order_id: str) -> dict[str, Any]:
+        return self._request_json(
+            "POST",
+            "/api/v1/orders",
+            json_body={
+                "productId": str(product_id).strip(),
+                "quantityPurchased": int(quantity),
+                "outOrderId": str(out_order_id).strip(),
+            },
+        )
+
+    def query_order(self, task_id: str) -> dict[str, Any]:
+        return self._request_json("GET", f"/api/v1/orders/{str(task_id).strip()}")
+
+    def query_balance(self) -> dict[str, Any]:
+        return self._request_json("GET", "/api/v1/balance")
+
+    def resolve_download_url(self, file_url: str) -> str:
+        return urljoin(f"{self.settings.daxi_api_base_url}/", str(file_url or "").strip())
+
+    def build_download_headers(self) -> dict[str, str]:
+        headers = self._headers()
+        headers["Accept"] = "*/*"
+        return headers

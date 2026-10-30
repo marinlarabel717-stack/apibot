@@ -4579,9 +4579,10 @@ def group_daxi_products(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         items = sorted(
             list(grouped[category_key].get("rows") or []),
             key=lambda item: (
+                -max(0, safe_int(item.get("totalStock"), 0)),
+                compact_search_text(str(item.get("productName") or "")),
                 compact_search_text(str(item.get("country") or "")),
                 compact_search_text(str(item.get("prefix") or "")),
-                compact_search_text(str(item.get("productName") or "")),
             ),
         )
         groups.append(

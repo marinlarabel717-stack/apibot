@@ -111,7 +111,7 @@ BUTTON_MAIN_MENU = "主菜单"
 BUTTON_PROFILE = "个人中心"
 BUTTON_RECHARGE = "我要充值"
 BUTTON_ACCOUNT_LIST = "账号列表"
-BUTTON_ACCOUNT_LIST_2 = "账号列表2"
+BUTTON_ACCOUNT_LIST_2 = "账号列表"
 BUTTON_RECHARGE_BALANCE = "充值余额"
 BUTTON_PURCHASE_NOTICE = "购买须知"
 BUTTON_ORDER_HISTORY = "购买记录"
@@ -121,7 +121,7 @@ BUTTON_MAIN_MENU_EN = "Main Menu"
 BUTTON_PROFILE_EN = "Profile"
 BUTTON_RECHARGE_EN = "Recharge"
 BUTTON_ACCOUNT_LIST_EN = "Account List"
-BUTTON_ACCOUNT_LIST_2_EN = "Account List 2"
+BUTTON_ACCOUNT_LIST_2_EN = "Account List"
 BUTTON_RECHARGE_BALANCE_EN = "Balance"
 BUTTON_PURCHASE_NOTICE_EN = "Purchase Notice"
 BUTTON_ORDER_HISTORY_EN = "Order History"
@@ -261,10 +261,10 @@ UI_TEXTS.update(
         "product_list_stock": {"zh": "{name} 库存 [{stock}]", "en": "{name} Stock [{stock}]"},
         "product_row_price": {"zh": "{name} 库存 [{stock}] - ${price}", "en": "{name} Stock [{stock}] - ${price}"},
         "view_product": {"zh": "查看 {name}", "en": "View {name}"},
-        "account_list_2_intro": {"zh": "这是账号列表2，当前已接入大喜 API。请选择需要的商品：", "en": "This is Account List 2 powered by the Daxi API. Please choose a product:"},
-        "back_account_list_2": {"zh": "返回账号列表2", "en": "Back to Account List 2"},
-        "no_products_in_account_list_2": {"zh": "账号列表2 当前没有商品。", "en": "Account List 2 has no products right now."},
-        "fetch_account_list_2_failed": {"zh": "获取账号列表2失败: {error}", "en": "Failed to load Account List 2: {error}"},
+        "account_list_2_intro": {"zh": "请选择需要的商品：", "en": "Please choose a product:"},
+        "back_account_list_2": {"zh": "返回账号列表", "en": "Back to Account List"},
+        "no_products_in_account_list_2": {"zh": "账号列表当前没有商品。", "en": "Account List has no products right now."},
+        "fetch_account_list_2_failed": {"zh": "获取账号列表失败: {error}", "en": "Failed to load Account List: {error}"},
         "previous_page": {"zh": "上一页", "en": "Previous"},
         "next_page": {"zh": "下一页", "en": "Next"},
         "no_categories": {"zh": "当前没有分类。", "en": "No categories available right now."},
@@ -350,14 +350,14 @@ UI_TEXTS.update(
 UI_TEXTS.update(
     {
         "legacy_supplier_enabled_notice": {"zh": "旧接口已开启。", "en": "Legacy supplier is enabled."},
-        "legacy_supplier_closed_set_notice": {"zh": "旧接口已关闭，请使用账号列表2。", "en": "Legacy supplier is disabled. Please use Account List 2."},
-        "legacy_supplier_disabled_notice": {"zh": "旧接口已暂停，请使用账号列表2。", "en": "Legacy supplier is unavailable. Please use Account List 2."},
+        "legacy_supplier_closed_set_notice": {"zh": "旧接口已关闭，请使用新账号列表。", "en": "Legacy supplier is disabled. Please use the new account list."},
+        "legacy_supplier_disabled_notice": {"zh": "旧接口已暂停，请使用新账号列表。", "en": "Legacy supplier is unavailable. Please use the new account list."},
         "account_list_2_intro": {
-            "zh": "账号列表2 已按类型整理成分类，请先选择分类：",
-            "en": "Account List 2 is organized by type. Please choose a category first:",
+            "zh": "请先选择分类：",
+            "en": "Please choose a category first:",
         },
-        "account_list_2_products_intro": {"zh": "账号列表2 当前分类：{category_name}", "en": "Account List 2 current category: {category_name}"},
-        "no_categories_in_account_list_2": {"zh": "账号列表2 当前没有可用分类。", "en": "Account List 2 has no categories right now."},
+        "account_list_2_products_intro": {"zh": "当前分类：{category_name}", "en": "Current category: {category_name}"},
+        "no_categories_in_account_list_2": {"zh": "账号列表当前没有可用分类。", "en": "Account List has no categories right now."},
     }
 )
 CATEGORY_NAME_TRANSLATIONS: list[tuple[str, str]] = [
@@ -3878,9 +3878,9 @@ def build_main_menu_inline(settings: Settings) -> InlineKeyboardMarkup:
         [
             [
                 build_main_menu_button(settings, BUTTON_ACCOUNT_LIST, "nav:cats", MAIN_MENU_EMOJI_ACCOUNT_LIST_ID, "📂"),
-                build_main_menu_button(settings, BUTTON_ACCOUNT_LIST_2, "nav:cats2", MAIN_MENU_EMOJI_ACCOUNT_LIST_ID, "🧩"),
             ],
             [
+                build_main_menu_button(settings, BUTTON_ACCOUNT_LIST_2, "nav:cats2", MAIN_MENU_EMOJI_ACCOUNT_LIST_ID, "🧩"),
                 build_main_menu_button(settings, BUTTON_RECHARGE_BALANCE, "nav:recharge", MAIN_MENU_EMOJI_RECHARGE_BALANCE_ID, "💰"),
             ],
             [
@@ -3897,9 +3897,9 @@ def build_main_menu_inline_localized(settings: Settings, lang: str) -> InlineKey
         [
             [
                 build_main_menu_button(settings, ui_text("button_account_list", lang), "nav:cats", MAIN_MENU_EMOJI_ACCOUNT_LIST_ID, "📂"),
-                build_main_menu_button(settings, ui_text("button_account_list_2", lang), "nav:cats2", MAIN_MENU_EMOJI_ACCOUNT_LIST_ID, "🧩"),
             ],
             [
+                build_main_menu_button(settings, ui_text("button_account_list_2", lang), "nav:cats2", MAIN_MENU_EMOJI_ACCOUNT_LIST_ID, "🧩"),
                 build_main_menu_button(settings, ui_text("button_recharge_balance", lang), "nav:recharge", MAIN_MENU_EMOJI_RECHARGE_BALANCE_ID, "💰"),
             ],
             [
@@ -3916,13 +3916,11 @@ def build_runtime_main_menu_inline_localized(
     lang: str,
     show_legacy_supplier: bool,
 ) -> InlineKeyboardMarkup:
-    first_row = [build_main_menu_button(settings, ui_text("button_account_list_2", lang), "nav:cats2", MAIN_MENU_EMOJI_ACCOUNT_LIST_ID, "🧩")]
     if show_legacy_supplier:
-        first_row.insert(0, build_main_menu_button(settings, ui_text("button_account_list", lang), "nav:cats", MAIN_MENU_EMOJI_ACCOUNT_LIST_ID, "📂"))
-    return InlineKeyboardMarkup(
-        [
-            first_row,
+        rows = [
+            [build_main_menu_button(settings, ui_text("button_account_list", lang), "nav:cats", MAIN_MENU_EMOJI_ACCOUNT_LIST_ID, "📂")],
             [
+                build_main_menu_button(settings, ui_text("button_account_list_2", lang), "nav:cats2", MAIN_MENU_EMOJI_ACCOUNT_LIST_ID, "🧩"),
                 build_main_menu_button(settings, ui_text("button_recharge_balance", lang), "nav:recharge", MAIN_MENU_EMOJI_RECHARGE_BALANCE_ID, "💰"),
             ],
             [
@@ -3931,7 +3929,19 @@ def build_runtime_main_menu_inline_localized(
             ],
             [build_main_menu_button(settings, ui_text("button_switch_language", lang), "nav:language", MAIN_MENU_EMOJI_SWITCH_LANGUAGE_ID, "🌐")],
         ]
-    )
+    else:
+        rows = [
+            [
+                build_main_menu_button(settings, ui_text("button_account_list_2", lang), "nav:cats2", MAIN_MENU_EMOJI_ACCOUNT_LIST_ID, "🧩"),
+                build_main_menu_button(settings, ui_text("button_recharge_balance", lang), "nav:recharge", MAIN_MENU_EMOJI_RECHARGE_BALANCE_ID, "💰"),
+            ],
+            [
+                build_main_menu_button(settings, ui_text("button_purchase_notice", lang), "nav:notice", MAIN_MENU_EMOJI_PURCHASE_NOTICE_ID, "📖"),
+                build_main_menu_button(settings, ui_text("button_order_history", lang), "nav:orders", MAIN_MENU_EMOJI_ORDER_HISTORY_ID, "📦"),
+            ],
+            [build_main_menu_button(settings, ui_text("button_switch_language", lang), "nav:language", MAIN_MENU_EMOJI_SWITCH_LANGUAGE_ID, "🌐")],
+        ]
+    return InlineKeyboardMarkup(rows)
 
 
 def build_category_keyboard(rows: list[dict[str, Any]]) -> InlineKeyboardMarkup:
@@ -8358,13 +8368,21 @@ async def route_menu_text(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if update.message is None or not update.message.text:
         return
     text = update.message.text.strip()
-    if button_matches(text, "button_products", "button_account_list"):
+    if button_matches(text, "button_products"):
         if not effective_legacy_supplier_enabled(context):
             await reply_legacy_supplier_disabled(update, context)
             return
         clear_pending_purchase(context)
         clear_pending_recharge(context)
         await show_categories(update, context)
+        return
+    if button_matches(text, "button_account_list"):
+        clear_pending_purchase(context)
+        clear_pending_recharge(context)
+        if effective_legacy_supplier_enabled(context):
+            await show_categories(update, context)
+        else:
+            await show_daxi_categories(update, context, 0)
         return
     if button_matches(text, "button_account_list_2"):
         clear_pending_purchase(context)

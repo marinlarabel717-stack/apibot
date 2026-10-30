@@ -175,6 +175,9 @@ UI_TEXTS: dict[str, dict[str, str]] = {
     "language_set_zh": {"zh": "中文", "en": "中文"},
     "language_set_en": {"zh": "English", "en": "English"},
     "language_changed": {"zh": "语言已切换为中文。", "en": "Language switched to English."},
+    "business_closed_notice": {"zh": "机器人正在维护，请等待。", "en": "The bot is under maintenance. Please wait."},
+    "business_opened_notice": {"zh": "已开始营业，所有用户都可以正常访问机器人。", "en": "Business is open. All users can access the bot now."},
+    "business_closed_set_notice": {"zh": "已停止营业，现在只有管理员可以访问机器人。", "en": "Business is closed. Only admins can access the bot now."},
     "language_placeholder": {"zh": "🌐 切换语言", "en": "🌐 Switch Language"},
     "categories_intro": {"zh": "这是商品分类列表，请选择你需要的分类：", "en": "This is the product category list. Please choose a category:"},
     "products_intro": {"zh": "这是商品列表，当前分类：{category_name}", "en": "This is the product list. Current category: {category_name}"},
@@ -3634,8 +3637,13 @@ async def should_ignore_for_closed_business(update: Update, context: ContextType
     user = update.effective_user
     if user is None or is_admin(settings, user.id) or effective_business_open(context):
         return False
+    lang = await ensure_user_with_lang(context, user)
+    notice = ui_text("business_closed_notice", lang)
     if update.callback_query is not None:
-        await answer_callback_query_safely(update.callback_query)
+        await answer_callback_query_safely(update.callback_query, notice, show_alert=True)
+        return True
+    if update.message is not None:
+        await update.message.reply_text(notice, reply_markup=build_menu_keyboard(lang))
     return True
 
 
@@ -3653,7 +3661,9 @@ async def handle_admin_business_toggle(update: Update, context: ContextTypes.DEF
     runtime_config[RUNTIME_KEY_BUSINESS_STATUS] = value
     await call_blocking(store.log_admin_action, user.id, "business_status", value, normalized)
     clear_pending_admin_action(context)
-    await send_menu_message(update, normalized)
+    lang = await ensure_user_with_lang(context, user)
+    message_key = "business_opened_notice" if value == "1" else "business_closed_set_notice"
+    await send_menu_message(update, ui_text(message_key, lang))
     return True
 
 

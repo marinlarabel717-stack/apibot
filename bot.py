@@ -332,6 +332,17 @@ UI_TEXTS.update(
         "delivery_ready_refund": {"zh": "已退款：", "en": "Refunded: "},
     }
 )
+UI_TEXTS.update(
+    {
+        "legacy_supplier_enabled_notice": {"zh": "旧接口已开启。", "en": "Legacy supplier is enabled."},
+        "legacy_supplier_closed_set_notice": {"zh": "旧接口已关闭，请使用账号列表2。", "en": "Legacy supplier is disabled. Please use Account List 2."},
+        "legacy_supplier_disabled_notice": {"zh": "旧接口已暂停，请使用账号列表2。", "en": "Legacy supplier is unavailable. Please use Account List 2."},
+        "account_list_2_intro": {
+            "zh": "这是账号列表2，当前已接入大喜 API。这套接口没有分类页，下面直接显示商品列表：",
+            "en": "This is Account List 2 powered by the Daxi API. This API has no category endpoint, so products are shown directly below:",
+        },
+    }
+)
 CATEGORY_NAME_TRANSLATIONS: list[tuple[str, str]] = [
     ("亚洲地区", "Asia Region"),
     ("欧美地区", "Western Region"),
@@ -629,6 +640,7 @@ RUNTIME_KEY_OKPAY_API_URL = "okpay_api_url"
 RUNTIME_KEY_CUSTOMER_SERVICE = "customer_service_contact"
 RUNTIME_KEY_RESTOCK_CHANNEL = "restock_channel"
 RUNTIME_KEY_BUSINESS_STATUS = "business_status"
+RUNTIME_KEY_LEGACY_SUPPLIER_ENABLED = "legacy_supplier_enabled"
 RUNTIME_KEY_SELL_PRICE_MODE = "sell_price_mode"
 RUNTIME_KEY_SELL_PRICE_VALUE = "sell_price_value"
 ADMIN_SETTING_SELL_PRICE_PERCENT = "__sell_price_percent__"
@@ -871,6 +883,18 @@ def effective_business_open(context: ContextTypes.DEFAULT_TYPE) -> bool:
 
 def business_status_label(context: ContextTypes.DEFAULT_TYPE) -> str:
     return "营业中" if effective_business_open(context) else "已停止"
+
+
+def legacy_supplier_is_enabled(raw_value: str) -> bool:
+    return str(raw_value or "1").strip().lower() not in {"0", "false", "off", "disabled", "stop", "closed"}
+
+
+def effective_legacy_supplier_enabled(context: ContextTypes.DEFAULT_TYPE) -> bool:
+    return legacy_supplier_is_enabled(runtime_value(context, RUNTIME_KEY_LEGACY_SUPPLIER_ENABLED, "1"))
+
+
+def legacy_supplier_status_label(context: ContextTypes.DEFAULT_TYPE) -> str:
+    return "已开启" if effective_legacy_supplier_enabled(context) else "已关闭"
 
 
 def normalize_sell_price_mode(raw_value: str, default: str = "fixed_add") -> str:
@@ -3647,6 +3671,16 @@ async def should_ignore_for_closed_business(update: Update, context: ContextType
     return True
 
 
+async def reply_legacy_supplier_disabled(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    lang = await ensure_user_with_lang(context, update.effective_user)
+    notice = ui_text("legacy_supplier_disabled_notice", lang)
+    if update.callback_query is not None:
+        await answer_callback_query_safely(update.callback_query, notice, show_alert=True)
+        return
+    if update.message is not None:
+        await update.message.reply_text(notice, reply_markup=build_menu_keyboard(lang))
+
+
 async def handle_admin_business_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> bool:
     settings, store, _ = get_services(context)
     user = update.effective_user
@@ -3663,6 +3697,26 @@ async def handle_admin_business_toggle(update: Update, context: ContextTypes.DEF
     clear_pending_admin_action(context)
     lang = await ensure_user_with_lang(context, user)
     message_key = "business_opened_notice" if value == "1" else "business_closed_set_notice"
+    await send_menu_message(update, ui_text(message_key, lang))
+    return True
+
+
+async def handle_admin_legacy_supplier_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> bool:
+    settings, store, _ = get_services(context)
+    user = update.effective_user
+    normalized = normalize_search_keyword(text)
+    if user is None or not is_admin(settings, user.id):
+        return False
+    if normalized not in {"开启旧接口", "关闭旧接口"}:
+        return False
+    value = "1" if normalized == "开启旧接口" else "0"
+    runtime_config = get_runtime_config(context)
+    await call_blocking(store.set_runtime_setting, RUNTIME_KEY_LEGACY_SUPPLIER_ENABLED, value, user.id)
+    runtime_config[RUNTIME_KEY_LEGACY_SUPPLIER_ENABLED] = value
+    await call_blocking(store.log_admin_action, user.id, "legacy_supplier_enabled", value, normalized)
+    clear_pending_admin_action(context)
+    lang = await ensure_user_with_lang(context, user)
+    message_key = "legacy_supplier_enabled_notice" if value == "1" else "legacy_supplier_closed_set_notice"
     await send_menu_message(update, ui_text(message_key, lang))
     return True
 
@@ -3705,6 +3759,29 @@ def build_main_menu_inline_localized(settings: Settings, lang: str) -> InlineKey
                 build_main_menu_button(settings, ui_text("button_account_list", lang), "nav:cats", MAIN_MENU_EMOJI_ACCOUNT_LIST_ID, "📂"),
                 build_main_menu_button(settings, ui_text("button_account_list_2", lang), "nav:cats2", MAIN_MENU_EMOJI_ACCOUNT_LIST_ID, "🧩"),
             ],
+            [
+                build_main_menu_button(settings, ui_text("button_recharge_balance", lang), "nav:recharge", MAIN_MENU_EMOJI_RECHARGE_BALANCE_ID, "💰"),
+            ],
+            [
+                build_main_menu_button(settings, ui_text("button_purchase_notice", lang), "nav:notice", MAIN_MENU_EMOJI_PURCHASE_NOTICE_ID, "📖"),
+                build_main_menu_button(settings, ui_text("button_order_history", lang), "nav:orders", MAIN_MENU_EMOJI_ORDER_HISTORY_ID, "📦"),
+            ],
+            [build_main_menu_button(settings, ui_text("button_switch_language", lang), "nav:language", MAIN_MENU_EMOJI_SWITCH_LANGUAGE_ID, "🌐")],
+        ]
+    )
+
+
+def build_runtime_main_menu_inline_localized(
+    settings: Settings,
+    lang: str,
+    show_legacy_supplier: bool,
+) -> InlineKeyboardMarkup:
+    first_row = [build_main_menu_button(settings, ui_text("button_account_list_2", lang), "nav:cats2", MAIN_MENU_EMOJI_ACCOUNT_LIST_ID, "🧩")]
+    if show_legacy_supplier:
+        first_row.insert(0, build_main_menu_button(settings, ui_text("button_account_list", lang), "nav:cats", MAIN_MENU_EMOJI_ACCOUNT_LIST_ID, "📂"))
+    return InlineKeyboardMarkup(
+        [
+            first_row,
             [
                 build_main_menu_button(settings, ui_text("button_recharge_balance", lang), "nav:recharge", MAIN_MENU_EMOJI_RECHARGE_BALANCE_ID, "💰"),
             ],
@@ -4378,7 +4455,11 @@ async def build_main_menu_message(
         effective_customer_service_contact(context, settings),
         lang,
     )
-    main_menu_inline = build_main_menu_inline_localized(settings, lang)
+    main_menu_inline = build_runtime_main_menu_inline_localized(
+        settings,
+        lang,
+        effective_legacy_supplier_enabled(context),
+    )
     return text, entities, main_menu_inline
 
 
@@ -4618,6 +4699,9 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 
 async def show_categories(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not effective_legacy_supplier_enabled(context):
+        await reply_legacy_supplier_disabled(update, context)
+        return
     settings, _, supplier = get_services(context)
     lang = await ensure_user_with_lang(context, update.effective_user)
     try:
@@ -4649,6 +4733,9 @@ async def show_products(
     category_id: int,
     page: int = 0,
 ) -> None:
+    if not effective_legacy_supplier_enabled(context):
+        await reply_legacy_supplier_disabled(update, context)
+        return
     settings, _, supplier = get_services(context)
     lang = await ensure_user_with_lang(context, update.effective_user)
     try:
@@ -4712,6 +4799,21 @@ def build_profile_keyboard_localized(lang: str) -> InlineKeyboardMarkup:
     )
 
 
+def build_runtime_profile_keyboard_localized(lang: str, show_legacy_supplier: bool) -> InlineKeyboardMarkup:
+    catalog_callback = "nav:cats" if show_legacy_supplier else "nav:cats2"
+    catalog_label = ui_text("button_account_list", lang) if show_legacy_supplier else ui_text("button_account_list_2", lang)
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton(ui_text("profile_recharge", lang), callback_data="nav:recharge")],
+            [
+                InlineKeyboardButton(catalog_label, callback_data=catalog_callback),
+                InlineKeyboardButton(ui_text("profile_orders", lang), callback_data="nav:orders"),
+            ],
+            [premium_inline_button(ui_text("button_main_menu", lang), "nav:menu", HOME_EMOJI_ID)],
+        ]
+    )
+
+
 def build_language_keyboard(lang: str = DEFAULT_LANG) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
@@ -4732,7 +4834,11 @@ async def show_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     lang = await ensure_user_with_lang(context, user)
     balance = await call_blocking(store.get_balance, user.id)
     rows = await call_blocking(store.list_user_orders, user.id, 5)
-    await reply_inline(update, build_profile_text_localized(user, balance, rows, lang), build_profile_keyboard_localized(lang))
+    await reply_inline(
+        update,
+        build_profile_text_localized(user, balance, rows, lang),
+        build_runtime_profile_keyboard_localized(lang, effective_legacy_supplier_enabled(context)),
+    )
     return
     await call_blocking(store.ensure_user, user.id, user.username or "", user.full_name or "")
     balance = await call_blocking(store.get_balance, user.id)
@@ -5552,6 +5658,7 @@ async def show_admin_home(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     )
     text = (
         f"{text}\n"
+        f"旧接口状态：{legacy_supplier_status_label(context)}\n"
         f"售价模式：{sell_price_mode_label(str(sell_price_config.get('mode') or 'fixed_add'))}\n"
         f"当前加价：{format_sell_price_value(str(sell_price_config.get('mode') or 'fixed_add'), safe_float(sell_price_config.get('value'), 0.0))}"
     )
@@ -6231,6 +6338,9 @@ async def me(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def categories(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if await should_ignore_for_closed_business(update, context):
+        return
+    if not effective_legacy_supplier_enabled(context):
+        await reply_legacy_supplier_disabled(update, context)
         return
     await show_categories(update, context)
 
@@ -7175,6 +7285,9 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     action = parts[0]
     if action != "rchg":
         clear_pending_recharge(context)
+    if action in {"cat", "prd", "qbuy", "cbuy"} and not effective_legacy_supplier_enabled(context):
+        await reply_legacy_supplier_disabled(update, context)
+        return
 
     if action == "lang" and len(parts) >= 3 and parts[1] == "set":
         user = update.effective_user
@@ -7324,6 +7437,9 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         clear_pending_recharge(context)
         target = parts[1] if len(parts) > 1 else ""
         if target == "cats":
+            if not effective_legacy_supplier_enabled(context):
+                await reply_legacy_supplier_disabled(update, context)
+                return
             await show_categories(update, context)
             return
         if target == "cats2":
@@ -7590,6 +7706,9 @@ async def route_menu_text(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
     text = update.message.text.strip()
     if button_matches(text, "button_products", "button_account_list"):
+        if not effective_legacy_supplier_enabled(context):
+            await reply_legacy_supplier_disabled(update, context)
+            return
         clear_pending_purchase(context)
         clear_pending_recharge(context)
         await show_categories(update, context)
@@ -7671,6 +7790,8 @@ async def search_text_rich(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     keyword = normalize_search_keyword(update.message.text)
     if await handle_admin_business_toggle(update, context, keyword):
         return
+    if await handle_admin_legacy_supplier_toggle(update, context, keyword):
+        return
     if await should_ignore_for_closed_business(update, context):
         return
     settings, _, supplier = get_services(context)
@@ -7735,6 +7856,9 @@ async def search_text_rich(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return
     if not should_trigger_product_search(keyword):
         return
+    if not effective_legacy_supplier_enabled(context):
+        await reply_legacy_supplier_disabled(update, context)
+        return
     try:
         rows = await search_products_cached(supplier, keyword)
     except SupplierApiError as exc:
@@ -7765,6 +7889,9 @@ async def search_text_rich(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 async def buy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if await should_ignore_for_closed_business(update, context):
+        return
+    if not effective_legacy_supplier_enabled(context):
+        await reply_legacy_supplier_disabled(update, context)
         return
     user = update.effective_user
     if user is None or update.message is None:
@@ -7842,6 +7969,9 @@ async def order(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def products(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if await should_ignore_for_closed_business(update, context):
         return
+    if not effective_legacy_supplier_enabled(context):
+        await reply_legacy_supplier_disabled(update, context)
+        return
     if update.message is None:
         return
     lang = await ensure_user_with_lang(context, update.effective_user)
@@ -7858,6 +7988,9 @@ async def products(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def product(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if await should_ignore_for_closed_business(update, context):
+        return
+    if not effective_legacy_supplier_enabled(context):
+        await reply_legacy_supplier_disabled(update, context)
         return
     settings, _, supplier = get_services(context)
     if update.message is None:

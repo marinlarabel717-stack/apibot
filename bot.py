@@ -75,6 +75,19 @@ BROADCAST_PROGRESS_UPDATE_EVERY = 10
 ASSETS_DIR = Path(__file__).resolve().parent / "assets"
 PURCHASE_CONFIRM_IMAGE_PATH = ASSETS_DIR / "purchase-confirm.png"
 DELIVERY_READY_IMAGE_PATH = ASSETS_DIR / "delivery-ready.png"
+
+DAXI_CATEGORY_SORT_ORDER = {
+    "normal": 0,
+    "month_1_3": 1,
+    "month_6_12": 2,
+    "year_1": 3,
+    "year_2": 4,
+    "year_3": 5,
+    "year_4": 6,
+    "year_5_plus": 7,
+    "year_7_plus": 8,
+    "weekly_member": 9,
+}
 START_MENU_IMAGE_PATH = ASSETS_DIR / "start-menu.png"
 LEGACY_START_MENU_IMAGE_PATH = PURCHASE_CONFIRM_IMAGE_PATH
 DELIVERY_FILES_DIR = Path(__file__).resolve().parent / "data" / "deliveries"
@@ -4299,7 +4312,26 @@ def render_daxi_product_detail_view_localized(
     return text, entities, build_daxi_product_detail_keyboard_localized(product_id, category_index, page, lang)
 
 
+def build_daxi_virtual_category_key(row: dict[str, Any]) -> str:
+    category_key = str(row.get("category") or "").strip().lower()
+    if category_key:
+        return category_key
+    group_kind = str(row.get("groupKind") or "").strip().lower()
+    if group_kind:
+        return group_kind
+    kind = str(row.get("kind") or "").strip().lower()
+    if kind:
+        return kind
+    return compact_search_text(str(row.get("productName") or row.get("productId") or "uncategorized"))
+
+
 def build_daxi_virtual_category_name(row: dict[str, Any]) -> str:
+    category_name = str(row.get("categoryName") or "").strip()
+    if category_name:
+        return category_name
+    group_kind = str(row.get("groupKind") or "").strip()
+    if group_kind:
+        return group_kind
     kind = str(row.get("kind") or "").strip()
     if kind:
         return kind
@@ -4311,22 +4343,21 @@ def build_daxi_virtual_category_name(row: dict[str, Any]) -> str:
     return str(row.get("productName") or row.get("productId") or "未分类").strip()
 
 
-def build_daxi_category_icon(category_name: str) -> str:
-    name = compact_search_text(category_name)
+def build_daxi_category_icon(category_name: str, category_key: str = "") -> str:
+    name = compact_search_text(f"{category_key} {category_name}")
     icon_rules = [
-        (("普通", "新号"), "📱"),
-        (("1月", "1-3", "1~3"), "🌱"),
-        (("6月", "6-12", "6~12"), "⭐"),
-        (("1年",), "💎"),
-        (("2年",), "💠"),
-        (("3年",), "🎂"),
-        (("4年",), "🎀"),
-        (("5年",), "🏆"),
-        (("7年",), "🌈"),
-        (("七年",), "🌈"),
+        (("normal", "普通", "新号"), "📱"),
+        (("month_1_3", "1月", "1-3", "1~3", "2-5"), "🌱"),
+        (("month_6_12", "6月", "6-12", "6~12"), "⭐"),
+        (("year_1", "1年"), "💎"),
+        (("year_2", "2年"), "💠"),
+        (("year_3", "3年"), "🎂"),
+        (("year_4", "4年"), "🎀"),
+        (("year_5_plus", "5年", "6年"), "🏆"),
+        (("year_7_plus", "7年", "七年", "9年", "10年", "11年", "12年"), "🌈"),
         (("协议",), "💍"),
+        (("member", "会员"), "👑"),
         (("双向",), "🔁"),
-        (("会员",), "👑"),
     ]
     for keywords, icon in icon_rules:
         if any(keyword in name for keyword in keywords):
@@ -4361,6 +4392,7 @@ def build_country_flag_emoji(country_name: str) -> str:
         "香港": "HK",
         "台湾": "TW",
         "澳门": "MO",
+        "多米尼加": "DO",
         "印度": "IN",
         "印度尼西亚": "ID",
         "印尼": "ID",
@@ -4377,6 +4409,7 @@ def build_country_flag_emoji(country_name: str) -> str:
         "埃及": "EG",
         "尼日利亚": "NG",
         "南非": "ZA",
+        "南苏丹": "SS",
         "澳大利亚": "AU",
         "新西兰": "NZ",
     }
@@ -4405,31 +4438,50 @@ def format_daxi_product_title(row: dict[str, Any], lang: str) -> str:
 
 
 def group_daxi_products(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    grouped: dict[str, list[dict[str, Any]]] = {}
+    grouped: dict[str, dict[str, Any]] = {}
     for row in rows:
+        category_key = build_daxi_virtual_category_key(row)
         category_name = build_daxi_virtual_category_name(row)
-        grouped.setdefault(category_name, []).append(row)
-    ordered_names = sorted(grouped.keys(), key=compact_search_text)
+        bucket = grouped.setdefault(category_key, {"name": category_name, "rows": []})
+        bucket["rows"].append(row)
+    ordered_keys = sorted(
+        grouped.keys(),
+        key=lambda key: (DAXI_CATEGORY_SORT_ORDER.get(key, 999), compact_search_text(str(grouped[key].get("name") or key))),
+    )
     groups: list[dict[str, Any]] = []
-    for index, name in enumerate(ordered_names):
+    for index, category_key in enumerate(ordered_keys):
+        name = str(grouped[category_key].get("name") or category_key)
         items = sorted(
-            grouped[name],
+            list(grouped[category_key].get("rows") or []),
             key=lambda item: (
-                compact_search_text(str(item.get("kind") or "")),
+                compact_search_text(str(item.get("country") or "")),
+                compact_search_text(str(item.get("prefix") or "")),
                 compact_search_text(str(item.get("productName") or "")),
             ),
         )
         groups.append(
             {
                 "index": index,
+                "key": category_key,
                 "name": name,
-                "icon": build_daxi_category_icon(name),
+                "icon": build_daxi_category_icon(name, category_key),
                 "rows": items,
                 "product_count": len(items),
                 "stock_total": sum(max(0, safe_int(item.get("totalStock"), 0)) for item in items),
             }
         )
     return groups
+
+
+def build_daxi_group_index_map(rows: list[dict[str, Any]]) -> dict[str, int]:
+    mapping: dict[str, int] = {}
+    for group in group_daxi_products(rows):
+        group_index = safe_int(group.get("index"), 0)
+        for row in list(group.get("rows") or []):
+            product_id = str(row.get("productId") or "").strip()
+            if product_id:
+                mapping[product_id] = group_index
+    return mapping
 
 
 async def show_daxi_categories(
@@ -4529,7 +4581,8 @@ def normalize_daxi_product_row(row: dict[str, Any]) -> dict[str, Any]:
     item["productId"] = str(item.get("productId") or "").strip()
     item["productName"] = str(item.get("productName") or item["productId"] or "商品").strip()
     item["totalStock"] = safe_int(item.get("stock"))
-    item["categoryName"] = BUTTON_ACCOUNT_LIST_2
+    item["category"] = str(item.get("category") or item.get("groupKind") or item.get("kind") or "").strip()
+    item["categoryName"] = str(item.get("categoryName") or item.get("groupKind") or item.get("kind") or BUTTON_ACCOUNT_LIST_2).strip()
     return item
 
 
@@ -8100,7 +8153,36 @@ async def search_text_rich(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if not should_trigger_product_search(keyword):
         return
     if not effective_legacy_supplier_enabled(context):
-        await reply_legacy_supplier_disabled(update, context)
+        daxi_supplier = get_daxi_supplier(context)
+        try:
+            all_rows = await fetch_daxi_products(daxi_supplier)
+            rows = await fetch_daxi_products(daxi_supplier, keyword)
+        except SupplierApiError as exc:
+            await update.message.reply_text(ui_text("search_failed", lang, error=exc))
+            return
+        if not rows:
+            await update.message.reply_text(ui_text("search_empty", lang), reply_markup=build_menu_keyboard(lang))
+            return
+        group_index_map = build_daxi_group_index_map(all_rows)
+        text, entities = build_search_results_text_localized(keyword, rows, lambda row: resolve_sell_price(settings, row), lang)
+        buttons: list[list[InlineKeyboardButton]] = []
+        for row in rows[:SEARCH_RESULTS_LIMIT]:
+            product_id = str(row.get("productId") or "").strip()
+            if not product_id:
+                continue
+            category_index = group_index_map.get(product_id, 0)
+            sell_price = resolve_sell_price(settings, row)
+            product_name = shorten(format_daxi_product_button_name(row, lang), 22)
+            buttons.append(
+                [
+                    plain_catalog_button(
+                        ui_text("product_row_price", lang, name=product_name, stock=safe_int(row.get("totalStock")), price=f"{sell_price:.2f}"),
+                        f"prd2:{product_id}:{category_index}:0",
+                    )
+                ]
+            )
+        buttons.append([InlineKeyboardButton(ui_text("button_account_list_2", lang), callback_data="nav:cats2")])
+        await update.message.reply_text(text, entities=entities, reply_markup=InlineKeyboardMarkup(buttons))
         return
     try:
         rows = await search_products_cached(supplier, keyword)

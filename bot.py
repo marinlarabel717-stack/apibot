@@ -2857,6 +2857,41 @@ def build_delivery_bundle_path(task_id: str) -> Path:
     return DELIVERY_FILES_DIR / f"{task_id}-bundle.zip"
 
 
+def normalize_bundle_member_name(name: str, fallback_name: str) -> str:
+    raw_name = str(name or "").replace("\\", "/").strip().lstrip("/")
+    parts = [part for part in raw_name.split("/") if part and part not in {".", ".."}]
+    if parts:
+        return "/".join(parts)
+    return sanitize_delivery_name(fallback_name or "delivery.bin")
+
+
+def unique_bundle_member_name(used_names: set[str], preferred_name: str, fallback_index: int) -> str:
+    candidate = preferred_name.strip() or f"delivery-{fallback_index}"
+    if candidate not in used_names:
+        used_names.add(candidate)
+        return candidate
+    path = Path(candidate)
+    stem = path.stem or f"delivery-{fallback_index}"
+    suffix = path.suffix
+    serial = 2
+    while True:
+        alt_name = f"{stem}-{serial}{suffix}"
+        if alt_name not in used_names:
+            used_names.add(alt_name)
+            return alt_name
+        serial += 1
+
+
+def should_bundle_delivery_files(downloaded_files: list[dict[str, Any]]) -> bool:
+    if len(downloaded_files) > 1:
+        return True
+    for item in downloaded_files:
+        path = Path(item["path"])
+        if path.suffix.lower() == ".zip" and zipfile.is_zipfile(path):
+            return True
+    return False
+
+
 def build_delivery_bundle(task_id: str, downloaded_files: list[dict[str, Any]]) -> Path:
     bundle_path = build_delivery_bundle_path(task_id)
     with zipfile.ZipFile(bundle_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
@@ -2864,10 +2899,17 @@ def build_delivery_bundle(task_id: str, downloaded_files: list[dict[str, Any]]) 
         for index, item in enumerate(downloaded_files, start=1):
             path = Path(item["path"])
             preferred_name = delivery_display_filename("", 0, "", str(item.get("file_name") or path.name))
-            archive_name = preferred_name or path.name
-            if archive_name in used_names:
-                archive_name = f"{Path(archive_name).stem}-{index}{Path(archive_name).suffix}"
-            used_names.add(archive_name)
+            if path.suffix.lower() == ".zip" and zipfile.is_zipfile(path):
+                with zipfile.ZipFile(path, "r") as nested_archive:
+                    for member in nested_archive.infolist():
+                        if member.is_dir():
+                            continue
+                        member_name = normalize_bundle_member_name(member.filename, preferred_name or path.name)
+                        archive_name = unique_bundle_member_name(used_names, member_name, index)
+                        archive.writestr(archive_name, nested_archive.read(member))
+                continue
+            archive_name = normalize_bundle_member_name(preferred_name or path.name, preferred_name or path.name)
+            archive_name = unique_bundle_member_name(used_names, archive_name, index)
             archive.write(path, arcname=archive_name)
     return bundle_path
 
@@ -3021,7 +3063,7 @@ async def deliver_order_file(
             order_row = await call_blocking(store.mark_order_delivery_ready_sent, task_id) or order_row
         if not downloaded_files:
             raise SupplierApiError("no delivery files available")
-        if isinstance(supplier, DaxiSupplierClient) and len(downloaded_files) > 1:
+        if isinstance(supplier, DaxiSupplierClient) and should_bundle_delivery_files(downloaded_files):
             send_path = await call_blocking(build_delivery_bundle, task_id, downloaded_files)
             send_name = delivery_display_filename(product_name, quantity, "", "")
         else:
@@ -7737,7 +7779,7 @@ async def send_admin_cha_order_file(
             await answer_callback_query_safely(query, "正在发送文件…")
         if not downloaded_files:
             raise SupplierApiError("no delivery files available")
-        if isinstance(supplier, DaxiSupplierClient) and len(downloaded_files) > 1:
+        if isinstance(supplier, DaxiSupplierClient) and should_bundle_delivery_files(downloaded_files):
             send_path = await call_blocking(build_delivery_bundle, str(fresh_order.get("task_id") or ""), downloaded_files)
             send_name = delivery_display_filename(product_name, quantity, "", "")
         else:

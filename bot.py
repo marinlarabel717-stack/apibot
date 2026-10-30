@@ -352,8 +352,8 @@ UI_TEXTS.update(
         "legacy_supplier_closed_set_notice": {"zh": "旧接口已关闭，请使用账号列表2。", "en": "Legacy supplier is disabled. Please use Account List 2."},
         "legacy_supplier_disabled_notice": {"zh": "旧接口已暂停，请使用账号列表2。", "en": "Legacy supplier is unavailable. Please use Account List 2."},
         "account_list_2_intro": {
-            "zh": "这是账号列表2，当前已接入大喜 API。我已按区号和国家帮你整理成分类，请先选择分类：",
-            "en": "This is Account List 2 powered by the Daxi API. Products are grouped locally by prefix and country. Please choose a category first:",
+            "zh": "账号列表2 已按类型整理成分类，请先选择分类：",
+            "en": "Account List 2 is organized by type. Please choose a category first:",
         },
         "account_list_2_products_intro": {"zh": "账号列表2 当前分类：{category_name}", "en": "Account List 2 current category: {category_name}"},
         "no_categories_in_account_list_2": {"zh": "账号列表2 当前没有可用分类。", "en": "Account List 2 has no categories right now."},
@@ -1824,6 +1824,11 @@ def translate_category_name(name: str, lang: str) -> str:
         translated = translated.replace(source, target)
     for pattern, target in DISPLAY_NAME_REGEX_TRANSLATIONS:
         translated = pattern.sub(target, translated)
+    translated = translated.replace("普通新号", "Fresh Number")
+    translated = translated.replace("普通号", "Fresh Number")
+    translated = translated.replace("新号", "Fresh Number")
+    translated = re.sub(r"(\d+)\s*-\s*(\d+)\s*(?:个)?月", lambda m: f"{m.group(1)}-{m.group(2)} Months", translated)
+    translated = re.sub(r"(\d+)\s*年", lambda m: f"{m.group(1)} Year" if m.group(1) == "1" else f"{m.group(1)} Years", translated)
     translated = re.sub(r"Fancy Number(?=[A-Za-z0-9])", "Fancy Number ", translated)
     translated = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", translated)
     return " ".join(translated.split())
@@ -4343,6 +4348,15 @@ def build_daxi_virtual_category_name(row: dict[str, Any]) -> str:
     return str(row.get("productName") or row.get("productId") or "未分类").strip()
 
 
+def is_hidden_daxi_product(row: dict[str, Any]) -> bool:
+    exact_hidden_values = {"tgpremium", "tgstars", "premium", "stars"}
+    for key in ("country", "productName", "categoryName", "groupKind", "kind"):
+        normalized = compact_search_text(str(row.get(key) or ""))
+        if normalized in exact_hidden_values:
+            return True
+    return False
+
+
 def build_daxi_category_icon(category_name: str, category_key: str = "") -> str:
     name = compact_search_text(f"{category_key} {category_name}")
     icon_rules = [
@@ -4548,15 +4562,16 @@ def build_country_flag_emoji(country_name: str) -> str:
 def format_daxi_product_button_name(row: dict[str, Any], lang: str) -> str:
     prefix = str(row.get("prefix") or "").strip()
     country = str(row.get("country") or "").strip()
+    country_label = translate_category_name(country, lang)
     product_name = translate_product_name(str(row.get("productName") or row.get("productId") or "商品"), lang)
     flag = build_country_flag_emoji(country)
-    base_name = " ".join(part for part in [flag, prefix, country] if part).strip()
+    base_name = " ".join(part for part in [flag, prefix, country_label] if part).strip()
     return base_name or product_name
 
 
 def format_daxi_product_title(row: dict[str, Any], lang: str) -> str:
     base_name = format_daxi_product_button_name(row, lang)
-    kind = str(row.get("kind") or "").strip()
+    kind = translate_category_name(str(row.get("kind") or "").strip(), lang)
     if kind and kind not in base_name:
         return f"{base_name} {kind}".strip()
     return base_name
@@ -4723,7 +4738,11 @@ async def fetch_daxi_products(
     if cached and now - cached[0] < CATEGORY_CACHE_TTL_SECONDS:
         return cached[1]
     payload = await call_blocking(supplier.get_products, normalized_query)
-    rows = [normalize_daxi_product_row(row) for row in (payload.get("data") or [])]
+    rows = [
+        normalized_row
+        for normalized_row in (normalize_daxi_product_row(row) for row in (payload.get("data") or []))
+        if not is_hidden_daxi_product(normalized_row)
+    ]
     DAXI_PRODUCTS_CACHE[cache_key] = (now, rows)
     return rows
 

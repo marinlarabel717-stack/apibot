@@ -69,6 +69,7 @@ DAXI_PRODUCT_DETAIL_CACHE: dict[tuple[int, str], tuple[float, dict[str, Any]]] =
 
 
 PRODUCTS_PER_PAGE = 30
+DAXI_CATEGORYS_PER_PAGE = 20
 SEARCH_RESULTS_LIMIT = 8
 BROADCAST_PROGRESS_UPDATE_EVERY = 10
 ASSETS_DIR = Path(__file__).resolve().parent / "assets"
@@ -338,9 +339,11 @@ UI_TEXTS.update(
         "legacy_supplier_closed_set_notice": {"zh": "旧接口已关闭，请使用账号列表2。", "en": "Legacy supplier is disabled. Please use Account List 2."},
         "legacy_supplier_disabled_notice": {"zh": "旧接口已暂停，请使用账号列表2。", "en": "Legacy supplier is unavailable. Please use Account List 2."},
         "account_list_2_intro": {
-            "zh": "这是账号列表2，当前已接入大喜 API。这套接口没有分类页，下面直接显示商品列表：",
-            "en": "This is Account List 2 powered by the Daxi API. This API has no category endpoint, so products are shown directly below:",
+            "zh": "这是账号列表2，当前已接入大喜 API。我已按区号和国家帮你整理成分类，请先选择分类：",
+            "en": "This is Account List 2 powered by the Daxi API. Products are grouped locally by prefix and country. Please choose a category first:",
         },
+        "account_list_2_products_intro": {"zh": "账号列表2 当前分类：{category_name}", "en": "Account List 2 current category: {category_name}"},
+        "no_categories_in_account_list_2": {"zh": "账号列表2 当前没有可用分类。", "en": "Account List 2 has no categories right now."},
     }
 )
 CATEGORY_NAME_TRANSLATIONS: list[tuple[str, str]] = [
@@ -4152,9 +4155,44 @@ def render_product_detail_view_configured(
     return text, entities, build_product_detail_keyboard(product_id, category_id, page)
 
 
+def build_daxi_category_keyboard_localized(
+    groups: list[dict[str, Any]],
+    page: int,
+    lang: str,
+) -> InlineKeyboardMarkup:
+    total_pages = max(1, (len(groups) + DAXI_CATEGORYS_PER_PAGE - 1) // DAXI_CATEGORYS_PER_PAGE)
+    page = max(0, min(page, total_pages - 1))
+    start = page * DAXI_CATEGORYS_PER_PAGE
+    page_groups = groups[start : start + DAXI_CATEGORYS_PER_PAGE]
+    buttons: list[list[InlineKeyboardButton]] = []
+    for group in page_groups:
+        group_index = safe_int(group.get("index"), 0)
+        category_name = shorten(translate_category_name(str(group.get("name") or "未分类"), lang), 26)
+        stock_total = max(0, safe_int(group.get("stock_total"), 0))
+        category_icon = str(group.get("icon") or "📦")
+        buttons.append(
+            [
+                plain_catalog_button(
+                    f"{category_icon} {category_name} 可用 [{stock_total}]",
+                    f"cat2:{group_index}:0",
+                )
+            ]
+        )
+    nav_row: list[InlineKeyboardButton] = []
+    if page > 0:
+        nav_row.append(InlineKeyboardButton(ui_text("previous_page", lang), callback_data=f"cats2:{page - 1}"))
+    nav_row.append(InlineKeyboardButton(f"{page + 1}/{total_pages}", callback_data=f"cats2:{page}"))
+    if page < total_pages - 1:
+        nav_row.append(InlineKeyboardButton(ui_text("next_page", lang), callback_data=f"cats2:{page + 1}"))
+    buttons.append(nav_row)
+    buttons.append([premium_inline_button(ui_text("button_main_menu", lang), "nav:menu", HOME_EMOJI_ID)])
+    return InlineKeyboardMarkup(buttons)
+
+
 def build_daxi_product_keyboard_localized(
     settings: Settings,
     rows: list[dict[str, Any]],
+    category_index: int,
     page: int,
     lang: str,
 ) -> InlineKeyboardMarkup:
@@ -4165,47 +4203,52 @@ def build_daxi_product_keyboard_localized(
     buttons: list[list[InlineKeyboardButton]] = []
     for row in page_rows:
         product_id = str(row.get("productId") or "").strip()
-        product_name = shorten(translate_product_name(str(row.get("productName") or product_id or "商品"), lang), 28)
+        product_name = shorten(format_daxi_product_button_name(row, lang), 28)
         stock = safe_int(row.get("totalStock"))
         price = resolve_sell_price(settings, row)
         buttons.append(
             [
                 plain_catalog_button(
                     ui_text("product_row_price", lang, name=product_name, stock=stock, price=f"{price:.2f}"),
-                    f"prd2:{product_id}:{page}",
+                    f"prd2:{product_id}:{category_index}:{page}",
                 )
             ]
         )
     nav_row: list[InlineKeyboardButton] = []
     if page > 0:
-        nav_row.append(InlineKeyboardButton(ui_text("previous_page", lang), callback_data=f"cat2:{page - 1}"))
-    nav_row.append(InlineKeyboardButton(f"{page + 1}/{total_pages}", callback_data=f"cat2:{page}"))
+        nav_row.append(InlineKeyboardButton(ui_text("previous_page", lang), callback_data=f"cat2:{category_index}:{page - 1}"))
+    nav_row.append(InlineKeyboardButton(f"{page + 1}/{total_pages}", callback_data=f"cat2:{category_index}:{page}"))
     if page < total_pages - 1:
-        nav_row.append(InlineKeyboardButton(ui_text("next_page", lang), callback_data=f"cat2:{page + 1}"))
+        nav_row.append(InlineKeyboardButton(ui_text("next_page", lang), callback_data=f"cat2:{category_index}:{page + 1}"))
     buttons.append(nav_row)
-    buttons.append([premium_inline_button(ui_text("button_main_menu", lang), "nav:menu", HOME_EMOJI_ID)])
+    buttons.append(
+        [
+            premium_inline_button(ui_text("button_main_menu", lang), "nav:menu", HOME_EMOJI_ID),
+            premium_inline_button(ui_text("back_account_list_2", lang), "cats2:0", BACK_EMOJI_ID),
+        ]
+    )
     return InlineKeyboardMarkup(buttons)
 
 
-def build_daxi_product_detail_keyboard_localized(product_id: str, page: int, lang: str) -> InlineKeyboardMarkup:
+def build_daxi_product_detail_keyboard_localized(product_id: str, category_index: int, page: int, lang: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
-            [premium_inline_button(ui_text("confirm_purchase", lang), f"qbuy2:{product_id}:{page}", BUY_BUTTON_EMOJI_ID)],
+            [premium_inline_button(ui_text("confirm_purchase", lang), f"qbuy2:{product_id}:{category_index}:{page}", BUY_BUTTON_EMOJI_ID)],
             [
                 premium_inline_button(ui_text("button_main_menu", lang), "nav:menu", HOME_EMOJI_ID),
-                premium_inline_button(ui_text("back_account_list_2", lang), f"cat2:{page}", BACK_EMOJI_ID),
+                premium_inline_button(ui_text("back_account_list_2", lang), f"cat2:{category_index}:{page}", BACK_EMOJI_ID),
             ],
         ]
     )
 
 
-def build_daxi_purchase_confirm_keyboard_localized(product_id: str, quantity: int, page: int, lang: str) -> InlineKeyboardMarkup:
+def build_daxi_purchase_confirm_keyboard_localized(product_id: str, quantity: int, category_index: int, page: int, lang: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
-            [premium_inline_button(ui_text("confirm_purchase", lang), f"cbuy2:{product_id}:{quantity}", BUY_BUTTON_EMOJI_ID)],
+            [premium_inline_button(ui_text("confirm_purchase", lang), f"cbuy2:{product_id}:{quantity}:{category_index}:{page}", BUY_BUTTON_EMOJI_ID)],
             [
                 premium_inline_button(ui_text("button_main_menu", lang), "nav:menu", HOME_EMOJI_ID),
-                premium_inline_button(ui_text("back_product", lang), f"prd2:{product_id}:{page}", BACK_EMOJI_ID),
+                premium_inline_button(ui_text("back_product", lang), f"prd2:{product_id}:{category_index}:{page}", BACK_EMOJI_ID),
             ],
         ]
     )
@@ -4224,14 +4267,28 @@ def build_daxi_products_intro_text_localized(lang: str) -> tuple[str, tuple[Mess
     )
 
 
+def build_daxi_products_group_intro_text_localized(category_name: str, lang: str) -> tuple[str, tuple[MessageEntity, ...]]:
+    return build_text_with_custom_emoji(
+        [
+            ("📂", MAIN_MENU_EMOJI_ACCOUNT_LIST_ID),
+            (f" {ui_text('account_list_2_products_intro', lang, category_name=category_name)}\n\n", None),
+            ("🛍", PRODUCT_LIST_EMOJI_ID),
+            (f" {ui_text('first_buy_notice', lang)}\n", None),
+            ("❗️", PRODUCT_LIST_ALERT_EMOJI_ID),
+            (f" {ui_text('buy_test_notice', lang)}", None),
+        ]
+    )
+
+
 def render_daxi_product_detail_view_localized(
     settings: Settings,
     row: dict[str, Any],
+    category_index: int,
     page: int,
     lang: str,
 ) -> tuple[str, tuple[MessageEntity, ...], InlineKeyboardMarkup]:
     product_id = str(row.get("productId") or "").strip()
-    product_name = str(row.get("productName") or product_id or "商品")
+    product_name = format_daxi_product_title(row, lang) or str(row.get("productName") or product_id or "商品")
     sell_price = resolve_sell_price(settings, row)
     text, entities = build_product_detail_text_localized(
         product_name,
@@ -4239,12 +4296,166 @@ def render_daxi_product_detail_view_localized(
         safe_int(row.get("totalStock")),
         lang,
     )
-    return text, entities, build_daxi_product_detail_keyboard_localized(product_id, page, lang)
+    return text, entities, build_daxi_product_detail_keyboard_localized(product_id, category_index, page, lang)
+
+
+def build_daxi_virtual_category_name(row: dict[str, Any]) -> str:
+    kind = str(row.get("kind") or "").strip()
+    if kind:
+        return kind
+    prefix = str(row.get("prefix") or "").strip()
+    country = str(row.get("country") or "").strip()
+    name = " ".join(part for part in [prefix, country] if part).strip()
+    if name:
+        return name
+    return str(row.get("productName") or row.get("productId") or "未分类").strip()
+
+
+def build_daxi_category_icon(category_name: str) -> str:
+    name = compact_search_text(category_name)
+    icon_rules = [
+        (("普通", "新号"), "📱"),
+        (("1月", "1-3", "1~3"), "🌱"),
+        (("6月", "6-12", "6~12"), "⭐"),
+        (("1年",), "💎"),
+        (("2年",), "💠"),
+        (("3年",), "🎂"),
+        (("4年",), "🎀"),
+        (("5年",), "🏆"),
+        (("7年",), "🌈"),
+        (("七年",), "🌈"),
+        (("协议",), "💍"),
+        (("双向",), "🔁"),
+        (("会员",), "👑"),
+    ]
+    for keywords, icon in icon_rules:
+        if any(keyword in name for keyword in keywords):
+            return icon
+    return "📦"
+
+
+def build_country_flag_emoji(country_name: str) -> str:
+    normalized = compact_search_text(country_name)
+    country_map = {
+        "美国": "US",
+        "加拿大": "CA",
+        "英国": "GB",
+        "俄罗斯": "RU",
+        "乌克兰": "UA",
+        "德国": "DE",
+        "法国": "FR",
+        "意大利": "IT",
+        "西班牙": "ES",
+        "荷兰": "NL",
+        "波兰": "PL",
+        "葡萄牙": "PT",
+        "巴西": "BR",
+        "墨西哥": "MX",
+        "阿根廷": "AR",
+        "哥伦比亚": "CO",
+        "秘鲁": "PE",
+        "智利": "CL",
+        "日本": "JP",
+        "韩国": "KR",
+        "中国": "CN",
+        "香港": "HK",
+        "台湾": "TW",
+        "澳门": "MO",
+        "印度": "IN",
+        "印度尼西亚": "ID",
+        "印尼": "ID",
+        "菲律宾": "PH",
+        "马来西亚": "MY",
+        "泰国": "TH",
+        "越南": "VN",
+        "新加坡": "SG",
+        "巴基斯坦": "PK",
+        "孟加拉": "BD",
+        "土耳其": "TR",
+        "阿联酋": "AE",
+        "沙特": "SA",
+        "埃及": "EG",
+        "尼日利亚": "NG",
+        "南非": "ZA",
+        "澳大利亚": "AU",
+        "新西兰": "NZ",
+    }
+    country_code = country_map.get(normalized, "")
+    if len(country_code) != 2 or not country_code.isalpha():
+        return ""
+    base = 127397
+    return "".join(chr(base + ord(char.upper())) for char in country_code)
+
+
+def format_daxi_product_button_name(row: dict[str, Any], lang: str) -> str:
+    prefix = str(row.get("prefix") or "").strip()
+    country = str(row.get("country") or "").strip()
+    product_name = translate_product_name(str(row.get("productName") or row.get("productId") or "商品"), lang)
+    flag = build_country_flag_emoji(country)
+    base_name = " ".join(part for part in [flag, prefix, country] if part).strip()
+    return base_name or product_name
+
+
+def format_daxi_product_title(row: dict[str, Any], lang: str) -> str:
+    base_name = format_daxi_product_button_name(row, lang)
+    kind = str(row.get("kind") or "").strip()
+    if kind and kind not in base_name:
+        return f"{base_name} {kind}".strip()
+    return base_name
+
+
+def group_daxi_products(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        category_name = build_daxi_virtual_category_name(row)
+        grouped.setdefault(category_name, []).append(row)
+    ordered_names = sorted(grouped.keys(), key=compact_search_text)
+    groups: list[dict[str, Any]] = []
+    for index, name in enumerate(ordered_names):
+        items = sorted(
+            grouped[name],
+            key=lambda item: (
+                compact_search_text(str(item.get("kind") or "")),
+                compact_search_text(str(item.get("productName") or "")),
+            ),
+        )
+        groups.append(
+            {
+                "index": index,
+                "name": name,
+                "icon": build_daxi_category_icon(name),
+                "rows": items,
+                "product_count": len(items),
+                "stock_total": sum(max(0, safe_int(item.get("totalStock"), 0)) for item in items),
+            }
+        )
+    return groups
+
+
+async def show_daxi_categories(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    page: int = 0,
+) -> None:
+    supplier = get_daxi_supplier(context)
+    lang = await ensure_user_with_lang(context, update.effective_user)
+    try:
+        rows = await fetch_daxi_products(supplier)
+    except SupplierApiError as exc:
+        await reply_inline(update, ui_text("fetch_account_list_2_failed", lang, error=exc))
+        return
+    groups = group_daxi_products(rows)
+    if not groups:
+        await reply_inline(update, ui_text("no_categories_in_account_list_2", lang))
+        return
+    text, entities = build_daxi_products_intro_text_localized(lang)
+    await reply_inline(update, text, build_daxi_category_keyboard_localized(groups, page, lang), entities=entities)
 
 
 async def show_daxi_products(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
+    category_index: int,
     page: int = 0,
 ) -> None:
     settings, _, _ = get_services(context)
@@ -4255,11 +4466,26 @@ async def show_daxi_products(
     except SupplierApiError as exc:
         await reply_inline(update, ui_text("fetch_account_list_2_failed", lang, error=exc))
         return
-    if not rows:
+    groups = group_daxi_products(rows)
+    if not groups:
+        await reply_inline(update, ui_text("no_categories_in_account_list_2", lang))
+        return
+    if category_index < 0 or category_index >= len(groups):
+        await show_daxi_categories(update, context, 0)
+        return
+    group = groups[category_index]
+    category_name = translate_category_name(str(group.get("name") or "未分类"), lang)
+    group_rows = list(group.get("rows") or [])
+    if not group_rows:
         await reply_inline(update, ui_text("no_products_in_account_list_2", lang))
         return
-    text, entities = build_daxi_products_intro_text_localized(lang)
-    await reply_inline(update, text, build_daxi_product_keyboard_localized(settings, rows, page, lang), entities=entities)
+    text, entities = build_daxi_products_group_intro_text_localized(category_name, lang)
+    await reply_inline(
+        update,
+        text,
+        build_daxi_product_keyboard_localized(settings, group_rows, category_index, page, lang),
+        entities=entities,
+    )
 
 
 async def fetch_categories(supplier: SupplierClient) -> list[dict[str, Any]]:
@@ -7443,7 +7669,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             await show_categories(update, context)
             return
         if target == "cats2":
-            await show_daxi_products(update, context, 0)
+            await show_daxi_categories(update, context, 0)
             return
         if target == "menu":
             await show_start_menu(update, context)
@@ -7538,10 +7764,21 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await show_products(update, context, category_id, page)
         return
 
-    if action == "cat2" and len(parts) == 2:
+    if action == "cats2" and len(parts) == 2:
         clear_pending_purchase(context)
         page = safe_int(parts[1], 0)
-        await show_daxi_products(update, context, page)
+        await show_daxi_categories(update, context, page)
+        return
+
+    if action == "cat2" and len(parts) == 3:
+        clear_pending_purchase(context)
+        category_index = safe_int(parts[1], -1)
+        page = safe_int(parts[2], 0)
+        if category_index < 0:
+            lang = await ensure_user_with_lang(context, update.effective_user)
+            await reply_inline(update, ui_text("category_param_invalid", lang))
+            return
+        await show_daxi_products(update, context, category_index, page)
         return
 
     if action == "prd" and len(parts) == 4:
@@ -7562,12 +7799,13 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await reply_inline(update, text, keyboard, entities=entities)
         return
 
-    if action == "prd2" and len(parts) == 3:
+    if action == "prd2" and len(parts) == 4:
         clear_pending_purchase(context)
         product_id = str(parts[1] or "").strip()
-        page = safe_int(parts[2], 0)
+        category_index = safe_int(parts[2], -1)
+        page = safe_int(parts[3], 0)
         lang = await ensure_user_with_lang(context, update.effective_user)
-        if not product_id:
+        if not product_id or category_index < 0:
             await reply_inline(update, ui_text("product_param_invalid", lang))
             return
         try:
@@ -7575,7 +7813,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         except SupplierApiError as exc:
             await reply_inline(update, ui_text("fetch_product_detail_failed", lang, error=exc))
             return
-        text, entities, keyboard = render_daxi_product_detail_view_localized(settings, row, page, lang)
+        text, entities, keyboard = render_daxi_product_detail_view_localized(settings, row, category_index, page, lang)
         await reply_inline(update, text, keyboard, entities=entities)
         return
 
@@ -7591,14 +7829,15 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await reply_inline(update, ui_text("quick_buy_prompt", lang))
         return
 
-    if action == "qbuy2" and len(parts) == 3:
+    if action == "qbuy2" and len(parts) == 4:
         product_id = str(parts[1] or "").strip()
-        page = safe_int(parts[2], 0)
+        category_index = safe_int(parts[2], -1)
+        page = safe_int(parts[3], 0)
         lang = await ensure_user_with_lang(context, update.effective_user)
-        if not product_id:
+        if not product_id or category_index < 0:
             await reply_inline(update, ui_text("quick_buy_param_invalid", lang))
             return
-        set_pending_purchase(context, product_id, 0, page, source=DAXI_SOURCE)
+        set_pending_purchase(context, product_id, category_index, page, source=DAXI_SOURCE)
         await reply_inline(update, ui_text("quick_buy_prompt", lang))
         return
 
@@ -7638,13 +7877,14 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             )
         return
 
-    if action == "cbuy2" and len(parts) == 3:
+    if action == "cbuy2" and len(parts) == 5:
         clear_pending_purchase(context)
         user = update.effective_user
         product_id = str(parts[1] or "").strip()
         quantity = safe_int(parts[2], 0)
+        category_index = safe_int(parts[3], -1)
         lang = await ensure_user_with_lang(context, user)
-        if user is None or not product_id or quantity <= 0:
+        if user is None or not product_id or quantity <= 0 or category_index < 0:
             await reply_inline(update, ui_text("quick_buy_param_invalid", lang))
             return
         await answer_callback_query_safely(query, ui_text("creating_order", lang))
@@ -7716,7 +7956,7 @@ async def route_menu_text(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if button_matches(text, "button_account_list_2"):
         clear_pending_purchase(context)
         clear_pending_recharge(context)
-        await show_daxi_products(update, context, 0)
+        await show_daxi_categories(update, context, 0)
         return
     if button_matches(text, "button_main_menu", "bottom_main_menu"):
         clear_pending_purchase(context)
@@ -7836,11 +8076,14 @@ async def search_text_rich(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         except SupplierApiError as exc:
             await update.message.reply_text(ui_text("fetch_product_detail_failed", lang, error=exc), reply_markup=build_menu_keyboard(lang))
             return
-        product_name = str(row.get("productName") or f"商品 {product_id}")
+        if source == DAXI_SOURCE:
+            product_name = format_daxi_product_title(row, lang) or str(row.get("productName") or f"商品 {product_id}")
+        else:
+            product_name = str(row.get("productName") or f"商品 {product_id}")
         unit_price = resolve_sell_price(settings, row)
         caption, caption_entities = build_purchase_confirm_text_localized(product_name, unit_price, quantity, lang)
         if source == DAXI_SOURCE:
-            keyboard = build_daxi_purchase_confirm_keyboard_localized(str(product_id), quantity, page, lang)
+            keyboard = build_daxi_purchase_confirm_keyboard_localized(str(product_id), quantity, category_id, page, lang)
         else:
             keyboard = build_purchase_confirm_keyboard_localized(product_id, quantity, category_id, page, lang)
         if PURCHASE_CONFIRM_IMAGE_PATH.exists():

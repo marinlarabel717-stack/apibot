@@ -11,6 +11,7 @@ import re
 import threading
 import time
 import urllib.parse
+import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, ROUND_DOWN
@@ -2720,13 +2721,21 @@ def build_client_out_order_id(user_id: int, product_id: Any) -> str:
     return f"tg-{int(user_id)}-{int(time.time() * 1000)}-{product_token}"
 
 
-def delivery_storage_filename(task_id: str, file_url: str) -> str:
-    parsed = urlparse(file_url)
-    candidate = Path(unquote(parsed.path)).name.strip()
+def delivery_file_suffix(file_url: str, file_name: str = "") -> str:
+    candidate = Path(str(file_name or "").strip()).name.strip()
+    if not candidate:
+        parsed = urlparse(file_url)
+        candidate = Path(unquote(parsed.path)).name.strip()
     suffix = Path(candidate).suffix.lower()
     if not suffix:
         suffix = ".zip"
-    return f"{task_id}{suffix}"
+    return suffix
+
+
+def delivery_storage_filename(task_id: str, file_url: str, file_name: str = "", index: int = 0) -> str:
+    suffix = delivery_file_suffix(file_url, file_name)
+    suffix_token = f"-{index}" if index > 0 else ""
+    return f"{task_id}{suffix_token}{suffix}"
 
 
 def sanitize_delivery_name(value: str) -> str:
@@ -2735,18 +2744,25 @@ def sanitize_delivery_name(value: str) -> str:
     return cleaned or "商品"
 
 
-def delivery_display_filename(product_name: str, quantity: int, file_url: str) -> str:
-    parsed = urlparse(file_url)
-    candidate = Path(unquote(parsed.path)).name.strip()
-    suffix = Path(candidate).suffix.lower()
-    if not suffix:
-        suffix = ".zip"
+def delivery_display_filename(product_name: str, quantity: int, file_url: str, file_name: str = "") -> str:
+    candidate = Path(str(file_name or "").strip()).name.strip()
+    if candidate:
+        stem = sanitize_delivery_name(Path(candidate).stem)
+        suffix = delivery_file_suffix(file_url, file_name)
+        return f"{stem}{suffix}"
+    suffix = delivery_file_suffix(file_url, file_name)
     return f"{sanitize_delivery_name(product_name)}-{max(int(quantity), 0)}{suffix}"
 
 
-def download_delivery_file(supplier: SupplierClient, task_id: str, file_url: str) -> Path:
+def download_delivery_file(
+    supplier: SupplierClient,
+    task_id: str,
+    file_url: str,
+    file_name: str = "",
+    index: int = 0,
+) -> Path:
     DELIVERY_FILES_DIR.mkdir(parents=True, exist_ok=True)
-    target_path = DELIVERY_FILES_DIR / delivery_storage_filename(task_id, file_url)
+    target_path = DELIVERY_FILES_DIR / delivery_storage_filename(task_id, file_url, file_name, index)
     if target_path.exists() and target_path.stat().st_size > 0:
         return target_path
 
@@ -2790,13 +2806,70 @@ def is_delivery_file_url_expired(file_url: str, now: datetime | None = None) -> 
 
 
 def extract_daxi_file_url(payload: dict[str, Any]) -> str:
+    files = extract_daxi_files(payload)
+    if files:
+        return str(files[0].get("download_url") or "").strip()
+    return ""
+
+
+def extract_daxi_files(payload: dict[str, Any]) -> list[dict[str, str]]:
     data = payload.get("data") or {}
     files = data.get("files") or []
+    results: list[dict[str, str]] = []
     for row in files:
         file_url = str((row or {}).get("downloadUrl") or "").strip()
         if file_url:
-            return file_url
-    return ""
+            results.append(
+                {
+                    "download_url": file_url,
+                    "file_name": str((row or {}).get("fileName") or "").strip(),
+                }
+            )
+    return results
+
+
+def parse_order_raw_payload(order_row: dict[str, Any]) -> dict[str, Any]:
+    raw_payload = order_row.get("raw_payload")
+    if isinstance(raw_payload, dict):
+        return raw_payload
+    raw_text = str(raw_payload or "").strip()
+    if not raw_text:
+        return {}
+    try:
+        parsed = json.loads(raw_text)
+    except json.JSONDecodeError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def build_delivery_entries(order_row: dict[str, Any], supplier: SupplierClient) -> list[dict[str, str]]:
+    file_url = str(order_row.get("file_url") or "").strip()
+    if isinstance(supplier, DaxiSupplierClient):
+        payload = parse_order_raw_payload(order_row)
+        files = extract_daxi_files(payload)
+        if files:
+            return files
+    return [{"download_url": file_url, "file_name": ""}] if file_url else []
+
+
+def build_delivery_bundle_path(task_id: str) -> Path:
+    DELIVERY_FILES_DIR.mkdir(parents=True, exist_ok=True)
+    return DELIVERY_FILES_DIR / f"{task_id}-bundle.zip"
+
+
+def build_delivery_bundle(task_id: str, downloaded_files: list[dict[str, Any]]) -> Path:
+    bundle_path = build_delivery_bundle_path(task_id)
+    with zipfile.ZipFile(bundle_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        used_names: set[str] = set()
+        for index, item in enumerate(downloaded_files, start=1):
+            path = Path(item["path"])
+            preferred_name = delivery_display_filename("", 0, "", str(item.get("file_name") or path.name))
+            archive_name = preferred_name or path.name
+            if archive_name in used_names:
+                archive_name = f"{Path(archive_name).stem}-{index}{Path(archive_name).suffix}"
+            used_names.add(archive_name)
+            archive.write(path, arcname=archive_name)
+    return bundle_path
 
 
 async def refresh_delivery_file_url(
@@ -2833,11 +2906,11 @@ async def refresh_delivery_file_url(
     return await call_blocking(store.update_order_delivery_file, task_id, file_url, payload)
 
 
-async def download_delivery_file_with_refresh(
+async def download_delivery_files_with_refresh(
     context: ContextTypes.DEFAULT_TYPE,
     supplier: SupplierClient,
     order_row: dict[str, Any],
-) -> tuple[Path, dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     task_id = str(order_row.get("task_id") or "").strip()
     file_url = str(order_row.get("file_url") or "").strip()
     current_order = order_row
@@ -2849,8 +2922,24 @@ async def download_delivery_file_with_refresh(
             file_url = str(current_order.get("file_url") or "").strip()
 
     try:
-        zip_path = await call_blocking(download_delivery_file, supplier, task_id, file_url)
-        return zip_path, current_order
+        delivery_entries = build_delivery_entries(current_order, supplier)
+        downloaded_files = [
+            {
+                "path": await call_blocking(
+                    download_delivery_file,
+                    supplier,
+                    task_id,
+                    str(entry.get("download_url") or "").strip(),
+                    str(entry.get("file_name") or "").strip(),
+                    index,
+                ),
+                "file_name": str(entry.get("file_name") or "").strip(),
+                "file_url": str(entry.get("download_url") or "").strip(),
+            }
+            for index, entry in enumerate(delivery_entries, start=1)
+            if str(entry.get("download_url") or "").strip()
+        ]
+        return downloaded_files, current_order
     except requests.HTTPError as exc:
         status_code = getattr(getattr(exc, "response", None), "status_code", None)
         if status_code != 403:
@@ -2861,8 +2950,24 @@ async def download_delivery_file_with_refresh(
             raise
         current_order = refreshed_row
         file_url = str(current_order.get("file_url") or "").strip()
-        zip_path = await call_blocking(download_delivery_file, supplier, task_id, file_url)
-        return zip_path, current_order
+        delivery_entries = build_delivery_entries(current_order, supplier)
+        downloaded_files = [
+            {
+                "path": await call_blocking(
+                    download_delivery_file,
+                    supplier,
+                    task_id,
+                    str(entry.get("download_url") or "").strip(),
+                    str(entry.get("file_name") or "").strip(),
+                    index,
+                ),
+                "file_name": str(entry.get("file_name") or "").strip(),
+                "file_url": str(entry.get("download_url") or "").strip(),
+            }
+            for index, entry in enumerate(delivery_entries, start=1)
+            if str(entry.get("download_url") or "").strip()
+        ]
+        return downloaded_files, current_order
 
 
 async def deliver_order_file(
@@ -2892,7 +2997,7 @@ async def deliver_order_file(
     product_name = str(order_row.get("product_name") or f"商品 {order_row.get('product_id')}")
 
     try:
-        zip_path, order_row = await download_delivery_file_with_refresh(context, supplier, order_row)
+        downloaded_files, order_row = await download_delivery_files_with_refresh(context, supplier, order_row)
         file_url = str(order_row.get("file_url") or "").strip()
         ready_photo_sent = str(order_row.get("delivery_ready_sent_at") or "").strip()
         if include_ready_photo and not ready_photo_sent and DELIVERY_READY_IMAGE_PATH.exists():
@@ -2914,18 +3019,32 @@ async def deliver_order_file(
                     connect_timeout=min(media_read_timeout, 30),
                 )
             order_row = await call_blocking(store.mark_order_delivery_ready_sent, task_id) or order_row
-        with zip_path.open("rb") as document_fp:
+        if not downloaded_files:
+            raise SupplierApiError("no delivery files available")
+        if isinstance(supplier, DaxiSupplierClient) and len(downloaded_files) > 1:
+            send_path = await call_blocking(build_delivery_bundle, task_id, downloaded_files)
+            send_name = delivery_display_filename(product_name, quantity, "", "")
+        else:
+            first_file = downloaded_files[0]
+            send_path = Path(first_file["path"])
+            send_name = delivery_display_filename(
+                product_name,
+                quantity,
+                str(first_file.get("file_url") or file_url),
+                str(first_file.get("file_name") or ""),
+            )
+        with send_path.open("rb") as document_fp:
             logger.info(
-                "准备发送订单 zip: task_id=%s user_id=%s size=%s timeout=%ss",
+                "准备发送订单文件: task_id=%s user_id=%s size=%s timeout=%ss",
                 task_id,
                 user_id,
-                zip_path.stat().st_size,
+                send_path.stat().st_size,
                 media_write_timeout,
             )
             await context.bot.send_document(
                 chat_id=user_id,
                 document=document_fp,
-                filename=delivery_display_filename(product_name, quantity, file_url),
+                filename=send_name,
                 reply_markup=MENU_KEYBOARD,
                 write_timeout=media_write_timeout,
                 read_timeout=media_read_timeout,
@@ -4221,7 +4340,7 @@ def build_daxi_product_keyboard_localized(
     buttons: list[list[InlineKeyboardButton]] = []
     for row in page_rows:
         product_id = str(row.get("productId") or "").strip()
-        product_name = shorten(format_daxi_product_button_name(row, lang), 28)
+        product_name = shorten(format_daxi_product_title(row, lang), 28)
         stock = safe_int(row.get("totalStock"))
         price = resolve_sell_price(settings, row)
         buttons.append(
@@ -4355,6 +4474,12 @@ def is_hidden_daxi_product(row: dict[str, Any]) -> bool:
         if normalized in exact_hidden_values:
             return True
     return False
+
+
+def prefer_daxi_upstream_display_name(row: dict[str, Any]) -> bool:
+    category_key = str(row.get("category") or row.get("groupKind") or "").strip().lower()
+    kind_text = str(row.get("kind") or "").strip()
+    return category_key == "weekly_member" or "会员协议号" in kind_text or bool(row.get("memberCategory") or row.get("memberType"))
 
 
 def build_daxi_category_icon(category_name: str, category_key: str = "") -> str:
@@ -4569,8 +4694,35 @@ def format_daxi_product_button_name(row: dict[str, Any], lang: str) -> str:
     return base_name or product_name
 
 
+def extract_daxi_variant_label(row: dict[str, Any], lang: str) -> str:
+    country = str(row.get("country") or "").strip()
+    prefix = str(row.get("prefix") or "").strip()
+    country_label = translate_category_name(country, lang)
+    for field in ("displayKind", "detailKind", "productName"):
+        raw_value = str(row.get(field) or "").strip()
+        if not raw_value:
+            continue
+        translated = translate_product_name(raw_value, lang)
+        variant = re.sub(r"^[^\w+\u4e00-\u9fff]+", "", translated).strip()
+        for token in (prefix, country, country_label):
+            token = str(token or "").strip()
+            if token and variant.startswith(token):
+                variant = variant[len(token) :].strip()
+        variant = variant.lstrip("-_:： ").strip()
+        if variant:
+            return variant
+    return ""
+
+
 def format_daxi_product_title(row: dict[str, Any], lang: str) -> str:
+    if prefer_daxi_upstream_display_name(row):
+        upstream_name = str(row.get("displayKind") or row.get("detailKind") or row.get("productName") or "").strip()
+        if upstream_name:
+            return translate_product_name(upstream_name, lang)
     base_name = format_daxi_product_button_name(row, lang)
+    variant = extract_daxi_variant_label(row, lang)
+    if variant and variant not in base_name:
+        return f"{base_name} {variant}".strip()
     kind = translate_category_name(str(row.get("kind") or "").strip(), lang)
     if kind and kind not in base_name:
         return f"{base_name} {kind}".strip()
@@ -7511,7 +7663,7 @@ async def send_admin_cha_order_file(
         return
     try:
         supplier = get_supplier_for_source(context, str(order_row.get("source") or LEGACY_SOURCE))
-        zip_path, fresh_order = await download_delivery_file_with_refresh(context, supplier, order_row)
+        downloaded_files, fresh_order = await download_delivery_files_with_refresh(context, supplier, order_row)
         quantity = safe_int(fresh_order.get("quantity"))
         product_name = str(fresh_order.get("product_name") or f"商品 {fresh_order.get('product_id')}")
         media_write_timeout = max(20, int(settings.telegram_media_write_timeout_seconds))
@@ -7524,11 +7676,25 @@ async def send_admin_cha_order_file(
         )
         if query is not None:
             await answer_callback_query_safely(query, "正在发送文件…")
-        with zip_path.open("rb") as document_fp:
+        if not downloaded_files:
+            raise SupplierApiError("no delivery files available")
+        if isinstance(supplier, DaxiSupplierClient) and len(downloaded_files) > 1:
+            send_path = await call_blocking(build_delivery_bundle, str(fresh_order.get("task_id") or ""), downloaded_files)
+            send_name = delivery_display_filename(product_name, quantity, "", "")
+        else:
+            first_file = downloaded_files[0]
+            send_path = Path(first_file["path"])
+            send_name = delivery_display_filename(
+                product_name,
+                quantity,
+                str(first_file.get("file_url") or fresh_order.get("file_url") or ""),
+                str(first_file.get("file_name") or ""),
+            )
+        with send_path.open("rb") as document_fp:
             await context.bot.send_document(
                 chat_id=update.effective_user.id if update.effective_user is not None else target_user_id,
                 document=document_fp,
-                filename=delivery_display_filename(product_name, quantity, str(fresh_order.get("file_url") or "")),
+                filename=send_name,
                 caption=caption,
                 write_timeout=media_write_timeout,
                 read_timeout=media_read_timeout,

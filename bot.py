@@ -4986,6 +4986,49 @@ def search_products_locally(rows: list[dict[str, Any]], keyword: str) -> list[di
     return [row for _, _, _, row in scored_rows]
 
 
+def search_daxi_products_locally(rows: list[dict[str, Any]], keyword: str) -> list[dict[str, Any]]:
+    normalized = normalize_search_keyword(keyword)
+    compact_keyword = compact_search_text(normalized)
+    if not compact_keyword:
+        return []
+    code_keyword = compact_keyword[1:] if compact_keyword.startswith("+") else compact_keyword
+
+    scored_rows: list[tuple[int, int, int, str, dict[str, Any]]] = []
+    seen_product_ids: set[str] = set()
+    for row in rows:
+        product_id = str(row.get("productId") or "").strip()
+        if not product_id or product_id in seen_product_ids:
+            continue
+        parts = [
+            str(row.get("productName") or ""),
+            str(row.get("displayKind") or ""),
+            str(row.get("detailKind") or ""),
+            str(row.get("categoryName") or ""),
+            str(row.get("country") or ""),
+            str(row.get("prefix") or ""),
+        ]
+        haystack = compact_search_text(" ".join(part for part in parts if part))
+        if not haystack:
+            continue
+        exact_match = haystack == compact_keyword or haystack == code_keyword
+        prefix_match = haystack.startswith(compact_keyword) or haystack.startswith(code_keyword)
+        contains_match = compact_keyword in haystack or code_keyword in haystack
+        if not (exact_match or prefix_match or contains_match):
+            continue
+        stock = max(0, safe_int(row.get("totalStock")))
+        position = haystack.find(compact_keyword)
+        if position < 0 and code_keyword != compact_keyword:
+            position = haystack.find(code_keyword)
+        if position < 0:
+            position = 9999
+        score = 0 if exact_match else 1 if prefix_match else 2
+        scored_rows.append((score, position, -stock, compact_search_text(str(row.get("productName") or "")), row))
+        seen_product_ids.add(product_id)
+
+    scored_rows.sort(key=lambda item: (item[0], item[1], item[2], item[3]))
+    return [row for _, _, _, _, row in scored_rows]
+
+
 async def search_products_cached(supplier: SupplierClient, keyword: str) -> list[dict[str, Any]]:
     normalized = normalize_search_keyword(keyword)
     cache_key = (id(supplier), normalized)
@@ -8473,10 +8516,10 @@ async def search_text_rich(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         daxi_supplier = get_daxi_supplier(context)
         try:
             all_rows = await fetch_daxi_products(daxi_supplier)
-            rows = await fetch_daxi_products(daxi_supplier, keyword)
         except SupplierApiError as exc:
             await update.message.reply_text(ui_text("search_failed", lang, error=exc))
             return
+        rows = search_daxi_products_locally(all_rows, keyword)
         if not rows:
             await update.message.reply_text(ui_text("search_empty", lang), reply_markup=build_menu_keyboard(lang))
             return

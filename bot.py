@@ -4479,7 +4479,13 @@ def is_hidden_daxi_product(row: dict[str, Any]) -> bool:
 def prefer_daxi_upstream_display_name(row: dict[str, Any]) -> bool:
     category_key = str(row.get("category") or row.get("groupKind") or "").strip().lower()
     kind_text = str(row.get("kind") or "").strip()
-    return category_key == "weekly_member" or "会员协议号" in kind_text or bool(row.get("memberCategory") or row.get("memberType"))
+    if category_key == "weekly_member" or "会员协议号" in kind_text or bool(row.get("memberCategory") or row.get("memberType")):
+        return True
+    for field in ("displayKind", "detailKind", "productName"):
+        raw_value = str(row.get(field) or "").strip()
+        if any(token in raw_value for token in ("（", "）", "(", ")", "【", "】", "[", "]", "可复接", "尝鲜价", "会员", "ID")):
+            return True
+    return False
 
 
 def build_daxi_category_icon(category_name: str, category_key: str = "") -> str:

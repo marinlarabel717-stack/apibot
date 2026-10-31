@@ -71,6 +71,7 @@ DAXI_GROUPS_CACHE: dict[int, tuple[float, list[dict[str, Any]]]] = {}
 RZ_PRODUCTS_CACHE: dict[tuple[int, str], tuple[float, list[dict[str, Any]]]] = {}
 RZ_PRODUCT_DETAIL_CACHE: dict[tuple[int, str], tuple[float, dict[str, Any]]] = {}
 RZ_GROUPS_CACHE: dict[int, tuple[float, list[dict[str, Any]]]] = {}
+CATALOG_WARMUP_TASKS: dict[str, asyncio.Task[Any]] = {}
 
 
 PRODUCTS_PER_PAGE = 30
@@ -5144,16 +5145,15 @@ async def fetch_daxi_products(
 
 async def fetch_daxi_groups(supplier: DaxiSupplierClient) -> list[dict[str, Any]]:
     cache_key = id(supplier)
-    now = time.monotonic()
     cached = DAXI_GROUPS_CACHE.get(cache_key)
-    if cached and now - cached[0] < CATEGORY_CACHE_TTL_SECONDS:
+    if cached:
         return cached[1]
     rows = await fetch_daxi_products(supplier)
     cached = DAXI_GROUPS_CACHE.get(cache_key)
     if cached:
         return cached[1]
     groups = group_daxi_products(rows)
-    DAXI_GROUPS_CACHE[cache_key] = (now, groups)
+    DAXI_GROUPS_CACHE[cache_key] = (time.monotonic(), groups)
     return groups
 
 
@@ -5506,12 +5506,11 @@ async def fetch_rz_products(
 
 async def fetch_rz_groups(supplier: RzSupplierClient, lang: str) -> list[dict[str, Any]]:
     cache_key = id(supplier)
-    now = time.monotonic()
     cached = RZ_GROUPS_CACHE.get(cache_key)
-    if cached and now - cached[0] < CATEGORY_CACHE_TTL_SECONDS:
+    if cached:
         return group_rz_products(cached[1], lang)
     rows = await fetch_rz_products(supplier)
-    RZ_GROUPS_CACHE[cache_key] = (now, rows)
+    RZ_GROUPS_CACHE[cache_key] = (time.monotonic(), rows)
     return group_rz_products(rows, lang)
 
 
@@ -5807,6 +5806,30 @@ async def warm_rz_catalog(context: ContextTypes.DEFAULT_TYPE) -> None:
         logger.exception("rz catalog warmup failed")
 
 
+def ensure_modern_catalog_warmup(context: ContextTypes.DEFAULT_TYPE) -> None:
+    now = time.monotonic()
+    warmups = (
+        ("daxi", get_daxi_supplier(context), DAXI_GROUPS_CACHE, warm_daxi_catalog),
+        ("rz", get_rz_supplier(context), RZ_GROUPS_CACHE, warm_rz_catalog),
+    )
+    for name, supplier, cache_store, warm_func in warmups:
+        cached = cache_store.get(id(supplier))
+        if cached and now - cached[0] < CATEGORY_CACHE_TTL_SECONDS:
+            continue
+        task_key = f"{name}:{id(supplier)}"
+        running = CATALOG_WARMUP_TASKS.get(task_key)
+        if running is not None and not running.done():
+            continue
+
+        async def _runner(key: str, fn: Any) -> None:
+            try:
+                await fn(context)
+            finally:
+                CATALOG_WARMUP_TASKS.pop(key, None)
+
+        CATALOG_WARMUP_TASKS[task_key] = asyncio.create_task(_runner(task_key, warm_func))
+
+
 async def build_main_menu_message(
     context: ContextTypes.DEFAULT_TYPE,
     user: Any,
@@ -6064,6 +6087,8 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     user = update.effective_user
     if user is None:
         return
+    await answer_callback_query_safely(update.callback_query)
+    ensure_modern_catalog_warmup(context)
     text, entities, main_menu_inline = await build_main_menu_message(context, user)
     await reply_inline(update, text, main_menu_inline, entities=entities)
 

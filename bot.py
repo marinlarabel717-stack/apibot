@@ -5118,22 +5118,22 @@ def format_rz_kind_label(kind: str, lang: str) -> str:
 
 
 def build_rz_category_key(row: dict[str, Any]) -> str:
-    section = str(row.get("section") or "").strip().lower()
-    if section:
-        return section
     kind = str(row.get("kind") or row.get("category") or "").strip().lower()
     if kind:
         return kind
+    section = str(row.get("section") or "").strip().lower()
+    if section:
+        return section
     return compact_search_text(str(row.get("productName") or row.get("productId") or "uncategorized"))
 
 
 def build_rz_category_name(row: dict[str, Any], lang: str) -> str:
-    section = str(row.get("section") or "").strip()
-    if section:
-        return translate_category_name(section, lang)
     kind = str(row.get("kind") or row.get("category") or "").strip()
     if kind:
         return format_rz_kind_label(kind, lang)
+    section = str(row.get("section") or "").strip()
+    if section:
+        return translate_category_name(section, lang)
     return str(row.get("productName") or row.get("productId") or "未分类").strip()
 
 

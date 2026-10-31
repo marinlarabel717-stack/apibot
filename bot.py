@@ -94,10 +94,15 @@ DAXI_CATEGORY_SORT_ORDER = {
     "weekly_member": 9,
 }
 RZ_CATEGORY_SORT_ORDER = {
-    "api_country": 0,
-    "aged": 1,
-    "random_id": 2,
-    "random_number": 3,
+    "region_asia": 0,
+    "region_europe": 1,
+    "region_africa": 2,
+    "region_americas": 3,
+    "region_oceania": 4,
+    "api_country": 5,
+    "aged": 6,
+    "random_id": 7,
+    "random_number": 8,
 }
 START_MENU_IMAGE_PATH = ASSETS_DIR / "start-menu.png"
 LEGACY_START_MENU_IMAGE_PATH = PURCHASE_CONFIRM_IMAGE_PATH
@@ -571,6 +576,9 @@ WESTERN_COUNTRY_TRANSLATIONS: list[tuple[str, str]] = [
     ("新西兰", "New Zealand"),
     ("巴布亚新几内亚", "Papua New Guinea"),
 ]
+AMERICAS_COUNTRY_TRANSLATIONS: list[tuple[str, str]] = WESTERN_COUNTRY_TRANSLATIONS[:37]
+EUROPE_COUNTRY_TRANSLATIONS: list[tuple[str, str]] = WESTERN_COUNTRY_TRANSLATIONS[37:82]
+OCEANIA_COUNTRY_TRANSLATIONS: list[tuple[str, str]] = WESTERN_COUNTRY_TRANSLATIONS[82:]
 
 AFRICA_COUNTRY_TRANSLATIONS: list[tuple[str, str]] = [
     ("埃及", "Egypt"),
@@ -5117,8 +5125,45 @@ def format_rz_kind_label(kind: str, lang: str) -> str:
     return translate_category_name(str(kind or "").strip(), lang)
 
 
+def resolve_rz_region_key(row: dict[str, Any]) -> str:
+    country_name = str(row.get("country") or row.get("country_name") or "").strip()
+    normalized = compact_search_text(country_name)
+    if not normalized:
+        return ""
+    region_pairs = (
+        ("asia", ASIA_COUNTRY_TRANSLATIONS),
+        ("europe", EUROPE_COUNTRY_TRANSLATIONS),
+        ("africa", AFRICA_COUNTRY_TRANSLATIONS),
+        ("americas", AMERICAS_COUNTRY_TRANSLATIONS),
+        ("oceania", OCEANIA_COUNTRY_TRANSLATIONS),
+    )
+    for region_key, pairs in region_pairs:
+        for zh_name, en_name in pairs:
+            if normalized in {compact_search_text(zh_name), compact_search_text(en_name)}:
+                return region_key
+    return ""
+
+
+def format_rz_region_label(region_key: str, lang: str) -> str:
+    labels = {
+        "asia": {"zh": "亚洲", "en": "Asia"},
+        "europe": {"zh": "欧洲", "en": "Europe"},
+        "africa": {"zh": "非洲", "en": "Africa"},
+        "americas": {"zh": "美洲", "en": "Americas"},
+        "oceania": {"zh": "大洋洲", "en": "Oceania"},
+    }
+    item = labels.get(str(region_key or "").strip().lower())
+    if item:
+        return item.get(lang, item["zh"])
+    return translate_category_name(str(region_key or "").strip(), lang)
+
+
 def build_rz_category_key(row: dict[str, Any]) -> str:
     kind = str(row.get("kind") or row.get("category") or "").strip().lower()
+    if kind == "api_country":
+        region_key = resolve_rz_region_key(row)
+        if region_key:
+            return f"region_{region_key}"
     if kind:
         return kind
     section = str(row.get("section") or "").strip().lower()
@@ -5129,6 +5174,10 @@ def build_rz_category_key(row: dict[str, Any]) -> str:
 
 def build_rz_category_name(row: dict[str, Any], lang: str) -> str:
     kind = str(row.get("kind") or row.get("category") or "").strip()
+    if str(kind or "").strip().lower() == "api_country":
+        region_key = resolve_rz_region_key(row)
+        if region_key:
+            return format_rz_region_label(region_key, lang)
     if kind:
         return format_rz_kind_label(kind, lang)
     section = str(row.get("section") or "").strip()
@@ -5140,7 +5189,15 @@ def build_rz_category_name(row: dict[str, Any], lang: str) -> str:
 def build_rz_category_icon(row: dict[str, Any]) -> str:
     kind = str(row.get("kind") or row.get("category") or "").strip().lower()
     if kind == "api_country":
-        return "🌍"
+        region_key = resolve_rz_region_key(row)
+        region_icons = {
+            "asia": "🌏",
+            "europe": "🏰",
+            "africa": "🦁",
+            "americas": "🗽",
+            "oceania": "🏝",
+        }
+        return region_icons.get(region_key, "🌍")
     if kind == "aged":
         return "🕰"
     if kind == "random_id":

@@ -223,8 +223,8 @@ UI_TEXTS: dict[str, dict[str, str]] = {
     "virtual_notice": {"zh": "虚拟商品一经发货通常不支持无理由处理，请先看清分类与说明。", "en": "Virtual goods are usually not refundable after delivery. Please confirm the details first."},
         "search_results_title": {"zh": "搜索结果：{keyword}", "en": "Search results: {keyword}"},
         "search_results_hint": {"zh": "点击下面商品按钮查看详情：", "en": "Tap a product below to view details:"},
-        "search_source_account_list_2": {"zh": "列表2", "en": "List 2"},
-        "search_source_account_list_3": {"zh": "列表3", "en": "List 3"},
+        "search_source_account_list_2": {"zh": "列表②", "en": "List 2"},
+        "search_source_account_list_3": {"zh": "列表③", "en": "List 3"},
         "stock_short": {"zh": "库存", "en": "Stock"},
     "buying_product": {"zh": "您正在购买：{product_name}", "en": "You are buying: {product_name}"},
     "price_label": {"zh": "价格：{price} USDT", "en": "Price: {price} USDT"},
@@ -2458,11 +2458,11 @@ def get_supplier_balance_targets(
     settings, _, supplier = get_services(context)
     targets: list[tuple[str, SupplierClient]] = []
     if str(settings.api_base_url or "").strip():
-        targets.append(("账号列表1", supplier))
+        targets.append(("列表①", supplier))
     if str(settings.daxi_api_base_url or "").strip() and str(settings.daxi_api_key or "").strip():
-        targets.append(("列表2", get_daxi_supplier(context)))
+        targets.append(("列表②", get_daxi_supplier(context)))
     if str(settings.rz_api_base_url or "").strip() and str(settings.rz_api_key or "").strip():
-        targets.append(("列表3", get_rz_supplier(context)))
+        targets.append(("列表③", get_rz_supplier(context)))
     return targets
 
 
@@ -9720,11 +9720,11 @@ def get_supplier_balance_targets(
     settings, _, supplier = get_services(context)
     targets: list[tuple[str, SupplierClient]] = []
     if str(settings.api_base_url or "").strip():
-        targets.append(("账号列表1", supplier))
+        targets.append(("列表①", supplier))
     if str(settings.daxi_api_base_url or "").strip() and str(settings.daxi_api_key or "").strip():
-        targets.append(("列表2", get_daxi_supplier(context)))
+        targets.append(("列表②", get_daxi_supplier(context)))
     if str(settings.rz_api_base_url or "").strip() and str(settings.rz_api_key or "").strip():
-        targets.append(("列表3", get_rz_supplier(context)))
+        targets.append(("列表③", get_rz_supplier(context)))
     return targets
 
 

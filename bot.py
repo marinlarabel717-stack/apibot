@@ -48,7 +48,7 @@ from telegram.ext import (
 
 from config import Settings, load_settings
 from store import Store
-from supplier_client import DaxiSupplierClient, SupplierApiError, SupplierClient
+from supplier_client import DaxiSupplierClient, RzSupplierClient, SupplierApiError, SupplierClient
 
 
 logging.basicConfig(
@@ -68,6 +68,9 @@ CATALOG_SEARCH_CACHE: dict[int, tuple[float, list[dict[str, Any]]]] = {}
 DAXI_PRODUCTS_CACHE: dict[tuple[int, str], tuple[float, list[dict[str, Any]]]] = {}
 DAXI_PRODUCT_DETAIL_CACHE: dict[tuple[int, str], tuple[float, dict[str, Any]]] = {}
 DAXI_GROUPS_CACHE: dict[int, tuple[float, list[dict[str, Any]]]] = {}
+RZ_PRODUCTS_CACHE: dict[tuple[int, str], tuple[float, list[dict[str, Any]]]] = {}
+RZ_PRODUCT_DETAIL_CACHE: dict[tuple[int, str], tuple[float, dict[str, Any]]] = {}
+RZ_GROUPS_CACHE: dict[int, tuple[float, list[dict[str, Any]]]] = {}
 
 
 PRODUCTS_PER_PAGE = 30
@@ -89,6 +92,12 @@ DAXI_CATEGORY_SORT_ORDER = {
     "year_5_plus": 7,
     "year_7_plus": 8,
     "weekly_member": 9,
+}
+RZ_CATEGORY_SORT_ORDER = {
+    "api_country": 0,
+    "aged": 1,
+    "random_id": 2,
+    "random_number": 3,
 }
 START_MENU_IMAGE_PATH = ASSETS_DIR / "start-menu.png"
 LEGACY_START_MENU_IMAGE_PATH = PURCHASE_CONFIRM_IMAGE_PATH
@@ -113,6 +122,7 @@ BUTTON_PROFILE = "个人中心"
 BUTTON_RECHARGE = "我要充值"
 BUTTON_ACCOUNT_LIST = "账号列表"
 BUTTON_ACCOUNT_LIST_2 = "账号列表"
+BUTTON_ACCOUNT_LIST_3 = "账号列表3"
 BUTTON_RECHARGE_BALANCE = "充值余额"
 BUTTON_PURCHASE_NOTICE = "购买须知"
 BUTTON_ORDER_HISTORY = "购买记录"
@@ -123,6 +133,7 @@ BUTTON_PROFILE_EN = "Profile"
 BUTTON_RECHARGE_EN = "Recharge"
 BUTTON_ACCOUNT_LIST_EN = "Account List"
 BUTTON_ACCOUNT_LIST_2_EN = "Account List"
+BUTTON_ACCOUNT_LIST_3_EN = "Account List 3"
 BUTTON_RECHARGE_BALANCE_EN = "Balance"
 BUTTON_PURCHASE_NOTICE_EN = "Purchase Notice"
 BUTTON_ORDER_HISTORY_EN = "Order History"
@@ -147,12 +158,14 @@ MENU_BUTTON_TEXTS = {
 LEGACY_MENU_BUTTON_TEXTS = {
     BUTTON_ACCOUNT_LIST,
     BUTTON_ACCOUNT_LIST_2,
+    BUTTON_ACCOUNT_LIST_3,
     BUTTON_RECHARGE_BALANCE,
     BUTTON_PURCHASE_NOTICE,
     BUTTON_ORDER_HISTORY,
     BUTTON_SWITCH_LANGUAGE,
     BUTTON_ACCOUNT_LIST_EN,
     BUTTON_ACCOUNT_LIST_2_EN,
+    BUTTON_ACCOUNT_LIST_3_EN,
     BUTTON_RECHARGE_BALANCE_EN,
     BUTTON_PURCHASE_NOTICE_EN,
     BUTTON_ORDER_HISTORY_EN,
@@ -170,6 +183,8 @@ NON_SEARCH_BUTTON_TEXTS = MENU_BUTTON_TEXTS | LEGACY_MENU_BUTTON_TEXTS | {
 }
 LEGACY_SOURCE = "legacy"
 DAXI_SOURCE = "daxi"
+RZ_SOURCE = "rz"
+MODERN_SOURCE_SET = {DAXI_SOURCE, RZ_SOURCE}
 DEFAULT_LANG = "zh"
 SUPPORTED_LANGS = {"zh", "en"}
 UI_TEXTS: dict[str, dict[str, str]] = {
@@ -179,6 +194,7 @@ UI_TEXTS: dict[str, dict[str, str]] = {
     "button_recharge": {"zh": BUTTON_RECHARGE, "en": BUTTON_RECHARGE_EN},
     "button_account_list": {"zh": BUTTON_ACCOUNT_LIST, "en": BUTTON_ACCOUNT_LIST_EN},
     "button_account_list_2": {"zh": BUTTON_ACCOUNT_LIST_2, "en": BUTTON_ACCOUNT_LIST_2_EN},
+    "button_account_list_3": {"zh": BUTTON_ACCOUNT_LIST_3, "en": BUTTON_ACCOUNT_LIST_3_EN},
     "button_recharge_balance": {"zh": BUTTON_RECHARGE_BALANCE, "en": BUTTON_RECHARGE_BALANCE_EN},
     "button_purchase_notice": {"zh": BUTTON_PURCHASE_NOTICE, "en": BUTTON_PURCHASE_NOTICE_EN},
     "button_order_history": {"zh": BUTTON_ORDER_HISTORY, "en": BUTTON_ORDER_HISTORY_EN},
@@ -269,6 +285,10 @@ UI_TEXTS.update(
         "back_account_list_2": {"zh": "返回账号列表", "en": "Back to Account List"},
         "no_products_in_account_list_2": {"zh": "账号列表当前没有商品。", "en": "Account List has no products right now."},
         "fetch_account_list_2_failed": {"zh": "获取账号列表失败: {error}", "en": "Failed to load Account List: {error}"},
+        "account_list_3_intro": {"zh": "请选择需要的商品：", "en": "Please choose a product:"},
+        "back_account_list_3": {"zh": "返回账号列表3", "en": "Back to Account List 3"},
+        "no_products_in_account_list_3": {"zh": "账号列表3当前没有商品。", "en": "Account List 3 has no products right now."},
+        "fetch_account_list_3_failed": {"zh": "获取账号列表3失败: {error}", "en": "Failed to load Account List 3: {error}"},
         "previous_page": {"zh": "上一页", "en": "Previous"},
         "next_page": {"zh": "下一页", "en": "Next"},
         "no_categories": {"zh": "当前没有分类。", "en": "No categories available right now."},
@@ -362,6 +382,12 @@ UI_TEXTS.update(
         },
         "account_list_2_products_intro": {"zh": "当前分类：{category_name}", "en": "Current category: {category_name}"},
         "no_categories_in_account_list_2": {"zh": "账号列表当前没有可用分类。", "en": "Account List has no categories right now."},
+        "account_list_3_intro": {
+            "zh": "请先选择分类：",
+            "en": "Please choose a category first:",
+        },
+        "account_list_3_products_intro": {"zh": "当前分类：{category_name}", "en": "Current category: {category_name}"},
+        "no_categories_in_account_list_3": {"zh": "账号列表3当前没有可用分类。", "en": "Account List 3 has no categories right now."},
     }
 )
 CATEGORY_NAME_TRANSLATIONS: list[tuple[str, str]] = [
@@ -2773,11 +2799,7 @@ def download_delivery_file(
     temp_path = target_path.with_suffix(target_path.suffix + ".part")
     download_url = supplier.resolve_download_url(file_url)
     download_headers = supplier.build_download_headers()
-    timeout_seconds = (
-        supplier.settings.daxi_api_timeout_seconds
-        if isinstance(supplier, DaxiSupplierClient)
-        else supplier.settings.api_timeout_seconds
-    )
+    timeout_seconds = supplier_request_timeout_seconds(supplier)
     with supplier.session.get(
         download_url,
         headers=download_headers or None,
@@ -2848,7 +2870,7 @@ def parse_order_raw_payload(order_row: dict[str, Any]) -> dict[str, Any]:
 
 def build_delivery_entries(order_row: dict[str, Any], supplier: SupplierClient) -> list[dict[str, str]]:
     file_url = str(order_row.get("file_url") or "").strip()
-    if isinstance(supplier, DaxiSupplierClient):
+    if is_modern_supplier(supplier):
         payload = parse_order_raw_payload(order_row)
         files = extract_daxi_files(payload)
         if files:
@@ -2927,7 +2949,7 @@ async def refresh_delivery_file_url(
     _, store, _ = get_services(context)
     payload = await call_blocking(supplier.query_order, task_id)
     data = payload.get("data") or {}
-    if isinstance(supplier, DaxiSupplierClient):
+    if is_modern_supplier(supplier):
         status = str(data.get("status") or "").strip().lower()
         file_url = extract_daxi_file_url(payload)
         ready = status in {"completed", "partial"} and bool(file_url)
@@ -3067,7 +3089,7 @@ async def deliver_order_file(
             order_row = await call_blocking(store.mark_order_delivery_ready_sent, task_id) or order_row
         if not downloaded_files:
             raise SupplierApiError("no delivery files available")
-        if isinstance(supplier, DaxiSupplierClient) and should_bundle_delivery_files(downloaded_files):
+        if is_modern_supplier(supplier) and should_bundle_delivery_files(downloaded_files):
             send_path = await call_blocking(build_delivery_bundle, task_id, downloaded_files)
             send_name = delivery_display_filename(product_name, quantity, "", "")
         else:
@@ -3829,17 +3851,41 @@ def get_daxi_supplier(context: ContextTypes.DEFAULT_TYPE) -> DaxiSupplierClient:
     return context.application.bot_data["supplier_daxi"]
 
 
+def get_rz_supplier(context: ContextTypes.DEFAULT_TYPE) -> RzSupplierClient:
+    return context.application.bot_data["supplier_rz"]
+
+
 def normalize_order_source(value: Any) -> str:
-    return DAXI_SOURCE if str(value or "").strip().lower() == DAXI_SOURCE else LEGACY_SOURCE
+    normalized = str(value or "").strip().lower()
+    if normalized == DAXI_SOURCE:
+        return DAXI_SOURCE
+    if normalized == RZ_SOURCE:
+        return RZ_SOURCE
+    return LEGACY_SOURCE
 
 
 def get_supplier_for_source(
     context: ContextTypes.DEFAULT_TYPE,
     source: str,
-) -> SupplierClient | DaxiSupplierClient:
-    if normalize_order_source(source) == DAXI_SOURCE:
+) -> SupplierClient | DaxiSupplierClient | RzSupplierClient:
+    normalized = normalize_order_source(source)
+    if normalized == DAXI_SOURCE:
         return get_daxi_supplier(context)
+    if normalized == RZ_SOURCE:
+        return get_rz_supplier(context)
     return get_services(context)[2]
+
+
+def is_modern_supplier(supplier: SupplierClient | DaxiSupplierClient | RzSupplierClient) -> bool:
+    return isinstance(supplier, (DaxiSupplierClient, RzSupplierClient))
+
+
+def supplier_request_timeout_seconds(supplier: SupplierClient | DaxiSupplierClient | RzSupplierClient) -> int:
+    if isinstance(supplier, DaxiSupplierClient):
+        return supplier.settings.daxi_api_timeout_seconds
+    if isinstance(supplier, RzSupplierClient):
+        return supplier.settings.rz_api_timeout_seconds
+    return supplier.settings.api_timeout_seconds
 
 
 async def should_ignore_for_closed_business(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
@@ -3927,6 +3973,9 @@ def build_main_menu_inline(settings: Settings) -> InlineKeyboardMarkup:
             ],
             [
                 build_main_menu_button(settings, BUTTON_ACCOUNT_LIST_2, "nav:cats2", MAIN_MENU_EMOJI_ACCOUNT_LIST_ID, "🧩"),
+                build_main_menu_button(settings, BUTTON_ACCOUNT_LIST_3, "nav:cats3", MAIN_MENU_EMOJI_ACCOUNT_LIST_ID, "🧪"),
+            ],
+            [
                 build_main_menu_button(settings, BUTTON_RECHARGE_BALANCE, "nav:recharge", MAIN_MENU_EMOJI_RECHARGE_BALANCE_ID, "💰"),
             ],
             [
@@ -3946,6 +3995,9 @@ def build_main_menu_inline_localized(settings: Settings, lang: str) -> InlineKey
             ],
             [
                 build_main_menu_button(settings, ui_text("button_account_list_2", lang), "nav:cats2", MAIN_MENU_EMOJI_ACCOUNT_LIST_ID, "🧩"),
+                build_main_menu_button(settings, ui_text("button_account_list_3", lang), "nav:cats3", MAIN_MENU_EMOJI_ACCOUNT_LIST_ID, "🧪"),
+            ],
+            [
                 build_main_menu_button(settings, ui_text("button_recharge_balance", lang), "nav:recharge", MAIN_MENU_EMOJI_RECHARGE_BALANCE_ID, "💰"),
             ],
             [
@@ -3967,6 +4019,9 @@ def build_runtime_main_menu_inline_localized(
             [build_main_menu_button(settings, ui_text("button_account_list", lang), "nav:cats", MAIN_MENU_EMOJI_ACCOUNT_LIST_ID, "📂")],
             [
                 build_main_menu_button(settings, ui_text("button_account_list_2", lang), "nav:cats2", MAIN_MENU_EMOJI_ACCOUNT_LIST_ID, "🧩"),
+                build_main_menu_button(settings, ui_text("button_account_list_3", lang), "nav:cats3", MAIN_MENU_EMOJI_ACCOUNT_LIST_ID, "🧪"),
+            ],
+            [
                 build_main_menu_button(settings, ui_text("button_recharge_balance", lang), "nav:recharge", MAIN_MENU_EMOJI_RECHARGE_BALANCE_ID, "💰"),
             ],
             [
@@ -3979,6 +4034,9 @@ def build_runtime_main_menu_inline_localized(
         rows = [
             [
                 build_main_menu_button(settings, ui_text("button_account_list_2", lang), "nav:cats2", MAIN_MENU_EMOJI_ACCOUNT_LIST_ID, "🧩"),
+                build_main_menu_button(settings, ui_text("button_account_list_3", lang), "nav:cats3", MAIN_MENU_EMOJI_ACCOUNT_LIST_ID, "🧪"),
+            ],
+            [
                 build_main_menu_button(settings, ui_text("button_recharge_balance", lang), "nav:recharge", MAIN_MENU_EMOJI_RECHARGE_BALANCE_ID, "💰"),
             ],
             [
@@ -4994,6 +5052,370 @@ async def fetch_daxi_product_detail_cached(
     return row
 
 
+def format_rz_kind_label(kind: str, lang: str) -> str:
+    labels = {
+        "api_country": {"zh": "国家号", "en": "Country"},
+        "aged": {"zh": "老号", "en": "Aged"},
+        "random_id": {"zh": "随机ID", "en": "Random ID"},
+        "random_number": {"zh": "随机号码", "en": "Random Number"},
+    }
+    item = labels.get(str(kind or "").strip().lower())
+    if item:
+        return item.get(lang, item["zh"])
+    return translate_category_name(str(kind or "").strip(), lang)
+
+
+def build_rz_category_key(row: dict[str, Any]) -> str:
+    section = str(row.get("section") or "").strip().lower()
+    if section:
+        return section
+    kind = str(row.get("kind") or row.get("category") or "").strip().lower()
+    if kind:
+        return kind
+    return compact_search_text(str(row.get("productName") or row.get("productId") or "uncategorized"))
+
+
+def build_rz_category_name(row: dict[str, Any], lang: str) -> str:
+    section = str(row.get("section") or "").strip()
+    if section:
+        return translate_category_name(section, lang)
+    kind = str(row.get("kind") or row.get("category") or "").strip()
+    if kind:
+        return format_rz_kind_label(kind, lang)
+    return str(row.get("productName") or row.get("productId") or "未分类").strip()
+
+
+def build_rz_category_icon(row: dict[str, Any]) -> str:
+    kind = str(row.get("kind") or row.get("category") or "").strip().lower()
+    if kind == "api_country":
+        return "🌍"
+    if kind == "aged":
+        return "🕰"
+    if kind == "random_id":
+        return "🆔"
+    if kind == "random_number":
+        return "🎲"
+    return "📦"
+
+
+def format_rz_product_title(row: dict[str, Any], lang: str) -> str:
+    country = translate_category_name(str(row.get("country") or row.get("country_name") or "").strip(), lang)
+    phone_code = str(row.get("prefix") or row.get("phone_code") or "").strip()
+    section = translate_category_name(str(row.get("section") or "").strip(), lang)
+    kind_label = format_rz_kind_label(str(row.get("kind") or ""), lang)
+    flag = build_country_flag_emoji(country)
+    parts = [flag, country, phone_code]
+    base = " ".join(part for part in parts if part).strip()
+    if not base:
+        base = translate_product_name(str(row.get("productName") or row.get("productId") or "商品"), lang)
+    extras: list[str] = []
+    if section and section not in base:
+        extras.append(section)
+    if kind_label and kind_label not in base and kind_label not in extras:
+        extras.append(kind_label)
+    return " ".join(part for part in [base, *extras] if part).strip()
+
+
+def group_rz_products(rows: list[dict[str, Any]], lang: str) -> list[dict[str, Any]]:
+    grouped: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        category_key = build_rz_category_key(row)
+        bucket = grouped.setdefault(
+            category_key,
+            {
+                "name": build_rz_category_name(row, lang),
+                "icon": build_rz_category_icon(row),
+                "rows": [],
+            },
+        )
+        bucket["rows"].append(row)
+    ordered_keys = sorted(
+        grouped.keys(),
+        key=lambda key: (
+            RZ_CATEGORY_SORT_ORDER.get(key, 999),
+            compact_search_text(str(grouped[key].get("name") or key)),
+        ),
+    )
+    groups: list[dict[str, Any]] = []
+    for index, category_key in enumerate(ordered_keys):
+        items = sorted(
+            list(grouped[category_key].get("rows") or []),
+            key=lambda item: (
+                -max(0, safe_int(item.get("totalStock"), 0)),
+                compact_search_text(str(item.get("country") or "")),
+                compact_search_text(str(item.get("productName") or "")),
+            ),
+        )
+        groups.append(
+            {
+                "index": index,
+                "key": category_key,
+                "name": grouped[category_key].get("name") or category_key,
+                "icon": grouped[category_key].get("icon") or "📦",
+                "rows": items,
+                "product_count": len(items),
+                "stock_total": sum(max(0, safe_int(item.get("totalStock"), 0)) for item in items),
+            }
+        )
+    return groups
+
+
+def build_rz_group_index_map(rows: list[dict[str, Any]], lang: str) -> dict[str, int]:
+    mapping: dict[str, int] = {}
+    for group in group_rz_products(rows, lang):
+        group_index = safe_int(group.get("index"), 0)
+        for row in list(group.get("rows") or []):
+            product_id = str(row.get("productId") or "").strip()
+            if product_id:
+                mapping[product_id] = group_index
+    return mapping
+
+
+def build_rz_category_keyboard_localized(
+    groups: list[dict[str, Any]],
+    page: int,
+    lang: str,
+) -> InlineKeyboardMarkup:
+    total_pages = max(1, (len(groups) + DAXI_CATEGORYS_PER_PAGE - 1) // DAXI_CATEGORYS_PER_PAGE)
+    page = max(0, min(page, total_pages - 1))
+    start = page * DAXI_CATEGORYS_PER_PAGE
+    page_groups = groups[start : start + DAXI_CATEGORYS_PER_PAGE]
+    buttons: list[list[InlineKeyboardButton]] = []
+    for group in page_groups:
+        group_index = safe_int(group.get("index"), 0)
+        category_name = shorten(str(group.get("name") or "未分类"), 26)
+        stock_total = max(0, safe_int(group.get("stock_total"), 0))
+        category_icon = str(group.get("icon") or "📦")
+        buttons.append(
+            [
+                plain_catalog_button(
+                    f"{category_icon} {category_name} 可用 [{stock_total}]",
+                    f"cat3:{group_index}:0",
+                )
+            ]
+        )
+    nav_row: list[InlineKeyboardButton] = []
+    if page > 0:
+        nav_row.append(InlineKeyboardButton(ui_text("previous_page", lang), callback_data=f"cats3:{page - 1}"))
+    nav_row.append(InlineKeyboardButton(f"{page + 1}/{total_pages}", callback_data=f"cats3:{page}"))
+    if page < total_pages - 1:
+        nav_row.append(InlineKeyboardButton(ui_text("next_page", lang), callback_data=f"cats3:{page + 1}"))
+    buttons.append(nav_row)
+    buttons.append([premium_inline_button(ui_text("button_main_menu", lang), "nav:menu", HOME_EMOJI_ID)])
+    return InlineKeyboardMarkup(buttons)
+
+
+def build_rz_product_keyboard_localized(
+    settings: Settings,
+    rows: list[dict[str, Any]],
+    category_index: int,
+    page: int,
+    lang: str,
+) -> InlineKeyboardMarkup:
+    total_pages = max(1, (len(rows) + PRODUCTS_PER_PAGE - 1) // PRODUCTS_PER_PAGE)
+    page = max(0, min(page, total_pages - 1))
+    start = page * PRODUCTS_PER_PAGE
+    page_rows = rows[start : start + PRODUCTS_PER_PAGE]
+    buttons: list[list[InlineKeyboardButton]] = []
+    for row in page_rows:
+        product_id = str(row.get("productId") or "").strip()
+        if not product_id:
+            continue
+        product_name = shorten(format_rz_product_title(row, lang), 28)
+        stock = safe_int(row.get("totalStock"))
+        price = resolve_sell_price(settings, row)
+        buttons.append(
+            [
+                plain_catalog_button(
+                    ui_text("product_row_price", lang, name=product_name, stock=stock, price=f"{price:.2f}"),
+                    f"prd3:{product_id}:{category_index}:{page}",
+                )
+            ]
+        )
+    nav_row: list[InlineKeyboardButton] = []
+    if page > 0:
+        nav_row.append(InlineKeyboardButton(ui_text("previous_page", lang), callback_data=f"cat3:{category_index}:{page - 1}"))
+    nav_row.append(InlineKeyboardButton(f"{page + 1}/{total_pages}", callback_data=f"cat3:{category_index}:{page}"))
+    if page < total_pages - 1:
+        nav_row.append(InlineKeyboardButton(ui_text("next_page", lang), callback_data=f"cat3:{category_index}:{page + 1}"))
+    buttons.append(nav_row)
+    buttons.append(
+        [
+            premium_inline_button(ui_text("button_main_menu", lang), "nav:menu", HOME_EMOJI_ID),
+            premium_inline_button(ui_text("back_account_list_3", lang), "cats3:0", BACK_EMOJI_ID),
+        ]
+    )
+    return InlineKeyboardMarkup(buttons)
+
+
+def build_rz_product_detail_keyboard_localized(product_id: str, category_index: int, page: int, lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [premium_inline_button(ui_text("confirm_purchase", lang), f"qbuy3:{product_id}:{category_index}:{page}", BUY_BUTTON_EMOJI_ID)],
+            [
+                premium_inline_button(ui_text("button_main_menu", lang), "nav:menu", HOME_EMOJI_ID),
+                premium_inline_button(ui_text("back_account_list_3", lang), f"cat3:{category_index}:{page}", BACK_EMOJI_ID),
+            ],
+        ]
+    )
+
+
+def build_rz_purchase_confirm_keyboard_localized(product_id: str, quantity: int, category_index: int, page: int, lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [premium_inline_button(ui_text("confirm_purchase", lang), f"cbuy3:{product_id}:{quantity}:{category_index}:{page}", BUY_BUTTON_EMOJI_ID)],
+            [
+                premium_inline_button(ui_text("button_main_menu", lang), "nav:menu", HOME_EMOJI_ID),
+                premium_inline_button(ui_text("back_product", lang), f"prd3:{product_id}:{category_index}:{page}", BACK_EMOJI_ID),
+            ],
+        ]
+    )
+
+
+def build_rz_products_intro_text_localized(lang: str) -> tuple[str, tuple[MessageEntity, ...]]:
+    return build_text_with_custom_emoji(
+        [
+            ("📦", MAIN_MENU_EMOJI_ACCOUNT_LIST_ID),
+            (f" {ui_text('account_list_3_intro', lang)}\n\n", None),
+            ("🧪", PRODUCT_LIST_EMOJI_ID),
+            (f" {ui_text('first_buy_notice', lang)}\n", None),
+            ("⚠️", PRODUCT_LIST_ALERT_EMOJI_ID),
+            (f" {ui_text('buy_test_notice', lang)}", None),
+        ]
+    )
+
+
+def build_rz_products_group_intro_text_localized(category_name: str, lang: str) -> tuple[str, tuple[MessageEntity, ...]]:
+    return build_text_with_custom_emoji(
+        [
+            ("📦", MAIN_MENU_EMOJI_ACCOUNT_LIST_ID),
+            (f" {ui_text('account_list_3_products_intro', lang, category_name=category_name)}\n\n", None),
+            ("🛍", PRODUCT_LIST_EMOJI_ID),
+            (f" {ui_text('first_buy_notice', lang)}\n", None),
+            ("❗️", PRODUCT_LIST_ALERT_EMOJI_ID),
+            (f" {ui_text('buy_test_notice', lang)}", None),
+        ]
+    )
+
+
+def render_rz_product_detail_view_localized(
+    settings: Settings,
+    row: dict[str, Any],
+    category_index: int,
+    page: int,
+    lang: str,
+) -> tuple[str, tuple[MessageEntity, ...], InlineKeyboardMarkup]:
+    product_id = str(row.get("productId") or "").strip()
+    product_name = format_rz_product_title(row, lang) or str(row.get("productName") or product_id or "商品")
+    sell_price = resolve_sell_price(settings, row)
+    text, entities = build_product_detail_text_localized(
+        product_name,
+        sell_price,
+        safe_int(row.get("totalStock")),
+        lang,
+    )
+    return text, entities, build_rz_product_detail_keyboard_localized(product_id, category_index, page, lang)
+
+
+async def fetch_rz_products(
+    supplier: RzSupplierClient,
+    query: str = "",
+) -> list[dict[str, Any]]:
+    normalized_query = normalize_search_keyword(query)
+    cache_key = (id(supplier), normalized_query)
+    now = time.monotonic()
+    cached = RZ_PRODUCTS_CACHE.get(cache_key)
+    if cached and (now - cached[0] < CATEGORY_CACHE_TTL_SECONDS or not normalized_query):
+        return cached[1]
+    payload = await call_blocking(supplier.get_products, normalized_query)
+    rows = list(payload.get("data") or [])
+    RZ_PRODUCTS_CACHE[cache_key] = (now, rows)
+    return rows
+
+
+async def fetch_rz_groups(supplier: RzSupplierClient, lang: str) -> list[dict[str, Any]]:
+    cache_key = id(supplier)
+    now = time.monotonic()
+    cached = RZ_GROUPS_CACHE.get(cache_key)
+    if cached and now - cached[0] < CATEGORY_CACHE_TTL_SECONDS:
+        return group_rz_products(cached[1], lang)
+    rows = await fetch_rz_products(supplier)
+    RZ_GROUPS_CACHE[cache_key] = (now, rows)
+    return group_rz_products(rows, lang)
+
+
+async def fetch_rz_product_detail_cached(
+    supplier: RzSupplierClient,
+    product_id: str,
+) -> dict[str, Any]:
+    normalized_product_id = str(product_id or "").strip()
+    cache_key = (id(supplier), normalized_product_id)
+    now = time.monotonic()
+    cached = RZ_PRODUCT_DETAIL_CACHE.get(cache_key)
+    if cached and now - cached[0] < PRODUCT_DETAIL_CACHE_TTL_SECONDS:
+        return cached[1]
+    payload = await call_blocking(supplier.get_product_detail, normalized_product_id)
+    row = dict(payload.get("data") or {})
+    RZ_PRODUCT_DETAIL_CACHE[cache_key] = (now, row)
+    return row
+
+
+async def show_rz_categories(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    page: int = 0,
+) -> None:
+    supplier = get_rz_supplier(context)
+    lang = await ensure_user_with_lang(context, update.effective_user)
+    await answer_callback_query_safely(update.callback_query)
+    try:
+        groups = await fetch_rz_groups(supplier, lang)
+    except SupplierApiError as exc:
+        await reply_inline(update, ui_text("fetch_account_list_3_failed", lang, error=exc))
+        return
+    if not groups:
+        await reply_inline(update, ui_text("no_categories_in_account_list_3", lang))
+        return
+    text, entities = build_rz_products_intro_text_localized(lang)
+    await reply_inline(update, text, build_rz_category_keyboard_localized(groups, page, lang), entities=entities)
+
+
+async def show_rz_products(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    category_index: int,
+    page: int = 0,
+) -> None:
+    settings, _, _ = get_services(context)
+    supplier = get_rz_supplier(context)
+    lang = await ensure_user_with_lang(context, update.effective_user)
+    await answer_callback_query_safely(update.callback_query)
+    try:
+        groups = await fetch_rz_groups(supplier, lang)
+    except SupplierApiError as exc:
+        await reply_inline(update, ui_text("fetch_account_list_3_failed", lang, error=exc))
+        return
+    if not groups:
+        await reply_inline(update, ui_text("no_categories_in_account_list_3", lang))
+        return
+    if category_index < 0 or category_index >= len(groups):
+        await show_rz_categories(update, context, 0)
+        return
+    group = groups[category_index]
+    category_name = str(group.get("name") or "未分类")
+    group_rows = list(group.get("rows") or [])
+    if not group_rows:
+        await reply_inline(update, ui_text("no_products_in_account_list_3", lang))
+        return
+    text, entities = build_rz_products_group_intro_text_localized(category_name, lang)
+    await reply_inline(
+        update,
+        text,
+        build_rz_product_keyboard_localized(settings, group_rows, category_index, page, lang),
+        entities=entities,
+    )
+
+
 async def build_catalog_search_rows(supplier: SupplierClient) -> list[dict[str, Any]]:
     cache_key = id(supplier)
     now = time.monotonic()
@@ -5135,6 +5557,16 @@ async def warm_daxi_catalog(context: ContextTypes.DEFAULT_TYPE) -> None:
         await fetch_daxi_products(supplier)
     except Exception:
         logger.exception("daxi catalog warmup failed")
+
+
+async def warm_rz_catalog(context: ContextTypes.DEFAULT_TYPE) -> None:
+    supplier = get_rz_supplier(context)
+    try:
+        RZ_PRODUCTS_CACHE.pop((id(supplier), ""), None)
+        RZ_GROUPS_CACHE.pop(id(supplier), None)
+        await fetch_rz_products(supplier)
+    except Exception:
+        logger.exception("rz catalog warmup failed")
 
 
 async def build_main_menu_message(
@@ -5511,6 +5943,7 @@ def build_runtime_profile_keyboard_localized(lang: str, show_legacy_supplier: bo
                 InlineKeyboardButton(catalog_label, callback_data=catalog_callback),
                 InlineKeyboardButton(ui_text("profile_orders", lang), callback_data="nav:orders"),
             ],
+            [InlineKeyboardButton(ui_text("button_account_list_3", lang), callback_data="nav:cats3")],
             [premium_inline_button(ui_text("button_main_menu", lang), "nav:menu", HOME_EMOJI_ID)],
         ]
     )
@@ -7100,8 +7533,11 @@ async def execute_purchase(
     settings, store, legacy_supplier = get_services(context)
     normalized_source = normalize_order_source(source)
     if normalized_source == DAXI_SOURCE:
-        supplier: SupplierClient | DaxiSupplierClient = get_daxi_supplier(context)
+        supplier: SupplierClient | DaxiSupplierClient | RzSupplierClient = get_daxi_supplier(context)
         row = await fetch_daxi_product_detail_cached(supplier, str(product_id))
+    elif normalized_source == RZ_SOURCE:
+        supplier = get_rz_supplier(context)
+        row = await fetch_rz_product_detail_cached(supplier, str(product_id))
     else:
         supplier = legacy_supplier
         row = await fetch_product_detail_cached(supplier, int(product_id))
@@ -7133,7 +7569,7 @@ async def execute_purchase(
         return text, entities, build_balance_not_enough_keyboard(lang)
 
     try:
-        if normalized_source == DAXI_SOURCE:
+        if normalized_source in MODERN_SOURCE_SET:
             buy_payload = await call_blocking(
                 supplier.buy_product,
                 str(product_id),
@@ -7156,10 +7592,10 @@ async def execute_purchase(
         return refund_text, refund_entities, None
 
     data = buy_payload.get("data") or {}
-    task_id_value = data.get("orderId") if normalized_source == DAXI_SOURCE else data.get("taskId")
+    task_id_value = data.get("orderId") if normalized_source in MODERN_SOURCE_SET else data.get("taskId")
     task_id = str(task_id_value or "").strip()
     if not task_id:
-        if normalized_source == DAXI_SOURCE:
+        if normalized_source in MODERN_SOURCE_SET:
             upstream_reason = str(data.get("reason") or buy_payload.get("message") or buy_payload.get("msg") or "上游未返回 orderId")
         else:
             reason_map = {
@@ -7319,7 +7755,7 @@ async def finalize_remote_order(
     quantity = safe_int(order["quantity"])
     unit_price = safe_float(order["unit_price"])
     total_price = safe_float(order["total_price"])
-    if isinstance(supplier, DaxiSupplierClient):
+    if is_modern_supplier(supplier):
         status = str(data.get("status") or "").strip().lower()
         quantity_success = safe_int(data.get("quantityDelivered"))
         file_url = extract_daxi_file_url(payload)
@@ -7440,14 +7876,14 @@ async def finalize_remote_order(
         "上游订单状态异常: task_id=%s age=%ss status=%s has_file_url=%s",
         task_id,
         order_age_seconds,
-        data.get("status") if isinstance(supplier, DaxiSupplierClient) else data.get("taskStatus"),
-        bool(extract_daxi_file_url(payload) if isinstance(supplier, DaxiSupplierClient) else str(data.get("fileUrl") or "").strip()),
+        data.get("status") if is_modern_supplier(supplier) else data.get("taskStatus"),
+        bool(extract_daxi_file_url(payload) if is_modern_supplier(supplier) else str(data.get("fileUrl") or "").strip()),
     )
     if order_age_seconds >= settings.order_stuck_timeout_seconds:
         logger.warning(
             "上游订单状态异常超时，按失败退款: task_id=%s status=%s age=%ss",
             task_id,
-            data.get("status") if isinstance(supplier, DaxiSupplierClient) else data.get("taskStatus"),
+            data.get("status") if is_modern_supplier(supplier) else data.get("taskStatus"),
             order_age_seconds,
         )
         return await finalize_failed_remote_order(
@@ -7455,7 +7891,7 @@ async def finalize_remote_order(
             store,
             task_id,
             total_price,
-            file_url=extract_daxi_file_url(payload) if isinstance(supplier, DaxiSupplierClient) else str(data.get("fileUrl") or "").strip(),
+            file_url=extract_daxi_file_url(payload) if is_modern_supplier(supplier) else str(data.get("fileUrl") or "").strip(),
             payload=payload,
             notify_user=notify_user,
             lang=lang,
@@ -7804,7 +8240,7 @@ async def send_admin_cha_order_file(
             await answer_callback_query_safely(query, "正在发送文件…")
         if not downloaded_files:
             raise SupplierApiError("no delivery files available")
-        if isinstance(supplier, DaxiSupplierClient) and should_bundle_delivery_files(downloaded_files):
+        if is_modern_supplier(supplier) and should_bundle_delivery_files(downloaded_files):
             send_path = await call_blocking(build_delivery_bundle, str(fresh_order.get("task_id") or ""), downloaded_files)
             send_name = delivery_display_filename(product_name, quantity, "", "")
         else:
@@ -8161,6 +8597,9 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         if target == "cats2":
             await show_daxi_categories(update, context, 0)
             return
+        if target == "cats3":
+            await show_rz_categories(update, context, 0)
+            return
         if target == "menu":
             await show_start_menu(update, context)
             return
@@ -8260,6 +8699,12 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await show_daxi_categories(update, context, page)
         return
 
+    if action == "cats3" and len(parts) == 2:
+        clear_pending_purchase(context)
+        page = safe_int(parts[1], 0)
+        await show_rz_categories(update, context, page)
+        return
+
     if action == "cat2" and len(parts) == 3:
         clear_pending_purchase(context)
         category_index = safe_int(parts[1], -1)
@@ -8269,6 +8714,17 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             await reply_inline(update, ui_text("category_param_invalid", lang))
             return
         await show_daxi_products(update, context, category_index, page)
+        return
+
+    if action == "cat3" and len(parts) == 3:
+        clear_pending_purchase(context)
+        category_index = safe_int(parts[1], -1)
+        page = safe_int(parts[2], 0)
+        if category_index < 0:
+            lang = await ensure_user_with_lang(context, update.effective_user)
+            await reply_inline(update, ui_text("category_param_invalid", lang))
+            return
+        await show_rz_products(update, context, category_index, page)
         return
 
     if action == "prd" and len(parts) == 4:
@@ -8307,6 +8763,24 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await reply_inline(update, text, keyboard, entities=entities)
         return
 
+    if action == "prd3" and len(parts) == 4:
+        clear_pending_purchase(context)
+        product_id = str(parts[1] or "").strip()
+        category_index = safe_int(parts[2], -1)
+        page = safe_int(parts[3], 0)
+        lang = await ensure_user_with_lang(context, update.effective_user)
+        if not product_id or category_index < 0:
+            await reply_inline(update, ui_text("product_param_invalid", lang))
+            return
+        try:
+            row = await fetch_rz_product_detail_cached(get_rz_supplier(context), product_id)
+        except SupplierApiError as exc:
+            await reply_inline(update, ui_text("fetch_product_detail_failed", lang, error=exc))
+            return
+        text, entities, keyboard = render_rz_product_detail_view_localized(settings, row, category_index, page, lang)
+        await reply_inline(update, text, keyboard, entities=entities)
+        return
+
     if action == "qbuy" and len(parts) == 5:
         product_id = safe_int(parts[1], -1)
         category_id = safe_int(parts[3], 0)
@@ -8328,6 +8802,18 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             await reply_inline(update, ui_text("quick_buy_param_invalid", lang))
             return
         set_pending_purchase(context, product_id, category_index, page, source=DAXI_SOURCE)
+        await reply_inline(update, ui_text("quick_buy_prompt", lang))
+        return
+
+    if action == "qbuy3" and len(parts) == 4:
+        product_id = str(parts[1] or "").strip()
+        category_index = safe_int(parts[2], -1)
+        page = safe_int(parts[3], 0)
+        lang = await ensure_user_with_lang(context, update.effective_user)
+        if not product_id or category_index < 0:
+            await reply_inline(update, ui_text("quick_buy_param_invalid", lang))
+            return
+        set_pending_purchase(context, product_id, category_index, page, source=RZ_SOURCE)
         await reply_inline(update, ui_text("quick_buy_prompt", lang))
         return
 
@@ -8413,6 +8899,52 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             )
         return
 
+    if action == "cbuy3" and len(parts) == 5:
+        clear_pending_purchase(context)
+        user = update.effective_user
+        product_id = str(parts[1] or "").strip()
+        quantity = safe_int(parts[2], 0)
+        category_index = safe_int(parts[3], -1)
+        lang = await ensure_user_with_lang(context, user)
+        if user is None or not product_id or quantity <= 0 or category_index < 0:
+            await reply_inline(update, ui_text("quick_buy_param_invalid", lang))
+            return
+        await answer_callback_query_safely(query, ui_text("creating_order", lang))
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except BadRequest:
+            pass
+        try:
+            result = await execute_purchase(
+                context,
+                user.id,
+                user.username or "",
+                user.full_name or "",
+                product_id,
+                quantity,
+                lang,
+                source=RZ_SOURCE,
+            )
+        except SupplierApiError as exc:
+            if query.message is not None:
+                await query.message.reply_text(ui_text("fetch_product_detail_failed", lang, error=exc), reply_markup=build_menu_keyboard(lang))
+            else:
+                await reply_inline(update, ui_text("fetch_product_detail_failed", lang, error=exc))
+            return
+        if result and query.message is not None:
+            result_text, result_entities, result_markup = result
+            await query.message.reply_text(result_text, entities=result_entities, reply_markup=result_markup or build_menu_keyboard(lang))
+        elif result:
+            result_text, result_entities, result_markup = result
+            await reply_inline(update, result_text, entities=result_entities, reply_markup=result_markup)
+        elif query.message is not None:
+            await query.message.reply_text(
+                order_created_caption_localized(lang),
+                reply_markup=build_menu_keyboard(lang),
+                parse_mode="HTML",
+            )
+        return
+
     lang = await ensure_user_with_lang(context, update.effective_user)
     await answer_callback_query_safely(query, ui_text("unsupported_button", lang), show_alert=False)
 
@@ -8455,6 +8987,11 @@ async def route_menu_text(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         clear_pending_purchase(context)
         clear_pending_recharge(context)
         await show_daxi_categories(update, context, 0)
+        return
+    if button_matches(text, "button_account_list_3"):
+        clear_pending_purchase(context)
+        clear_pending_recharge(context)
+        await show_rz_categories(update, context, 0)
         return
     if button_matches(text, "button_main_menu", "bottom_main_menu"):
         clear_pending_purchase(context)
@@ -8568,6 +9105,9 @@ async def search_text_rich(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             if source == DAXI_SOURCE:
                 product_id = str(raw_product_id or "").strip()
                 row = await fetch_daxi_product_detail_cached(get_daxi_supplier(context), product_id)
+            elif source == RZ_SOURCE:
+                product_id = str(raw_product_id or "").strip()
+                row = await fetch_rz_product_detail_cached(get_rz_supplier(context), product_id)
             else:
                 product_id = safe_int(raw_product_id, -1)
                 row = await fetch_product_detail_cached(supplier, product_id)
@@ -8576,12 +9116,16 @@ async def search_text_rich(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             return
         if source == DAXI_SOURCE:
             product_name = format_daxi_product_title(row, lang) or str(row.get("productName") or f"商品 {product_id}")
+        elif source == RZ_SOURCE:
+            product_name = format_rz_product_title(row, lang) or str(row.get("productName") or f"商品 {product_id}")
         else:
             product_name = str(row.get("productName") or f"商品 {product_id}")
         unit_price = resolve_sell_price(settings, row)
         caption, caption_entities = build_purchase_confirm_text_localized(product_name, unit_price, quantity, lang)
         if source == DAXI_SOURCE:
             keyboard = build_daxi_purchase_confirm_keyboard_localized(str(product_id), quantity, category_id, page, lang)
+        elif source == RZ_SOURCE:
+            keyboard = build_rz_purchase_confirm_keyboard_localized(str(product_id), quantity, category_id, page, lang)
         else:
             keyboard = build_purchase_confirm_keyboard_localized(product_id, quantity, category_id, page, lang)
         if PURCHASE_CONFIRM_IMAGE_PATH.exists():
@@ -8834,6 +9378,7 @@ def build_application(settings: Settings) -> Application:
     store = Store(settings.database_path)
     supplier = SupplierClient(settings)
     supplier_daxi = DaxiSupplierClient(settings)
+    supplier_rz = RzSupplierClient(settings)
     application = (
         ApplicationBuilder()
         .token(settings.bot_token)
@@ -8854,6 +9399,7 @@ def build_application(settings: Settings) -> Application:
     application.bot_data["store"] = store
     application.bot_data["supplier"] = supplier
     application.bot_data["supplier_daxi"] = supplier_daxi
+    application.bot_data["supplier_rz"] = supplier_rz
     application.bot_data["runtime_config"] = store.get_runtime_settings()
     apply_runtime_sell_price_settings(settings, application.bot_data["runtime_config"])
 
@@ -8902,6 +9448,17 @@ def build_application(settings: Settings) -> Application:
             interval=max(120, CATEGORY_CACHE_TTL_SECONDS - 60),
             first=max(120, CATEGORY_CACHE_TTL_SECONDS - 40),
             name="warm_daxi_catalog",
+        )
+        application.job_queue.run_once(
+            warm_rz_catalog,
+            when=10,
+            name="warm_rz_catalog_initial",
+        )
+        application.job_queue.run_repeating(
+            warm_rz_catalog,
+            interval=max(120, CATEGORY_CACHE_TTL_SECONDS - 60),
+            first=max(120, CATEGORY_CACHE_TTL_SECONDS - 20),
+            name="warm_rz_catalog",
         )
         application.job_queue.run_repeating(
             poll_processing_orders,

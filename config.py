@@ -122,6 +122,9 @@ class Settings:
     daxi_api_base_url: str
     daxi_api_key: str
     daxi_api_timeout_seconds: int
+    rz_api_base_url: str
+    rz_api_key: str
+    rz_api_timeout_seconds: int
     supplier_balance_alert_threshold: float
     supplier_balance_alert_poll_seconds: int
     database_path: Path
@@ -200,6 +203,9 @@ def load_settings() -> Settings:
         daxi_api_base_url=os.getenv("DAXI_API_BASE_URL", "https://api.daxi.pro").strip().rstrip("/"),
         daxi_api_key=os.getenv("DAXI_API_KEY", "").strip(),
         daxi_api_timeout_seconds=max(5, int(os.getenv("DAXI_API_TIMEOUT_SECONDS", "20"))),
+        rz_api_base_url=os.getenv("RZ_API_BASE_URL", "https://api2.darimarket.online").strip().rstrip("/"),
+        rz_api_key=os.getenv("RZ_API_KEY", "").strip(),
+        rz_api_timeout_seconds=max(5, int(os.getenv("RZ_API_TIMEOUT_SECONDS", "20"))),
         supplier_balance_alert_threshold=max(0.0, _parse_float(os.getenv("SUPPLIER_BALANCE_ALERT_THRESHOLD", "50"), "SUPPLIER_BALANCE_ALERT_THRESHOLD", 50.0)),
         supplier_balance_alert_poll_seconds=max(30, int(os.getenv("SUPPLIER_BALANCE_ALERT_POLL_SECONDS", "60"))),
         database_path=database_path,

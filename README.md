@@ -127,6 +127,8 @@ API_AUTH_HEADER_VALUE=
 API_AUTH_TRY_BEARER_VARIANTS=true
 DAXI_API_BASE_URL=https://api.daxi.pro
 DAXI_API_KEY=
+RZ_API_BASE_URL=https://api2.darimarket.online
+RZ_API_KEY=
 ```
 
 仓库已经附带一份可直接改的 `.env.example` 成品模板，复制后主要替换：
@@ -135,6 +137,7 @@ DAXI_API_KEY=
 - `ADMIN_USER_IDS`
 - `API_AUTH_HEADER_VALUE`
 - `DAXI_API_KEY`
+- `RZ_API_KEY`
 - `RESTOCK_CHANNEL`
 - `CUSTOMER_SERVICE_CONTACT`
 - `OKPAY_SHOP_ID`
@@ -205,6 +208,10 @@ API_EXTRA_QUERY_JSON={"uid":"10001"}
   - 主菜单 `账号列表2` 使用的大喜 API 地址和密钥
 - `DAXI_API_TIMEOUT_SECONDS`
   - `账号列表2` 请求大喜 API 的超时秒数，默认 `20`
+- `RZ_API_BASE_URL` / `RZ_API_KEY`
+  - 主菜单 `账号列表3` 使用的 RZ / DariMarket API 地址和密钥
+- `RZ_API_TIMEOUT_SECONDS`
+  - `账号列表3` 请求 RZ / DariMarket API 的超时秒数，默认 `20`
 - `INLINE_BUTTON_CUSTOM_EMOJI_ENABLED`
   - 是否启用 Telegram custom emoji 按钮图标
 - `BUTTON_CUSTOM_EMOJI_IDS_JSON`

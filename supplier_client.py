@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 from typing import Any
-from urllib.parse import urljoin
+from urllib.parse import quote, urljoin
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -317,6 +317,202 @@ class DaxiSupplierClient(SupplierClient):
 
     def resolve_download_url(self, file_url: str) -> str:
         return urljoin(f"{self.settings.daxi_api_base_url}/", str(file_url or "").strip())
+
+    def build_download_headers(self) -> dict[str, str]:
+        headers = self._headers()
+        headers["Accept"] = "*/*"
+        return headers
+
+
+@dataclass(slots=True)
+class RzSupplierClient(SupplierClient):
+    def _headers(self) -> dict[str, str]:
+        headers = {
+            "User-Agent": "apibot/0.1",
+            "Accept": "application/json",
+        }
+        api_key = str(self.settings.rz_api_key or "").strip()
+        if api_key:
+            headers["X-Api-Key"] = api_key
+        return headers
+
+    def _parse_response(self, response: requests.Response) -> dict[str, Any]:
+        try:
+            response.raise_for_status()
+        except requests.HTTPError as exc:
+            payload: Any | None = None
+            try:
+                payload = response.json()
+            except ValueError:
+                payload = None
+            raise SupplierApiError(self._build_http_error_message(response, payload), payload) from exc
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise SupplierApiError("supplier returned invalid JSON") from exc
+        if not isinstance(payload, dict):
+            raise SupplierApiError("supplier returned a non-object JSON payload", payload)
+        if payload.get("error"):
+            error = payload.get("error") or {}
+            raise SupplierApiError(str(error.get("message") or "supplier request failed"), payload)
+        return payload
+
+    def _request_json(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        json_body: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        url = f"{self.settings.rz_api_base_url}{path}"
+        headers = self._headers()
+        timeout = self.settings.rz_api_timeout_seconds
+        try:
+            response = self.session.request(
+                method=method.upper(),
+                url=url,
+                params=params,
+                json=json_body,
+                headers=headers,
+                timeout=timeout,
+            )
+            return self._parse_response(response)
+        except requests.RequestException as exc:
+            self.session.close()
+            self.session = self._build_session()
+            try:
+                response = self.session.request(
+                    method=method.upper(),
+                    url=url,
+                    params=params,
+                    json=json_body,
+                    headers=headers,
+                    timeout=timeout,
+                )
+                return self._parse_response(response)
+            except SupplierApiError:
+                raise
+            except requests.RequestException as retry_exc:
+                raise SupplierApiError(str(retry_exc)) from retry_exc
+
+    def _normalize_product_row(self, row: dict[str, Any]) -> dict[str, Any]:
+        item = dict(row)
+        item["productId"] = str(item.get("id") or item.get("productId") or "").strip()
+        country_name = str(item.get("country_name") or item.get("countryName") or "").strip()
+        kind = str(item.get("kind") or "").strip()
+        section = str(item.get("section") or "").strip()
+        phone_code = str(item.get("phone_code") or item.get("phoneCode") or "").strip()
+        base_name = country_name or section or kind or item["productId"] or "商品"
+        item["productName"] = str(item.get("productName") or base_name).strip()
+        item["category"] = kind
+        item["categoryName"] = section or kind or "账号列表3"
+        item["country"] = country_name
+        item["prefix"] = phone_code
+        item["totalStock"] = int(item.get("stock") or 0)
+        try:
+            item["price"] = float(item.get("price") or 0)
+        except (TypeError, ValueError):
+            item["price"] = 0.0
+        return item
+
+    def _normalize_order_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
+        status_raw = str(payload.get("status") or "").strip().lower()
+        status_map = {
+            "processing": "processing",
+            "completed": "completed",
+            "partially_completed": "partial",
+            "partial": "partial",
+            "failed": "failed",
+        }
+        normalized_status = status_map.get(status_raw, status_raw or "processing")
+        delivered = max(0, int(payload.get("delivered") or 0))
+        requested = max(delivered, int(payload.get("requested") or 0))
+        failed = max(0, int(payload.get("failed") or 0))
+        download = payload.get("download") or {}
+        files: list[dict[str, str]] = []
+        if isinstance(download, dict):
+            download_url = str(download.get("url") or "").strip()
+            token = str(download.get("token") or "").strip()
+            if not download_url and token:
+                download_url = f"/v1/downloads/{token}"
+            if download_url:
+                files.append(
+                    {
+                        "downloadUrl": download_url,
+                        "fileName": str(download.get("filename") or "").strip(),
+                    }
+                )
+        return {
+            "success": True,
+            "data": {
+                "orderId": str(payload.get("order_id") or "").strip(),
+                "status": normalized_status,
+                "quantityRequested": requested,
+                "quantityDelivered": delivered,
+                "quantityFailed": failed,
+                "amountRefunded": "0",
+                "ready": bool(payload.get("ready")),
+                "files": files,
+            },
+        }
+
+    def get_products(self, query: str = "") -> dict[str, Any]:
+        limit = 100
+        offset = 0
+        products: list[dict[str, Any]] = []
+        params: dict[str, Any] = {"limit": limit, "offset": offset}
+        query_text = str(query or "").strip()
+        if query_text:
+            params["q"] = query_text
+
+        while True:
+            params["offset"] = offset
+            payload = self._request_json("GET", "/v1/products", params=params)
+            rows = payload.get("products") or []
+            products.extend(self._normalize_product_row(row) for row in rows if isinstance(row, dict))
+            count = int(payload.get("count") or len(products))
+            if len(rows) < limit or len(products) >= count:
+                break
+            offset += limit
+
+        return {"success": True, "data": products}
+
+    def get_product_detail(self, product_id: str) -> dict[str, Any]:
+        payload = self._request_json("GET", f"/v1/products/{quote(str(product_id or '').strip(), safe='')}")
+        return {"success": True, "data": self._normalize_product_row(payload)}
+
+    def search_products(self, text: str) -> dict[str, Any]:
+        return self.get_products(text)
+
+    def buy_product(self, product_id: str, quantity: int, out_order_id: str) -> dict[str, Any]:
+        payload = self._request_json(
+            "POST",
+            "/v1/buy",
+            json_body={
+                "product_id": str(product_id).strip(),
+                "quantity": int(quantity),
+            },
+        )
+        return self._normalize_order_payload(payload)
+
+    def query_order(self, task_id: str) -> dict[str, Any]:
+        payload = self._request_json("GET", f"/v1/orders/{str(task_id).strip()}")
+        return self._normalize_order_payload(payload)
+
+    def query_balance(self) -> dict[str, Any]:
+        payload = self._request_json("GET", "/v1/me")
+        return {
+            "success": True,
+            "data": {
+                "userId": payload.get("telegram_id"),
+                "userName": payload.get("username"),
+                "accountBalance": payload.get("balance"),
+            },
+        }
+
+    def resolve_download_url(self, file_url: str) -> str:
+        return urljoin(f"{self.settings.rz_api_base_url}/", str(file_url or "").strip())
 
     def build_download_headers(self) -> dict[str, str]:
         headers = self._headers()

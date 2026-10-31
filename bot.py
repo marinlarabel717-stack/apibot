@@ -579,6 +579,33 @@ WESTERN_COUNTRY_TRANSLATIONS: list[tuple[str, str]] = [
 AMERICAS_COUNTRY_TRANSLATIONS: list[tuple[str, str]] = WESTERN_COUNTRY_TRANSLATIONS[:37]
 EUROPE_COUNTRY_TRANSLATIONS: list[tuple[str, str]] = WESTERN_COUNTRY_TRANSLATIONS[37:82]
 OCEANIA_COUNTRY_TRANSLATIONS: list[tuple[str, str]] = WESTERN_COUNTRY_TRANSLATIONS[82:]
+AMERICAS_TERRITORY_TRANSLATIONS: list[tuple[str, str]] = [
+    ("安圭拉", "Anguilla"),
+    ("瓜德罗普", "Guadeloupe"),
+    ("马提尼克", "Martinique"),
+    ("法属圭亚那", "French Guiana"),
+    ("库拉索", "Curacao"),
+    ("阿鲁巴", "Aruba"),
+    ("开曼群岛", "Cayman Islands"),
+    ("百慕大", "Bermuda"),
+    ("英属维尔京群岛", "British Virgin Islands"),
+    ("美属维尔京群岛", "U.S. Virgin Islands"),
+    ("特克斯和凯科斯群岛", "Turks and Caicos Islands"),
+    ("蒙特塞拉特", "Montserrat"),
+    ("圣马丁", "Saint Martin"),
+    ("荷属圣马丁", "Sint Maarten"),
+]
+EUROPE_TERRITORY_TRANSLATIONS: list[tuple[str, str]] = [
+    ("法罗群岛", "Faroe Islands"),
+    ("直布罗陀", "Gibraltar"),
+]
+OCEANIA_TERRITORY_TRANSLATIONS: list[tuple[str, str]] = [
+    ("法属波利尼西亚", "French Polynesia"),
+    ("法属玻利尼西亚", "French Polynesia"),
+    ("新喀里多尼亚", "New Caledonia"),
+    ("关岛", "Guam"),
+    ("美属萨摩亚", "American Samoa"),
+]
 
 AFRICA_COUNTRY_TRANSLATIONS: list[tuple[str, str]] = [
     ("埃及", "Egypt"),
@@ -638,10 +665,18 @@ AFRICA_COUNTRY_TRANSLATIONS: list[tuple[str, str]] = [
     ("佛得角", "Cape Verde"),
     ("圣多美和普林西比", "Sao Tome and Principe"),
 ]
+AFRICA_TERRITORY_TRANSLATIONS: list[tuple[str, str]] = [
+    ("留尼汪", "Reunion"),
+]
+AMERICAS_REGION_TRANSLATIONS: list[tuple[str, str]] = [*AMERICAS_COUNTRY_TRANSLATIONS, *AMERICAS_TERRITORY_TRANSLATIONS]
+EUROPE_REGION_TRANSLATIONS: list[tuple[str, str]] = [*EUROPE_COUNTRY_TRANSLATIONS, *EUROPE_TERRITORY_TRANSLATIONS]
+AFRICA_REGION_TRANSLATIONS: list[tuple[str, str]] = [*AFRICA_COUNTRY_TRANSLATIONS, *AFRICA_TERRITORY_TRANSLATIONS]
+OCEANIA_REGION_TRANSLATIONS: list[tuple[str, str]] = [*OCEANIA_COUNTRY_TRANSLATIONS, *OCEANIA_TERRITORY_TRANSLATIONS]
 
 TERRITORY_NAME_TRANSLATIONS: list[tuple[str, str]] = [
     ("法罗群岛", "Faroe Islands"),
     ("直布罗陀", "Gibraltar"),
+    ("安圭拉", "Anguilla"),
     ("法属波利尼西亚", "French Polynesia"),
     ("法属玻利尼西亚", "French Polynesia"),
     ("瓜德罗普", "Guadeloupe"),
@@ -655,6 +690,12 @@ TERRITORY_NAME_TRANSLATIONS: list[tuple[str, str]] = [
     ("百慕大", "Bermuda"),
     ("关岛", "Guam"),
     ("美属萨摩亚", "American Samoa"),
+    ("英属维尔京群岛", "British Virgin Islands"),
+    ("美属维尔京群岛", "U.S. Virgin Islands"),
+    ("特克斯和凯科斯群岛", "Turks and Caicos Islands"),
+    ("蒙特塞拉特", "Montserrat"),
+    ("圣马丁", "Saint Martin"),
+    ("荷属圣马丁", "Sint Maarten"),
 ]
 
 COUNTRY_NAME_TRANSLATIONS: list[tuple[str, str]] = [
@@ -5144,10 +5185,10 @@ def resolve_rz_region_key(row: dict[str, Any]) -> str:
         return ""
     region_pairs = (
         ("asia", ASIA_COUNTRY_TRANSLATIONS),
-        ("europe", EUROPE_COUNTRY_TRANSLATIONS),
-        ("africa", AFRICA_COUNTRY_TRANSLATIONS),
-        ("americas", AMERICAS_COUNTRY_TRANSLATIONS),
-        ("oceania", OCEANIA_COUNTRY_TRANSLATIONS),
+        ("europe", EUROPE_REGION_TRANSLATIONS),
+        ("africa", AFRICA_REGION_TRANSLATIONS),
+        ("americas", AMERICAS_REGION_TRANSLATIONS),
+        ("oceania", OCEANIA_REGION_TRANSLATIONS),
     )
     for region_key, pairs in region_pairs:
         for zh_name, en_name in pairs:
@@ -9383,7 +9424,7 @@ async def search_text_rich(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             sell_price = resolve_sell_price(settings, row)
             display_name = shorten(format_rz_product_title(row, lang), 28)
             source_label = ui_text("search_source_account_list_3", lang)
-            callback_data = f"prd3:{product_id}:{category_index}:0"
+            callback_data = f"qbuy3:{product_id}:{category_index}:0"
         modern_items.append(
             {
                 "row": row,

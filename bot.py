@@ -905,6 +905,14 @@ def prefix_matches_keyword(prefix_value: Any, keyword: str) -> bool:
     return normalized_prefix == normalized_keyword or normalized_prefix.lstrip("+") == normalized_keyword.lstrip("+")
 
 
+def encode_callback_value(value: Any) -> str:
+    return urllib.parse.quote(str(value or "").strip(), safe="")
+
+
+def decode_callback_value(value: Any) -> str:
+    return urllib.parse.unquote(str(value or "").strip())
+
+
 def get_pending_admin_action(context: ContextTypes.DEFAULT_TYPE) -> dict[str, Any] | None:
     pending = context.user_data.get(PENDING_ADMIN_KEY)
     return pending if isinstance(pending, dict) else None
@@ -8975,11 +8983,11 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await reply_inline(update, text, keyboard, entities=entities)
         return
 
-    if action == "prd2" and len(parts) == 4:
+    if action == "prd2" and len(parts) >= 4:
         clear_pending_purchase(context)
-        product_id = str(parts[1] or "").strip()
-        category_index = safe_int(parts[2], -1)
-        page = safe_int(parts[3], 0)
+        product_id = decode_callback_value(":".join(parts[1:-2]))
+        category_index = safe_int(parts[-2], -1)
+        page = safe_int(parts[-1], 0)
         lang = await ensure_user_with_lang(context, update.effective_user)
         if not product_id or category_index < 0:
             await reply_inline(update, ui_text("product_param_invalid", lang))
@@ -8993,11 +9001,11 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await reply_inline(update, text, keyboard, entities=entities)
         return
 
-    if action == "prd3" and len(parts) == 4:
+    if action == "prd3" and len(parts) >= 4:
         clear_pending_purchase(context)
-        product_id = str(parts[1] or "").strip()
-        category_index = safe_int(parts[2], -1)
-        page = safe_int(parts[3], 0)
+        product_id = decode_callback_value(":".join(parts[1:-2]))
+        category_index = safe_int(parts[-2], -1)
+        page = safe_int(parts[-1], 0)
         lang = await ensure_user_with_lang(context, update.effective_user)
         if not product_id or category_index < 0:
             await reply_inline(update, ui_text("product_param_invalid", lang))
@@ -9023,10 +9031,10 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await reply_inline(update, ui_text("quick_buy_prompt", lang))
         return
 
-    if action == "qbuy2" and len(parts) == 4:
-        product_id = str(parts[1] or "").strip()
-        category_index = safe_int(parts[2], -1)
-        page = safe_int(parts[3], 0)
+    if action == "qbuy2" and len(parts) >= 4:
+        product_id = decode_callback_value(":".join(parts[1:-2]))
+        category_index = safe_int(parts[-2], -1)
+        page = safe_int(parts[-1], 0)
         lang = await ensure_user_with_lang(context, update.effective_user)
         if not product_id or category_index < 0:
             await reply_inline(update, ui_text("quick_buy_param_invalid", lang))
@@ -9035,10 +9043,10 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await reply_inline(update, ui_text("quick_buy_prompt", lang))
         return
 
-    if action == "qbuy3" and len(parts) == 4:
-        product_id = str(parts[1] or "").strip()
-        category_index = safe_int(parts[2], -1)
-        page = safe_int(parts[3], 0)
+    if action == "qbuy3" and len(parts) >= 4:
+        product_id = decode_callback_value(":".join(parts[1:-2]))
+        category_index = safe_int(parts[-2], -1)
+        page = safe_int(parts[-1], 0)
         lang = await ensure_user_with_lang(context, update.effective_user)
         if not product_id or category_index < 0:
             await reply_inline(update, ui_text("quick_buy_param_invalid", lang))
@@ -9083,12 +9091,12 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             )
         return
 
-    if action == "cbuy2" and len(parts) == 5:
+    if action == "cbuy2" and len(parts) >= 5:
         clear_pending_purchase(context)
         user = update.effective_user
-        product_id = str(parts[1] or "").strip()
-        quantity = safe_int(parts[2], 0)
-        category_index = safe_int(parts[3], -1)
+        product_id = decode_callback_value(":".join(parts[1:-3]))
+        quantity = safe_int(parts[-3], 0)
+        category_index = safe_int(parts[-2], -1)
         lang = await ensure_user_with_lang(context, user)
         if user is None or not product_id or quantity <= 0 or category_index < 0:
             await reply_inline(update, ui_text("quick_buy_param_invalid", lang))
@@ -9129,12 +9137,12 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             )
         return
 
-    if action == "cbuy3" and len(parts) == 5:
+    if action == "cbuy3" and len(parts) >= 5:
         clear_pending_purchase(context)
         user = update.effective_user
-        product_id = str(parts[1] or "").strip()
-        quantity = safe_int(parts[2], 0)
-        category_index = safe_int(parts[3], -1)
+        product_id = decode_callback_value(":".join(parts[1:-3]))
+        quantity = safe_int(parts[-3], 0)
+        category_index = safe_int(parts[-2], -1)
         lang = await ensure_user_with_lang(context, user)
         if user is None or not product_id or quantity <= 0 or category_index < 0:
             await reply_inline(update, ui_text("quick_buy_param_invalid", lang))

@@ -215,9 +215,11 @@ UI_TEXTS: dict[str, dict[str, str]] = {
     "products_intro": {"zh": "这是商品列表，当前分类：{category_name}", "en": "This is the product list. Current category: {category_name}"},
     "first_buy_notice": {"zh": "首次购买建议先少量测试，确认符合需求再放量。", "en": "If this is your first time buying, place a small test order first."},
     "virtual_notice": {"zh": "虚拟商品一经发货通常不支持无理由处理，请先看清分类与说明。", "en": "Virtual goods are usually not refundable after delivery. Please confirm the details first."},
-    "search_results_title": {"zh": "搜索结果：{keyword}", "en": "Search results: {keyword}"},
-    "search_results_hint": {"zh": "点击下面商品按钮查看详情：", "en": "Tap a product below to view details:"},
-    "stock_short": {"zh": "库存", "en": "Stock"},
+        "search_results_title": {"zh": "搜索结果：{keyword}", "en": "Search results: {keyword}"},
+        "search_results_hint": {"zh": "点击下面商品按钮查看详情：", "en": "Tap a product below to view details:"},
+        "search_source_account_list_2": {"zh": "账号列表2", "en": "Account List 2"},
+        "search_source_account_list_3": {"zh": "账号列表3", "en": "Account List 3"},
+        "stock_short": {"zh": "库存", "en": "Stock"},
     "buying_product": {"zh": "您正在购买：{product_name}", "en": "You are buying: {product_name}"},
     "price_label": {"zh": "价格：{price} USDT", "en": "Price: {price} USDT"},
     "stock_label": {"zh": "库存：{stock}", "en": "Stock: {stock}"},
@@ -2573,6 +2575,40 @@ def build_search_results_text_localized(
         parts.extend(
             [
                 ("- ", None),
+                (product_name, None),
+                (f" | {ui_text('stock_short', lang)} ", None),
+                (str(safe_int(row.get("totalStock"))), None),
+                (" | $", None),
+                (f"{sell_price:.2f}", None),
+                ("\n", None),
+            ]
+        )
+    if parts[-1][0] == "\n":
+        parts.pop()
+    return build_text_with_custom_emoji(parts)
+
+
+def build_modern_search_results_text_localized(
+    keyword: str,
+    items: list[dict[str, Any]],
+    lang: str,
+) -> tuple[str, tuple[MessageEntity, ...]]:
+    parts: list[tuple[str, str | None]] = [
+        ("🔎", SEARCH_RESULTS_EMOJI_ID),
+        (f" {ui_text('search_results_title', lang, keyword=keyword)}", None),
+        ("\n", None),
+        (ui_text("search_results_hint", lang), None),
+        ("\n\n", None),
+    ]
+    for item in items[:SEARCH_RESULTS_LIMIT]:
+        row = item.get("row") or {}
+        sell_price = safe_float(item.get("price"), 0.0)
+        product_name = str(item.get("display_name") or row.get("productName") or "商品")
+        source_label = str(item.get("source_label") or "").strip()
+        parts.extend(
+            [
+                ("- ", None),
+                (f"[{source_label}] " if source_label else "", None),
                 (product_name, None),
                 (f" | {ui_text('stock_short', lang)} ", None),
                 (str(safe_int(row.get("totalStock"))), None),
@@ -5501,6 +5537,49 @@ def search_daxi_products_locally(rows: list[dict[str, Any]], keyword: str) -> li
             str(row.get("categoryName") or ""),
             str(row.get("country") or ""),
             str(row.get("prefix") or ""),
+        ]
+        haystack = compact_search_text(" ".join(part for part in parts if part))
+        if not haystack:
+            continue
+        exact_match = haystack == compact_keyword or haystack == code_keyword
+        prefix_match = haystack.startswith(compact_keyword) or haystack.startswith(code_keyword)
+        contains_match = compact_keyword in haystack or code_keyword in haystack
+        if not (exact_match or prefix_match or contains_match):
+            continue
+        stock = max(0, safe_int(row.get("totalStock")))
+        position = haystack.find(compact_keyword)
+        if position < 0 and code_keyword != compact_keyword:
+            position = haystack.find(code_keyword)
+        if position < 0:
+            position = 9999
+        score = 0 if exact_match else 1 if prefix_match else 2
+        scored_rows.append((score, position, -stock, compact_search_text(str(row.get("productName") or "")), row))
+        seen_product_ids.add(product_id)
+
+    scored_rows.sort(key=lambda item: (item[0], item[1], item[2], item[3]))
+    return [row for _, _, _, _, row in scored_rows]
+
+
+def search_rz_products_locally(rows: list[dict[str, Any]], keyword: str) -> list[dict[str, Any]]:
+    normalized = normalize_search_keyword(keyword)
+    compact_keyword = compact_search_text(normalized)
+    if not compact_keyword:
+        return []
+    code_keyword = compact_keyword[1:] if compact_keyword.startswith("+") else compact_keyword
+
+    scored_rows: list[tuple[int, int, int, str, dict[str, Any]]] = []
+    seen_product_ids: set[str] = set()
+    for row in rows:
+        product_id = str(row.get("productId") or "").strip()
+        if not product_id or product_id in seen_product_ids:
+            continue
+        parts = [
+            str(row.get("productName") or ""),
+            str(row.get("section") or ""),
+            str(row.get("kind") or ""),
+            str(row.get("categoryName") or ""),
+            str(row.get("country") or row.get("country_name") or ""),
+            str(row.get("prefix") or row.get("phone_code") or ""),
         ]
         haystack = compact_search_text(" ".join(part for part in parts if part))
         if not haystack:
@@ -9141,37 +9220,95 @@ async def search_text_rich(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return
     if not should_trigger_product_search(keyword):
         return
-    if not effective_legacy_supplier_enabled(context):
-        daxi_supplier = get_daxi_supplier(context)
-        try:
-            all_rows = await fetch_daxi_products(daxi_supplier)
-        except SupplierApiError as exc:
-            await update.message.reply_text(ui_text("search_failed", lang, error=exc))
-            return
-        rows = search_daxi_products_locally(all_rows, keyword)
-        if not rows:
-            await update.message.reply_text(ui_text("search_empty", lang), reply_markup=build_menu_keyboard(lang))
-            return
-        group_index_map = build_daxi_group_index_map(all_rows)
-        text, entities = build_search_results_text_localized(keyword, rows, lambda row: resolve_sell_price(settings, row), lang)
-        buttons: list[list[InlineKeyboardButton]] = []
-        for row in rows[:SEARCH_RESULTS_LIMIT]:
-            product_id = str(row.get("productId") or "").strip()
-            if not product_id:
-                continue
-            category_index = group_index_map.get(product_id, 0)
+    daxi_supplier = get_daxi_supplier(context)
+    rz_supplier = get_rz_supplier(context)
+    modern_errors: list[str] = []
+
+    try:
+        daxi_all_rows = await fetch_daxi_products(daxi_supplier)
+    except SupplierApiError as exc:
+        modern_errors.append(f"{ui_text('search_source_account_list_2', lang)}: {exc}")
+        daxi_all_rows = []
+
+    try:
+        rz_all_rows = await fetch_rz_products(rz_supplier)
+    except SupplierApiError as exc:
+        modern_errors.append(f"{ui_text('search_source_account_list_3', lang)}: {exc}")
+        rz_all_rows = []
+
+    modern_items: list[dict[str, Any]] = []
+    daxi_rows = search_daxi_products_locally(daxi_all_rows, keyword)
+    rz_rows = search_rz_products_locally(rz_all_rows, keyword)
+    daxi_group_index_map = build_daxi_group_index_map(daxi_all_rows) if daxi_rows else {}
+    rz_group_index_map = build_rz_group_index_map(rz_all_rows, lang) if rz_rows else {}
+
+    if daxi_rows and rz_rows:
+        primary_limit = max(1, SEARCH_RESULTS_LIMIT // 2)
+        ordered_rows = (
+            [("daxi", row) for row in daxi_rows[:primary_limit]]
+            + [("rz", row) for row in rz_rows[:primary_limit]]
+            + [("daxi", row) for row in daxi_rows[primary_limit:]]
+            + [("rz", row) for row in rz_rows[primary_limit:]]
+        )
+    elif daxi_rows:
+        ordered_rows = [("daxi", row) for row in daxi_rows]
+    else:
+        ordered_rows = [("rz", row) for row in rz_rows]
+
+    buttons: list[list[InlineKeyboardButton]] = []
+    for source_name, row in ordered_rows:
+        if len(modern_items) >= SEARCH_RESULTS_LIMIT:
+            break
+        product_id = str(row.get("productId") or "").strip()
+        if not product_id:
+            continue
+        if source_name == "daxi":
+            category_index = daxi_group_index_map.get(product_id, 0)
             sell_price = resolve_sell_price(settings, row)
-            product_name = shorten(format_daxi_product_title(row, lang), 28)
-            buttons.append(
-                [
-                    plain_catalog_button(
-                        ui_text("product_row_price", lang, name=product_name, stock=safe_int(row.get("totalStock")), price=f"{sell_price:.2f}"),
-                        f"prd2:{product_id}:{category_index}:0",
-                    )
-                ]
-            )
-        buttons.append([InlineKeyboardButton(ui_text("button_account_list_2", lang), callback_data="nav:cats2")])
+            display_name = shorten(format_daxi_product_title(row, lang), 28)
+            source_label = ui_text("search_source_account_list_2", lang)
+            callback_data = f"prd2:{product_id}:{category_index}:0"
+        else:
+            category_index = rz_group_index_map.get(product_id, 0)
+            sell_price = resolve_sell_price(settings, row)
+            display_name = shorten(format_rz_product_title(row, lang), 28)
+            source_label = ui_text("search_source_account_list_3", lang)
+            callback_data = f"prd3:{product_id}:{category_index}:0"
+        modern_items.append(
+            {
+                "row": row,
+                "price": sell_price,
+                "display_name": display_name,
+                "source_label": source_label,
+            }
+        )
+        buttons.append(
+            [
+                plain_catalog_button(
+                    ui_text(
+                        "product_row_price",
+                        lang,
+                        name=f"[{source_label}] {display_name}",
+                        stock=safe_int(row.get("totalStock")),
+                        price=f"{sell_price:.2f}",
+                    ),
+                    callback_data,
+                )
+            ]
+        )
+
+    if modern_items:
+        text, entities = build_modern_search_results_text_localized(keyword, modern_items, lang)
+        buttons.append(
+            [
+                InlineKeyboardButton(ui_text("button_account_list_2", lang), callback_data="nav:cats2"),
+                InlineKeyboardButton(ui_text("button_account_list_3", lang), callback_data="nav:cats3"),
+            ]
+        )
         await update.message.reply_text(text, entities=entities, reply_markup=InlineKeyboardMarkup(buttons))
+        return
+    if modern_errors and not effective_legacy_supplier_enabled(context):
+        await update.message.reply_text(ui_text("search_failed", lang, error=" | ".join(modern_errors)))
         return
     try:
         rows = await search_products_cached(supplier, keyword)

@@ -9743,15 +9743,13 @@ async def supplier_balance(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         try:
             payload = await call_blocking(supplier.query_balance)
             data = payload.get("data") or {}
-            lines.extend(
-                [
-                    "",
-                    supplier_name,
-                    f"userId: {data.get('userId') or '-'}",
-                    f"userName: {data.get('userName') or '-'}",
-                    f"accountBalance: {format_money(safe_float(data.get('accountBalance')))}",
-                ]
-            )
+            user_id = str(data.get("userId") or "").strip()
+            user_name = str(data.get("userName") or "").strip()
+            lines.extend(["", supplier_name, f"accountBalance: {format_money(safe_float(data.get('accountBalance')))}"])
+            if user_id:
+                lines.append(f"userId: {user_id}")
+            if user_name:
+                lines.append(f"userName: {user_name}")
         except SupplierApiError as exc:
             lines.extend(["", supplier_name, f"查询失败: {exc}"])
     await update.message.reply_text("\n".join(lines), reply_markup=MENU_KEYBOARD)
@@ -9793,12 +9791,22 @@ async def poll_supplier_balance_alert(context: ContextTypes.DEFAULT_TYPE) -> Non
                 supplier_state["last_balance"] = balance
                 continue
 
-            text = f"上游：{supplier_name}\n\n" + build_supplier_low_balance_alert_text(
-                threshold=threshold,
-                balance=balance,
-                user_id=str(data.get("userId") or ""),
-                user_name=str(data.get("userName") or ""),
-            )
+            user_id = str(data.get("userId") or "").strip()
+            user_name = str(data.get("userName") or "").strip()
+            text_lines = [
+                f"上游：{supplier_name}",
+                "",
+                "上游余额预警",
+                "",
+                f"当前余额：{format_money(balance)} U",
+                f"提醒阈值：{format_money(threshold)} U",
+            ]
+            if user_id:
+                text_lines.append(f"userId：{user_id}")
+            if user_name:
+                text_lines.append(f"userName：{user_name}")
+            text_lines.extend(["", "请尽快充值。"])
+            text = "\n".join(text_lines)
             for admin_user_id in sorted(settings.admin_user_ids):
                 try:
                     await application.bot.send_message(chat_id=admin_user_id, text=text)

@@ -2452,6 +2452,20 @@ def build_supplier_low_balance_alert_text(
     )
 
 
+def get_supplier_balance_targets(
+    context: ContextTypes.DEFAULT_TYPE,
+) -> list[tuple[str, SupplierClient]]:
+    settings, _, supplier = get_services(context)
+    targets: list[tuple[str, SupplierClient]] = []
+    if str(settings.api_base_url or "").strip():
+        targets.append(("账号列表1", supplier))
+    if str(settings.daxi_api_base_url or "").strip() and str(settings.daxi_api_key or "").strip():
+        targets.append(("列表2", get_daxi_supplier(context)))
+    if str(settings.rz_api_base_url or "").strip() and str(settings.rz_api_key or "").strip():
+        targets.append(("列表3", get_rz_supplier(context)))
+    return targets
+
+
 def build_start_menu_text(
     settings: Settings,
     user: Any,
@@ -9408,17 +9422,22 @@ async def search_text_rich(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     rz_supplier = get_rz_supplier(context)
     modern_errors: list[str] = []
 
-    try:
-        daxi_all_rows = await fetch_daxi_products(daxi_supplier)
-    except SupplierApiError as exc:
-        modern_errors.append(f"{ui_text('search_source_account_list_2', lang)}: {exc}")
+    daxi_result, rz_result = await asyncio.gather(
+        fetch_daxi_products(daxi_supplier),
+        fetch_rz_products(rz_supplier),
+        return_exceptions=True,
+    )
+    if isinstance(daxi_result, Exception):
+        modern_errors.append(f"{ui_text('search_source_account_list_2', lang)}: {daxi_result}")
         daxi_all_rows = []
+    else:
+        daxi_all_rows = daxi_result
 
-    try:
-        rz_all_rows = await fetch_rz_products(rz_supplier)
-    except SupplierApiError as exc:
-        modern_errors.append(f"{ui_text('search_source_account_list_3', lang)}: {exc}")
+    if isinstance(rz_result, Exception):
+        modern_errors.append(f"{ui_text('search_source_account_list_3', lang)}: {rz_result}")
         rz_all_rows = []
+    else:
+        rz_all_rows = rz_result
 
     modern_items: list[dict[str, Any]] = []
     daxi_rows = search_daxi_products_locally(daxi_all_rows, keyword)
@@ -9693,6 +9712,100 @@ async def poll_processing_orders(context: ContextTypes.DEFAULT_TYPE) -> None:
 async def on_application_post_init(application: Application) -> None:
     application.bot_data["main_loop"] = asyncio.get_running_loop()
     await ensure_okpay_callback_server(application)
+
+
+def get_supplier_balance_targets(
+    context: ContextTypes.DEFAULT_TYPE,
+) -> list[tuple[str, SupplierClient]]:
+    settings, _, supplier = get_services(context)
+    targets: list[tuple[str, SupplierClient]] = []
+    if str(settings.api_base_url or "").strip():
+        targets.append(("账号列表1", supplier))
+    if str(settings.daxi_api_base_url or "").strip() and str(settings.daxi_api_key or "").strip():
+        targets.append(("列表2", get_daxi_supplier(context)))
+    if str(settings.rz_api_base_url or "").strip() and str(settings.rz_api_key or "").strip():
+        targets.append(("列表3", get_rz_supplier(context)))
+    return targets
+
+
+async def supplier_balance(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if await should_ignore_for_closed_business(update, context):
+        return
+    settings, _, _ = get_services(context)
+    user = update.effective_user
+    if user is None or update.message is None:
+        return
+    if not is_admin(settings, user.id):
+        await update.message.reply_text("只有管理员可以查看上游余额。")
+        return
+    lines = ["上游余额："]
+    for supplier_name, supplier in get_supplier_balance_targets(context):
+        try:
+            payload = await call_blocking(supplier.query_balance)
+            data = payload.get("data") or {}
+            lines.extend(
+                [
+                    "",
+                    supplier_name,
+                    f"userId: {data.get('userId') or '-'}",
+                    f"userName: {data.get('userName') or '-'}",
+                    f"accountBalance: {format_money(safe_float(data.get('accountBalance')))}",
+                ]
+            )
+        except SupplierApiError as exc:
+            lines.extend(["", supplier_name, f"查询失败: {exc}"])
+    await update.message.reply_text("\n".join(lines), reply_markup=MENU_KEYBOARD)
+
+
+async def poll_supplier_balance_alert(context: ContextTypes.DEFAULT_TYPE) -> None:
+    application = context.application
+    settings, _, _ = get_services(context)
+    threshold = max(0.0, settings.supplier_balance_alert_threshold)
+    if threshold <= 0 or not settings.admin_user_ids:
+        return
+
+    poll_lock = application.bot_data.setdefault("supplier_balance_alert_lock", asyncio.Lock())
+    if poll_lock.locked():
+        return
+
+    async with poll_lock:
+        state = application.bot_data.setdefault(
+            "supplier_balance_alert_state",
+            {},
+        )
+        for supplier_name, supplier in get_supplier_balance_targets(context):
+            try:
+                payload = await call_blocking(supplier.query_balance)
+            except SupplierApiError as exc:
+                logger.warning("supplier balance poll failed: %s - %s", supplier_name, exc)
+                continue
+
+            data = payload.get("data") or {}
+            balance = safe_float(data.get("accountBalance"))
+            supplier_state = state.setdefault(supplier_name, {"alerted": False})
+
+            if balance >= threshold:
+                supplier_state["alerted"] = False
+                supplier_state["last_balance"] = balance
+                continue
+
+            if supplier_state.get("alerted"):
+                supplier_state["last_balance"] = balance
+                continue
+
+            text = f"上游：{supplier_name}\n\n" + build_supplier_low_balance_alert_text(
+                threshold=threshold,
+                balance=balance,
+                user_id=str(data.get("userId") or ""),
+                user_name=str(data.get("userName") or ""),
+            )
+            for admin_user_id in sorted(settings.admin_user_ids):
+                try:
+                    await application.bot.send_message(chat_id=admin_user_id, text=text)
+                except Exception:
+                    logger.exception("supplier balance alert send failed: admin=%s supplier=%s", admin_user_id, supplier_name)
+            supplier_state["alerted"] = True
+            supplier_state["last_balance"] = balance
 
 
 def build_application(settings: Settings) -> Application:

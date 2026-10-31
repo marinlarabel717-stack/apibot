@@ -852,6 +852,18 @@ def should_trigger_product_search(keyword: str) -> bool:
     return any(compact.startswith(country) for country in SEARCH_COUNTRY_KEYWORDS)
 
 
+def is_precise_prefix_keyword(keyword: str) -> bool:
+    return bool(re.fullmatch(r"\+?\d+", normalize_search_keyword(keyword)))
+
+
+def prefix_matches_keyword(prefix_value: Any, keyword: str) -> bool:
+    normalized_prefix = compact_search_text(str(prefix_value or ""))
+    normalized_keyword = compact_search_text(keyword)
+    if not normalized_prefix or not normalized_keyword:
+        return False
+    return normalized_prefix == normalized_keyword or normalized_prefix.lstrip("+") == normalized_keyword.lstrip("+")
+
+
 def get_pending_admin_action(context: ContextTypes.DEFAULT_TYPE) -> dict[str, Any] | None:
     pending = context.user_data.get(PENDING_ADMIN_KEY)
     return pending if isinstance(pending, dict) else None
@@ -5559,12 +5571,20 @@ def search_products_locally(rows: list[dict[str, Any]], keyword: str) -> list[di
     if not compact_keyword:
         return []
     code_keyword = compact_keyword[1:] if compact_keyword.startswith("+") else compact_keyword
+    exact_prefix_search = is_precise_prefix_keyword(normalized)
 
     scored_rows: list[tuple[int, int, int, dict[str, Any]]] = []
     seen_product_ids: set[int] = set()
     for row in rows:
         product_id = safe_int(row.get("productId"))
         if product_id <= 0 or product_id in seen_product_ids:
+            continue
+        if exact_prefix_search:
+            if not prefix_matches_keyword(row.get("prefix") or row.get("phone_code"), normalized):
+                continue
+            stock = max(0, safe_int(row.get("totalStock")))
+            scored_rows.append((0, 0, -stock, row))
+            seen_product_ids.add(product_id)
             continue
         raw_name = str(row.get("productName") or "")
         raw_category = str(row.get("categoryName") or "")
@@ -5596,12 +5616,20 @@ def search_daxi_products_locally(rows: list[dict[str, Any]], keyword: str) -> li
     if not compact_keyword:
         return []
     code_keyword = compact_keyword[1:] if compact_keyword.startswith("+") else compact_keyword
+    exact_prefix_search = is_precise_prefix_keyword(normalized)
 
     scored_rows: list[tuple[int, int, int, str, dict[str, Any]]] = []
     seen_product_ids: set[str] = set()
     for row in rows:
         product_id = str(row.get("productId") or "").strip()
         if not product_id or product_id in seen_product_ids:
+            continue
+        if exact_prefix_search:
+            if not prefix_matches_keyword(row.get("prefix"), normalized):
+                continue
+            stock = max(0, safe_int(row.get("totalStock")))
+            scored_rows.append((0, 0, -stock, compact_search_text(str(row.get("productName") or "")), row))
+            seen_product_ids.add(product_id)
             continue
         parts = [
             str(row.get("productName") or ""),
@@ -5639,12 +5667,20 @@ def search_rz_products_locally(rows: list[dict[str, Any]], keyword: str) -> list
     if not compact_keyword:
         return []
     code_keyword = compact_keyword[1:] if compact_keyword.startswith("+") else compact_keyword
+    exact_prefix_search = is_precise_prefix_keyword(normalized)
 
     scored_rows: list[tuple[int, int, int, str, dict[str, Any]]] = []
     seen_product_ids: set[str] = set()
     for row in rows:
         product_id = str(row.get("productId") or "").strip()
         if not product_id or product_id in seen_product_ids:
+            continue
+        if exact_prefix_search:
+            if not prefix_matches_keyword(row.get("prefix") or row.get("phone_code"), normalized):
+                continue
+            stock = max(0, safe_int(row.get("totalStock")))
+            scored_rows.append((0, 0, -stock, compact_search_text(str(row.get("productName") or "")), row))
+            seen_product_ids.add(product_id)
             continue
         parts = [
             str(row.get("productName") or ""),

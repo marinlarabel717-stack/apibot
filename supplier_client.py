@@ -313,7 +313,48 @@ class DaxiSupplierClient(SupplierClient):
         return self._request_json("GET", f"/api/v1/orders/{str(task_id).strip()}")
 
     def query_balance(self) -> dict[str, Any]:
-        return self._request_json("GET", "/api/v1/balance")
+        payload = self._request_json("GET", "/api/v1/balance")
+        data = payload.get("data")
+        if not isinstance(data, dict):
+            data = payload if isinstance(payload, dict) else {}
+        profile = data.get("user") if isinstance(data.get("user"), dict) else {}
+        return {
+            "success": True,
+            "data": {
+                "userId": (
+                    data.get("userId")
+                    or data.get("user_id")
+                    or data.get("uid")
+                    or data.get("id")
+                    or profile.get("userId")
+                    or profile.get("user_id")
+                    or profile.get("uid")
+                    or profile.get("id")
+                    or data.get("telegramId")
+                    or data.get("telegram_id")
+                ),
+                "userName": (
+                    data.get("userName")
+                    or data.get("username")
+                    or data.get("user_name")
+                    or data.get("name")
+                    or profile.get("userName")
+                    or profile.get("username")
+                    or profile.get("user_name")
+                    or profile.get("name")
+                ),
+                "accountBalance": (
+                    data.get("accountBalance")
+                    or data.get("balance")
+                    or data.get("usdt")
+                    or data.get("amount")
+                    or profile.get("accountBalance")
+                    or profile.get("balance")
+                    or profile.get("usdt")
+                    or profile.get("amount")
+                ),
+            },
+        }
 
     def resolve_download_url(self, file_url: str) -> str:
         return urljoin(f"{self.settings.daxi_api_base_url}/", str(file_url or "").strip())

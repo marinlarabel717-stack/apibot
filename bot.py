@@ -9432,7 +9432,7 @@ async def search_text_rich(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             sell_price = resolve_sell_price(settings, row)
             display_name = shorten(format_rz_product_title(row, lang), 28)
             source_label = ui_text("search_source_account_list_3", lang)
-            callback_data = f"qbuy3:{product_id}:{category_index}:0"
+            callback_data = f"prd3:{product_id}:{category_index}:0"
         modern_items.append(
             {
                 "row": row,

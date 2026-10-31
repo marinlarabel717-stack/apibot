@@ -5223,7 +5223,8 @@ def format_rz_product_title(row: dict[str, Any], lang: str) -> str:
     country = translate_category_name(str(row.get("country") or row.get("country_name") or "").strip(), lang)
     phone_code = str(row.get("prefix") or row.get("phone_code") or "").strip()
     section = translate_category_name(str(row.get("section") or "").strip(), lang)
-    kind_label = format_rz_kind_label(str(row.get("kind") or ""), lang)
+    kind = str(row.get("kind") or row.get("category") or "").strip().lower()
+    kind_label = "" if kind == "api_country" else format_rz_kind_label(str(row.get("kind") or ""), lang)
     flag = build_country_flag_emoji(country)
     parts = [flag, country, phone_code]
     base = " ".join(part for part in parts if part).strip()

@@ -127,8 +127,8 @@ BUTTON_MAIN_MENU = "主菜单"
 BUTTON_PROFILE = "个人中心"
 BUTTON_RECHARGE = "我要充值"
 BUTTON_ACCOUNT_LIST = "账号列表"
-BUTTON_ACCOUNT_LIST_2 = "账号列表"
-BUTTON_ACCOUNT_LIST_3 = "账号列表3"
+BUTTON_ACCOUNT_LIST_2 = "账号列表②"
+BUTTON_ACCOUNT_LIST_3 = "账号列表③"
 BUTTON_RECHARGE_BALANCE = "充值余额"
 BUTTON_PURCHASE_NOTICE = "购买须知"
 BUTTON_ORDER_HISTORY = "购买记录"
@@ -290,13 +290,13 @@ UI_TEXTS.update(
         "product_row_price": {"zh": "{name} 库存 [{stock}] - ${price}", "en": "{name} Stock [{stock}] - ${price}"},
         "view_product": {"zh": "查看 {name}", "en": "View {name}"},
         "account_list_2_intro": {"zh": "请选择需要的商品：", "en": "Please choose a product:"},
-        "back_account_list_2": {"zh": "返回账号列表", "en": "Back to Account List"},
-        "no_products_in_account_list_2": {"zh": "账号列表当前没有商品。", "en": "Account List has no products right now."},
-        "fetch_account_list_2_failed": {"zh": "获取账号列表失败: {error}", "en": "Failed to load Account List: {error}"},
+        "back_account_list_2": {"zh": "返回账号列表②", "en": "Back to Account List 2"},
+        "no_products_in_account_list_2": {"zh": "账号列表②当前没有商品。", "en": "Account List 2 has no products right now."},
+        "fetch_account_list_2_failed": {"zh": "获取账号列表②失败: {error}", "en": "Failed to load Account List 2: {error}"},
         "account_list_3_intro": {"zh": "请选择需要的商品：", "en": "Please choose a product:"},
-        "back_account_list_3": {"zh": "返回账号列表3", "en": "Back to Account List 3"},
-        "no_products_in_account_list_3": {"zh": "账号列表3当前没有商品。", "en": "Account List 3 has no products right now."},
-        "fetch_account_list_3_failed": {"zh": "获取账号列表3失败: {error}", "en": "Failed to load Account List 3: {error}"},
+        "back_account_list_3": {"zh": "返回账号列表③", "en": "Back to Account List 3"},
+        "no_products_in_account_list_3": {"zh": "账号列表③当前没有商品。", "en": "Account List 3 has no products right now."},
+        "fetch_account_list_3_failed": {"zh": "获取账号列表③失败: {error}", "en": "Failed to load Account List 3: {error}"},
         "previous_page": {"zh": "上一页", "en": "Previous"},
         "next_page": {"zh": "下一页", "en": "Next"},
         "no_categories": {"zh": "当前没有分类。", "en": "No categories available right now."},
@@ -389,13 +389,13 @@ UI_TEXTS.update(
             "en": "Please choose a category first:",
         },
         "account_list_2_products_intro": {"zh": "当前分类：{category_name}", "en": "Current category: {category_name}"},
-        "no_categories_in_account_list_2": {"zh": "账号列表当前没有可用分类。", "en": "Account List has no categories right now."},
+        "no_categories_in_account_list_2": {"zh": "账号列表②当前没有可用分类。", "en": "Account List 2 has no categories right now."},
         "account_list_3_intro": {
             "zh": "请先选择分类：",
             "en": "Please choose a category first:",
         },
         "account_list_3_products_intro": {"zh": "当前分类：{category_name}", "en": "Current category: {category_name}"},
-        "no_categories_in_account_list_3": {"zh": "账号列表3当前没有可用分类。", "en": "Account List 3 has no categories right now."},
+        "no_categories_in_account_list_3": {"zh": "账号列表③当前没有可用分类。", "en": "Account List 3 has no categories right now."},
     }
 )
 CATEGORY_NAME_TRANSLATIONS: list[tuple[str, str]] = [

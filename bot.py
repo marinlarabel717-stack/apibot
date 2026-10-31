@@ -1850,7 +1850,16 @@ def resolve_button_icon(settings: Settings, name: str) -> tuple[str, str | None]
 
 def translate_category_name(name: str, lang: str) -> str:
     text = str(name or "").strip()
-    if not text or normalize_lang_code(lang) != "en":
+    normalized_lang = normalize_lang_code(lang)
+    if not text:
+        return text
+    if normalized_lang == "zh":
+        compact_text = compact_search_text(text)
+        for source, target in DISPLAY_NAME_TRANSLATIONS:
+            if compact_search_text(target) == compact_text:
+                return source
+        return text
+    if normalized_lang != "en":
         return text
     translated = text
     for source, target in DISPLAY_NAME_TRANSLATIONS:
@@ -4834,6 +4843,13 @@ def build_country_flag_emoji(country_name: str) -> str:
         "科索沃": "XK",
     }
     country_code = country_map.get(normalized, "")
+    if not country_code:
+        for source, target in DISPLAY_NAME_TRANSLATIONS:
+            if compact_search_text(target) != normalized:
+                continue
+            country_code = country_map.get(compact_search_text(source), "")
+            if country_code:
+                break
     if len(country_code) != 2 or not country_code.isalpha():
         return ""
     base = 127397

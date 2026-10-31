@@ -846,14 +846,14 @@ def should_trigger_product_search(keyword: str) -> bool:
         return False
 
     compact = compact_search_text(normalized)
-    if re.fullmatch(r"\+\d{1,4}(?:[^\d].*)?", compact):
+    if re.fullmatch(r"\+\d{1,4}", compact):
         return True
 
     return any(compact.startswith(country) for country in SEARCH_COUNTRY_KEYWORDS)
 
 
 def is_precise_prefix_keyword(keyword: str) -> bool:
-    return bool(re.fullmatch(r"\+?\d+", normalize_search_keyword(keyword)))
+    return bool(re.fullmatch(r"\+\d+", normalize_search_keyword(keyword)))
 
 
 def prefix_matches_keyword(prefix_value: Any, keyword: str) -> bool:

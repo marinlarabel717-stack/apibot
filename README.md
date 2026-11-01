@@ -67,6 +67,8 @@
 
 ## API 文档结论
 
+更完整的对接说明见 [API.md](./API.md)。
+
 我已经确认文档的 OpenAPI 在：
 
 ```text

@@ -165,6 +165,8 @@ class Store:
             if "is_active" not in user_columns:
                 conn.execute("ALTER TABLE users ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1")
             order_columns = {row["name"] for row in conn.execute("PRAGMA table_info(orders)").fetchall()}
+            if "unit_cost" not in order_columns:
+                conn.execute("ALTER TABLE orders ADD COLUMN unit_cost REAL")
             if "source" not in order_columns:
                 conn.execute("ALTER TABLE orders ADD COLUMN source TEXT NOT NULL DEFAULT 'legacy'")
             if "delivery_ready_sent_at" not in order_columns:
@@ -311,6 +313,7 @@ class Store:
         total_price: float,
         payload: dict[str, Any],
         source: str = "legacy",
+        unit_cost: float | None = None,
     ) -> None:
         with self._lock, self._connect() as conn:
             ts = now_iso()
@@ -319,8 +322,8 @@ class Store:
                 INSERT OR REPLACE INTO orders (
                     task_id, user_id, username, product_id, product_name, quantity,
                     quantity_success, unit_price, total_price, refund_amount, state, source,
-                    file_url, delivery_ready_sent_at, delivery_sent_at, delivery_error, raw_payload, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, 0, 'processing', ?, '', '', '', '', ?, ?, ?)
+                    file_url, delivery_ready_sent_at, delivery_sent_at, delivery_error, raw_payload, created_at, updated_at, unit_cost
+                ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, 0, 'processing', ?, '', '', '', '', ?, ?, ?, ?)
                 """,
                 (
                     str(task_id),
@@ -335,6 +338,7 @@ class Store:
                     json.dumps(payload, ensure_ascii=False),
                     ts,
                     ts,
+                    float(unit_cost) if unit_cost is not None else None,
                 ),
             )
             conn.commit()
@@ -387,6 +391,25 @@ class Store:
                 (str(start_at), str(end_at)),
             ).fetchone()
             return float(row["total"]) if row else 0.0
+
+    def get_supplier_sales_stats(self) -> dict[str, dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT COALESCE(NULLIF(source, ''), 'legacy') AS source,
+                    COUNT(CASE WHEN quantity_success > 0 THEN 1 END) AS sold_orders,
+                    COALESCE(SUM(MIN(quantity, MAX(0, quantity_success))), 0) AS sold_quantity,
+                    COALESCE(SUM(total_price - refund_amount), 0) AS net_sales,
+                    COALESCE(SUM(CASE WHEN unit_cost IS NOT NULL THEN
+                        total_price - refund_amount - unit_cost * MIN(quantity, MAX(0, quantity_success))
+                        ELSE 0 END), 0) AS known_profit,
+                    COUNT(CASE WHEN unit_cost IS NULL AND quantity_success > 0 THEN 1 END) AS missing_cost_orders
+                FROM orders
+                WHERE state IN ('completed', 'partial')
+                GROUP BY COALESCE(NULLIF(source, ''), 'legacy')
+                """
+            ).fetchall()
+            return {row["source"]: dict(row) for row in rows}
 
     def get_admin_home_stats(
         self,

@@ -213,6 +213,18 @@ class TgstorexSupplierClient(SupplierClient):
             raise TgstorexPurchaseUncertain("Purchase response has no order ID")
         return {"success": True, "data": {"orderId": str(data["id"]), "status": "processing"}}
 
+    def query_balance(self) -> dict[str, Any]:
+        payload = self._request_json("GET", "/orders", params={"order_type": "sessions", "per_page": 1})
+        meta = payload.get("meta")
+        value = meta.get("wallet_balance") if isinstance(meta, dict) else None
+        try:
+            balance = float(value)
+        except (TypeError, ValueError, OverflowError):
+            raise SupplierApiError("Session supplier did not return a wallet balance") from None
+        if isinstance(value, bool) or not math.isfinite(balance):
+            raise SupplierApiError("Session supplier returned an invalid wallet balance")
+        return {"success": True, "data": {"accountBalance": balance, "currency": "USD"}}
+
     def query_order(self, task_id: str) -> dict[str, Any]:
         if str(task_id).startswith("tgx-review-"):
             return {"success": True, "data": {"orderId": task_id, "status": "processing", "needsReview": True}}

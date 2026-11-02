@@ -137,6 +137,7 @@ class AccountListTests(unittest.IsolatedAsyncioTestCase):
                 await bot.execute_purchase(context, 1, "buyer", "Buyer", "1", 1, source=source)
                 self.assertEqual(notify.await_args.kwargs["source"], source)
                 self.assertEqual(store.record_order.call_args.args[-1], source)
+                self.assertEqual(store.record_order.call_args.kwargs["unit_cost"], row["price"])
 
     def test_all_menu_combinations(self):
         for enabled in itertools.product((False, True), repeat=3):

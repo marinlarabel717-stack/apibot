@@ -343,15 +343,11 @@ class DaxiSupplierClient(SupplierClient):
                     or profile.get("user_name")
                     or profile.get("name")
                 ),
-                "accountBalance": (
-                    data.get("accountBalance")
-                    or data.get("balance")
-                    or data.get("usdt")
-                    or data.get("amount")
-                    or profile.get("accountBalance")
-                    or profile.get("balance")
-                    or profile.get("usdt")
-                    or profile.get("amount")
+                "accountBalance": next(
+                    (record[key] for record in (data, profile)
+                     for key in ("accountBalance", "balance", "usdt", "amount")
+                     if record.get(key) is not None and record[key] != ""),
+                    None,
                 ),
             },
         }

@@ -7304,6 +7304,7 @@ def build_admin_home_keyboard() -> InlineKeyboardMarkup:
                 InlineKeyboardButton("售价配置", callback_data="adm:cfg:pricing"),
                 InlineKeyboardButton("客服/补货", callback_data="adm:cfg:contact"),
             ],
+            [InlineKeyboardButton("查看余额", callback_data="adm:balances")],
             [InlineKeyboardButton("取消当前操作", callback_data="adm:cancel")],
         ]
     )
@@ -7974,6 +7975,9 @@ async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
         await answer_callback_query_safely(query, "只有管理员可以操作", show_alert=True)
         return
     sub = parts[1] if len(parts) > 1 else ""
+    if sub == "balances":
+        await show_admin_supplier_balances(update, context)
+        return
     if sub == "home":
         await show_admin_home(update, context)
         return
@@ -8250,6 +8254,9 @@ async def execute_purchase(
         refund_text, refund_entities = build_purchase_refund_error_text_localized(total_price, refunded, lang)
         return refund_text, refund_entities, None
 
+    unit_cost = safe_float(row.get("price"), -1)
+    if not Decimal(str(unit_cost)).is_finite() or unit_cost < 0:
+        unit_cost = None
     await call_blocking(
         store.record_order,
         task_id,
@@ -8262,6 +8269,7 @@ async def execute_purchase(
         total_price,
         buy_payload,
         normalized_source,
+        unit_cost=unit_cost,
     )
     await notify_admin_new_purchase(
         context,
@@ -10160,7 +10168,78 @@ def get_supplier_balance_targets(
         targets.append(("列表②", get_daxi_supplier(context)))
     if str(settings.rz_api_base_url or "").strip() and str(settings.rz_api_key or "").strip():
         targets.append(("列表③", get_rz_supplier(context)))
+    if str(settings.tgstorex_api_base_url or "").strip() and str(settings.tgstorex_api_key or "").strip():
+        targets.append(("列表④", get_tgstorex_supplier(context)))
     return targets
+
+
+async def show_admin_supplier_balances(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    settings, _, _ = get_services(context)
+    if update.effective_user is None or not is_admin(settings, update.effective_user.id):
+        await send_menu_message(update, "只有管理员可以查看上游余额。")
+        return
+    await reply_inline(update, "正在查询四个上游的可用余额，请稍候。")
+    try:
+        sales_stats = await call_blocking(context.application.bot_data["store"].get_supplier_sales_stats)
+    except Exception as exc:
+        logger.warning("Supplier sales stats unavailable (%s)", type(exc).__name__)
+        sales_stats = None
+    targets = dict(get_supplier_balance_targets(context))
+    notes = (("列表①", "旧接口"), ("列表②", "DAXI"),
+             ("列表③", "RZ / DariMarket"), ("列表④", "Tgstorex · 会话包"))
+
+    async def query_one(name: str, note: str) -> str:
+        lines = [f"账号{name}", f"备注：{note}"]
+        source = {"列表①": LEGACY_SOURCE, "列表②": DAXI_SOURCE, "列表③": RZ_SOURCE, "列表④": TGSTOREX_SOURCE}[name]
+        stats_lines = []
+        if sales_stats is None:
+            stats_lines.append("销售统计：暂不可用")
+        else:
+            stats = sales_stats.get(source, {})
+            stats_lines.extend([
+                f"累计售出：{safe_int(stats.get('sold_quantity'))} 个 / {safe_int(stats.get('sold_orders'))} 单",
+                f"实收销售额：{format_money(safe_float(stats.get('net_sales')))} U",
+                f"商品利润（已记录成本）：{format_money(safe_float(stats.get('known_profit')))} U",
+            ])
+            missing = safe_int(stats.get("missing_cost_orders"))
+            if missing:
+                stats_lines.append(f"成本缺失：{missing} 单，未计入利润")
+        supplier = targets.get(name)
+        if supplier is None:
+            return "\n".join([*lines, "可用余额：未配置", *stats_lines])
+        try:
+            payload = await asyncio.wait_for(call_blocking(supplier.query_balance), timeout=15)
+            data = payload.get("data")
+            if payload.get("success") is False or not isinstance(data, dict):
+                raise ValueError("Invalid balance response")
+            value = data.get("accountBalance")
+            amount = Decimal(str(value))
+            if isinstance(value, bool) or not amount.is_finite():
+                raise ValueError("Invalid balance amount")
+            unit = "USD" if name == "列表④" else "U"
+            lines.append(f"可用余额：{format_money(amount)} {unit}")
+            user_id, user_name = data.get("userId"), data.get("userName")
+            if user_id is not None and str(user_id).strip():
+                lines.append(f"上游账号ID：{str(user_id).strip()[:80]}")
+            if user_name is not None and str(user_name).strip():
+                lines.append(f"上游账号：{str(user_name).strip()[:80]}")
+        except asyncio.TimeoutError:
+            lines.append("可用余额：查询超时，请点击刷新重试")
+        except Exception as exc:
+            logger.warning("Admin supplier balance unavailable: %s (%s)", name, type(exc).__name__)
+            lines.append("可用余额：查询失败，请检查上游配置、权限或网络")
+        return "\n".join([*lines, *stats_lines])
+
+    sections = await asyncio.gather(*(query_one(name, note) for name, note in notes))
+    text = "上游余额与销售统计\n\n" + "\n\n".join(sections)
+    text += "\n\n销量仅计已结算订单的实际成功数量；销售额已扣退款。"
+    text += "\n商品利润按下单时成本计算，未扣手续费、汇差及运营费用；历史缺失成本不估算。"
+    text += "\n各上游余额独立，不合并计算。点击刷新可重新查询。"
+    keyboard = InlineKeyboardMarkup([[
+        InlineKeyboardButton("刷新余额", callback_data="adm:balances"),
+        InlineKeyboardButton("返回后台", callback_data="adm:home"),
+    ]])
+    await reply_inline(update, text, keyboard)
 
 
 async def supplier_balance(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -10173,21 +10252,7 @@ async def supplier_balance(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if not is_admin(settings, user.id):
         await update.message.reply_text("只有管理员可以查看上游余额。")
         return
-    lines = ["上游余额："]
-    for supplier_name, supplier in get_supplier_balance_targets(context):
-        try:
-            payload = await call_blocking(supplier.query_balance)
-            data = payload.get("data") or {}
-            user_id = str(data.get("userId") or "").strip()
-            user_name = str(data.get("userName") or "").strip()
-            lines.extend(["", supplier_name, f"accountBalance: {format_money(safe_float(data.get('accountBalance')))}"])
-            if user_id:
-                lines.append(f"userId: {user_id}")
-            if user_name:
-                lines.append(f"userName: {user_name}")
-        except SupplierApiError as exc:
-            lines.extend(["", supplier_name, f"查询失败: {exc}"])
-    await update.message.reply_text("\n".join(lines), reply_markup=MENU_KEYBOARD)
+    await show_admin_supplier_balances(update, context)
 
 
 async def poll_supplier_balance_alert(context: ContextTypes.DEFAULT_TYPE) -> None:

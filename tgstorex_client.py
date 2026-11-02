@@ -290,7 +290,17 @@ class TgstorexSupplierClient(SupplierClient):
                         next_url = str(data.get("file_url") or "").strip()
                         if not next_url:
                             raise SupplierApiError("上游未提供实际会话包下载地址。")
-                        download_url = self.resolve_download_url(urljoin(download_url, next_url))
+                        next_url = self.resolve_download_url(urljoin(download_url, next_url))
+                        parsed = urlparse(download_url)
+                        if (
+                            next_url == download_url
+                            and expected_order
+                            and re.fullmatch(r"/orders/[^/]+/file/?", parsed.path.removeprefix(urlparse(self.settings.tgstorex_api_base_url).path))
+                            and not parsed.query
+                        ):
+                            # Some file routes return status until download mode is requested.
+                            next_url = parsed._replace(query="download=1").geturl()
+                        download_url = next_url
                         continue
                     if "html" in content_type:
                         raise SupplierApiError("上游下载返回了网页而不是 ZIP，请检查下载权限后重试原订单。")

@@ -268,7 +268,6 @@ class SessionFileTests(unittest.TestCase):
         for data in (
             {"ready": True, "file_url": "https://evil.example/stolen"},
             {"ready": True, "file_url": "http://127.0.0.1/private"},
-            {"ready": True, "file_url": "/api/v1/orders/test/file"},
             {"ready": False, "file_url": "?download=1"},
             {"ready": True, "order_id": "other-order", "file_url": "?download=1"},
         ):
@@ -277,6 +276,37 @@ class SessionFileTests(unittest.TestCase):
                 with self.assertRaises(SupplierApiError):
                     self.client.download_session_file("/api/v1/orders/test/file", Path(directory) / "result.zip")
                 self.client.session.get.assert_called_once()
+
+    def test_self_descriptor_tries_download_mode_once(self):
+        descriptor = {"data": {"order_id": "test", "ready": True,
+                                "file_url": "/api/v1/orders/test/file"}}
+        original = zip_bytes()
+        self.client.session.get = MagicMock(side_effect=[
+            response(json.dumps(descriptor).encode(), "application/json"), response(original),
+        ])
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "result.zip"
+            self.client.download_session_file(descriptor["data"]["file_url"], target)
+            self.assertEqual(target.read_bytes(), original)
+        self.assertEqual(self.client.session.get.call_count, 2)
+        self.assertEqual(self.client.session.get.call_args.args[0],
+                         "https://tgstorex.com/api/v1/orders/test/file?download=1")
+
+    def test_download_mode_cannot_loop_or_modify_other_queries(self):
+        for path, expected_calls in (
+            ("/api/v1/orders/test/file", 2),
+            ("/api/v1/orders/test/file?download=1", 1),
+            ("/api/v1/orders/test/file?signature=preserve", 1),
+            ("/storage/test.zip", 1),
+        ):
+            with self.subTest(path=path), tempfile.TemporaryDirectory() as directory:
+                body = json.dumps({"data": {"ready": True, "file_url": path}}).encode()
+                self.client.session.get = MagicMock(return_value=response(body, "application/json"))
+                target = Path(directory) / "result.zip"
+                with self.assertRaises(SupplierApiError):
+                    self.client.download_session_file(path, target)
+                self.assertEqual(self.client.session.get.call_count, expected_calls)
+                self.assertFalse(target.exists())
 
     def test_multiple_packages_keep_original_directory_layout(self):
         original = zip_bytes("tdata/key_data")

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import threading
 import time
 import zipfile
@@ -248,26 +249,58 @@ class TgstorexSupplierClient(SupplierClient):
             except SupplierApiError:
                 pass  # Never reuse corrupt files cached by an older version.
         temp_path = target_path.with_suffix(target_path.suffix + ".part")
+        download_url = self.resolve_download_url(file_url)
+        expected_order = re.search(r"/orders/([^/]+)/file(?:/|$)", urlparse(download_url).path)
+        visited = set()
         try:
-            with self.session.get(
-                self.resolve_download_url(file_url),
-                headers=self.build_download_headers(),
-                timeout=self.settings.tgstorex_api_timeout_seconds,
-                stream=True,
-                allow_redirects=False,
-            ) as response:
-                response.raise_for_status()
-                if 300 <= response.status_code < 400:
-                    raise SupplierApiError("会话包下载被上游重定向，请检查下载权限后重试原订单。")
-                content_type = str(response.headers.get("Content-Type") or "").lower()
-                if "html" in content_type or "json" in content_type:
-                    raise SupplierApiError("上游下载返回了网页或错误信息，而不是 ZIP；请重试原订单。")
-                with temp_path.open("wb") as handle:
-                    for chunk in response.iter_content(chunk_size=65536):
-                        if chunk:
-                            handle.write(chunk)
-            self.validate_delivery_file(temp_path)
-            temp_path.replace(target_path)
-            return target_path
+            for _ in range(4):
+                if download_url in visited:
+                    raise SupplierApiError("上游下载地址循环跳转，请联系上游核查原订单。")
+                visited.add(download_url)
+                with self.session.get(
+                    download_url,
+                    headers=self.build_download_headers(),
+                    timeout=self.settings.tgstorex_api_timeout_seconds,
+                    stream=True,
+                    allow_redirects=False,
+                ) as response:
+                    response.raise_for_status()
+                    if 300 <= response.status_code < 400:
+                        location = str(response.headers.get("Location") or "").strip()
+                        if not location:
+                            raise SupplierApiError("上游下载重定向缺少文件地址。")
+                        download_url = self.resolve_download_url(urljoin(download_url, location))
+                        continue
+                    content_type = str(response.headers.get("Content-Type") or "").lower()
+                    if "json" in content_type:
+                        descriptor = bytearray()
+                        for chunk in response.iter_content(chunk_size=8192):
+                            descriptor.extend(chunk)
+                            if len(descriptor) > 65536:
+                                raise SupplierApiError("上游文件描述响应过大，已停止下载。")
+                        try:
+                            payload = json.loads(descriptor)
+                        except (ValueError, UnicodeError):
+                            raise SupplierApiError("上游文件描述不是有效 JSON。") from None
+                        data = payload.get("data") if isinstance(payload, dict) else None
+                        if not isinstance(data, dict) or data.get("ready") is not True:
+                            raise SupplierApiError("上游会话包文件尚未就绪或下载权限不足，请稍后重试原订单。")
+                        if expected_order and data.get("order_id") not in (None, expected_order.group(1)):
+                            raise SupplierApiError("上游返回的会话包订单号不匹配，已停止下载。")
+                        next_url = str(data.get("file_url") or "").strip()
+                        if not next_url:
+                            raise SupplierApiError("上游未提供实际会话包下载地址。")
+                        download_url = self.resolve_download_url(urljoin(download_url, next_url))
+                        continue
+                    if "html" in content_type:
+                        raise SupplierApiError("上游下载返回了网页而不是 ZIP，请检查下载权限后重试原订单。")
+                    with temp_path.open("wb") as handle:
+                        for chunk in response.iter_content(chunk_size=65536):
+                            if chunk:
+                                handle.write(chunk)
+                self.validate_delivery_file(temp_path)
+                temp_path.replace(target_path)
+                return target_path
+            raise SupplierApiError("上游下载跳转次数过多，请联系上游核查原订单。")
         finally:
             temp_path.unlink(missing_ok=True)

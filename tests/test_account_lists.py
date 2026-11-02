@@ -1,5 +1,6 @@
 import io
 import itertools
+import json
 import os
 import sys
 import tempfile
@@ -246,6 +247,36 @@ class SessionFileTests(unittest.TestCase):
                     self.client.download_session_file("/orders/test/file", target)
                 self.assertFalse(target.exists())
                 self.assertFalse(target.with_suffix(".zip.part").exists())
+
+    def test_download_follows_ready_descriptor_to_original_zip(self):
+        original = zip_bytes()
+        descriptor = {"data": {"order_id": "test", "ready": True, "status": "done", "message": "ready",
+                                "file_url": "?download=1", "file_path": "downloads/test.zip"}}
+        self.client.session.get = MagicMock(side_effect=[
+            response(json.dumps(descriptor).encode(), "application/json"), response(original),
+        ])
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "result.zip"
+            self.client.download_session_file("/api/v1/orders/test/file", target)
+            self.assertEqual(target.read_bytes(), original)
+        calls = self.client.session.get.call_args_list
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[1].args[0], "https://tgstorex.com/api/v1/orders/test/file?download=1")
+        self.assertTrue(all(c.kwargs["headers"]["Authorization"] == "Bearer test-token" for c in calls))
+
+    def test_descriptor_does_not_leak_credentials_or_loop(self):
+        for data in (
+            {"ready": True, "file_url": "https://evil.example/stolen"},
+            {"ready": True, "file_url": "http://127.0.0.1/private"},
+            {"ready": True, "file_url": "/api/v1/orders/test/file"},
+            {"ready": False, "file_url": "?download=1"},
+            {"ready": True, "order_id": "other-order", "file_url": "?download=1"},
+        ):
+            with self.subTest(data=data), tempfile.TemporaryDirectory() as directory:
+                self.client.session.get = MagicMock(return_value=response(json.dumps({"data": data}).encode(), "application/json"))
+                with self.assertRaises(SupplierApiError):
+                    self.client.download_session_file("/api/v1/orders/test/file", Path(directory) / "result.zip")
+                self.client.session.get.assert_called_once()
 
     def test_multiple_packages_keep_original_directory_layout(self):
         original = zip_bytes("tdata/key_data")

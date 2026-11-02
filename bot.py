@@ -15,6 +15,7 @@ import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, ROUND_DOWN
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
@@ -62,6 +63,9 @@ OKPAY_HTTP_LOCAL = threading.local()
 CATEGORY_CACHE_TTL_SECONDS = 300
 PRODUCT_DETAIL_CACHE_TTL_SECONDS = 300
 SEARCH_CACHE_TTL_SECONDS = 180
+CATALOG_REFRESH_SECONDS = 60
+CATALOG_RETRY_SECONDS = 30
+SEARCH_COLD_WAIT_SECONDS = 0.5
 CATEGORY_LIST_CACHE: dict[int, tuple[float, list[dict[str, Any]]]] = {}
 CATEGORY_PRODUCTS_CACHE: dict[tuple[int, int], tuple[float, list[dict[str, Any]]]] = {}
 PRODUCT_DETAIL_CACHE: dict[tuple[int, int], tuple[float, dict[str, Any]]] = {}
@@ -73,7 +77,6 @@ DAXI_GROUPS_CACHE: dict[int, tuple[float, list[dict[str, Any]]]] = {}
 RZ_PRODUCTS_CACHE: dict[tuple[int, str], tuple[float, list[dict[str, Any]]]] = {}
 RZ_PRODUCT_DETAIL_CACHE: dict[tuple[int, str], tuple[float, dict[str, Any]]] = {}
 RZ_GROUPS_CACHE: dict[int, tuple[float, list[dict[str, Any]]]] = {}
-CATALOG_WARMUP_TASKS: dict[str, asyncio.Task[Any]] = {}
 
 
 PRODUCTS_PER_PAGE = 30
@@ -276,7 +279,7 @@ UI_TEXTS: dict[str, dict[str, str]] = {
     "search_empty": {"zh": "没有搜到商品。", "en": "No products found."},
     "enter_number": {"zh": "请输入数字", "en": "Please enter a number."},
     "recharge_amount_positive": {"zh": "充值金额必须大于 0。", "en": "Recharge amount must be greater than 0."},
-    "enter_quantity": {"zh": "请输入要购买的数量，直接发数字即可，例如：1", "en": "Please enter the quantity as a number, for example: 1"},
+    "enter_quantity": {"zh": "✋请发送需要购买的数量：\n例如： 10", "en": "Please enter the quantity as a number, for example: 1"},
     "fetch_product_detail_failed": {"zh": "获取商品详情失败: {error}", "en": "Failed to get product details: {error}"},
     "category_param_invalid": {"zh": "分类参数不合法。", "en": "Invalid category parameter."},
     "product_param_invalid": {"zh": "商品参数不合法。", "en": "Invalid product parameter."},
@@ -322,7 +325,7 @@ UI_TEXTS.update(
         "close_done": {"zh": "已关闭。", "en": "Closed."},
         "recharge_canceled": {"zh": "已取消充值。", "en": "Recharge cancelled."},
         "invalid_recharge_order": {"zh": "这笔订单当前不能取消。", "en": "This order cannot be cancelled right now."},
-        "quick_buy_prompt": {"zh": "请发送需要购买的数量，直接回复数字即可，例如：1", "en": "Send the quantity you want to buy as a number, for example: 1"},
+        "quick_buy_prompt": {"zh": "✋请发送需要购买的数量：\n例如： 10", "en": "Send the quantity you want to buy as a number, for example: 1"},
         "unsupported_button": {"zh": "暂不支持这个按钮", "en": "This button is not supported yet."},
         "usage_buy": {"zh": "用法: /buy <product_id> <数量>", "en": "Usage: /buy <product_id> <quantity>"},
         "usage_order": {"zh": "用法: /order <task_id>", "en": "Usage: /order <task_id>"},
@@ -401,6 +404,8 @@ UI_TEXTS.update(
         "legacy_supplier_disabled_notice": {"zh": "账号列表①已关闭，请使用其他账号列表。", "en": "Account list 1 is disabled. Please use another account list."},
         "account_list_disabled_notice": {"zh": "账号列表{number}已关闭，请使用其他账号列表。", "en": "Account list {number} is disabled. Please use another account list."},
         "account_list_toggled_notice": {"zh": "账号列表{number}{status}。", "en": "Account list {number} is {status}."},
+        "search_catalog_loading": {"zh": "{lists}正在加载或重试，结果可能未齐全，请稍后再搜。", "en": "{lists} are loading or retrying. Results may be incomplete; please search again shortly."},
+        "search_cached_notice": {"zh": "库存和价格为缓存快照，以购买确认页为准。", "en": "Stock and prices are cached snapshots; confirm the current quote before buying."},
         "account_list_2_intro": {
             "zh": "请先选择分类：",
             "en": "Please choose a category first:",
@@ -1960,6 +1965,7 @@ def resolve_button_icon(settings: Settings, name: str) -> tuple[str, str | None]
     return "📦", None
 
 
+@lru_cache(maxsize=4096)
 def translate_category_name(name: str, lang: str) -> str:
     text = str(name or "").strip()
     normalized_lang = normalize_lang_code(lang)
@@ -5155,11 +5161,11 @@ async def show_daxi_products(
     )
 
 
-async def fetch_categories(supplier: SupplierClient) -> list[dict[str, Any]]:
+async def fetch_categories(supplier: SupplierClient, *, refresh: bool = False) -> list[dict[str, Any]]:
     cache_key = id(supplier)
     now = time.monotonic()
     cached = CATEGORY_LIST_CACHE.get(cache_key)
-    if cached and now - cached[0] < CATEGORY_CACHE_TTL_SECONDS:
+    if not refresh and cached and now - cached[0] < CATEGORY_CACHE_TTL_SECONDS:
         return cached[1]
     payload = await call_blocking(supplier.get_categories)
     rows = payload.get("data") or []
@@ -5167,11 +5173,11 @@ async def fetch_categories(supplier: SupplierClient) -> list[dict[str, Any]]:
     return rows
 
 
-async def fetch_category_products(supplier: SupplierClient, category_id: int) -> list[dict[str, Any]]:
+async def fetch_category_products(supplier: SupplierClient, category_id: int, *, refresh: bool = False) -> list[dict[str, Any]]:
     cache_key = (id(supplier), int(category_id))
     now = time.monotonic()
     cached = CATEGORY_PRODUCTS_CACHE.get(cache_key)
-    if cached and now - cached[0] < CATEGORY_CACHE_TTL_SECONDS:
+    if not refresh and cached and now - cached[0] < CATEGORY_CACHE_TTL_SECONDS:
         return cached[1]
     payload = await call_blocking(supplier.get_products, category_id)
     rows = payload.get("data") or []
@@ -5204,12 +5210,14 @@ def normalize_daxi_product_row(row: dict[str, Any]) -> dict[str, Any]:
 async def fetch_daxi_products(
     supplier: DaxiSupplierClient,
     query: str = "",
+    *,
+    refresh: bool = False,
 ) -> list[dict[str, Any]]:
     normalized_query = normalize_search_keyword(query)
     cache_key = (id(supplier), normalized_query)
     now = time.monotonic()
     cached = DAXI_PRODUCTS_CACHE.get(cache_key)
-    if cached and (now - cached[0] < CATEGORY_CACHE_TTL_SECONDS or not normalized_query):
+    if not refresh and cached and (now - cached[0] < CATEGORY_CACHE_TTL_SECONDS or not normalized_query):
         return cached[1]
     payload = await call_blocking(supplier.get_products, normalized_query)
     rows = [
@@ -5217,7 +5225,7 @@ async def fetch_daxi_products(
         for normalized_row in (normalize_daxi_product_row(row) for row in (payload.get("data") or []))
         if not is_hidden_daxi_product(normalized_row)
     ]
-    DAXI_PRODUCTS_CACHE[cache_key] = (now, rows)
+    DAXI_PRODUCTS_CACHE[cache_key] = (time.monotonic(), rows)
     if not normalized_query:
         DAXI_GROUPS_CACHE[id(supplier)] = (now, group_daxi_products(rows))
     return rows
@@ -5270,6 +5278,11 @@ def resolve_rz_region_key(row: dict[str, Any]) -> str:
     if row.get("source") == TGSTOREX_SOURCE and row.get("region") in {"asia", "europe", "africa", "americas", "oceania"}:
         return str(row["region"])
     country_name = str(row.get("country") or row.get("country_name") or "").strip()
+    return resolve_country_region_name(country_name)
+
+
+@lru_cache(maxsize=512)
+def resolve_country_region_name(country_name: str) -> str:
     normalized = compact_search_text(country_name)
     if not normalized:
         return ""
@@ -5578,16 +5591,18 @@ def render_rz_product_detail_view_localized(
 async def fetch_rz_products(
     supplier: RzSupplierClient,
     query: str = "",
+    *,
+    refresh: bool = False,
 ) -> list[dict[str, Any]]:
     normalized_query = normalize_search_keyword(query)
     cache_key = (id(supplier), normalized_query)
     now = time.monotonic()
     cached = RZ_PRODUCTS_CACHE.get(cache_key)
-    if cached and (now - cached[0] < CATEGORY_CACHE_TTL_SECONDS or not normalized_query):
+    if not refresh and cached and (now - cached[0] < CATEGORY_CACHE_TTL_SECONDS or not normalized_query):
         return cached[1]
     payload = await call_blocking(supplier.get_products, normalized_query)
     rows = list(payload.get("data") or [])
-    RZ_PRODUCTS_CACHE[cache_key] = (now, rows)
+    RZ_PRODUCTS_CACHE[cache_key] = (time.monotonic(), rows)
     return rows
 
 
@@ -5833,16 +5848,22 @@ async def on_tgstorex_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     await reply_inline(update, ui_text("unsupported_button", lang))
 
 
-async def build_catalog_search_rows(supplier: SupplierClient) -> list[dict[str, Any]]:
+async def build_catalog_search_rows(supplier: SupplierClient, *, refresh: bool = False) -> list[dict[str, Any]]:
     cache_key = id(supplier)
     now = time.monotonic()
     cached = CATALOG_SEARCH_CACHE.get(cache_key)
-    if cached and now - cached[0] < CATEGORY_CACHE_TTL_SECONDS:
+    if not refresh and cached and now - cached[0] < CATEGORY_CACHE_TTL_SECONDS:
         return cached[1]
 
-    categories = await fetch_categories(supplier)
+    categories = await fetch_categories(supplier, refresh=refresh)
+    semaphore = asyncio.Semaphore(4)
+
+    async def fetch_one(category_id: int) -> list[dict[str, Any]]:
+        async with semaphore:
+            return await fetch_category_products(supplier, category_id, refresh=refresh)
+
     rows_by_category = await asyncio.gather(
-        *(fetch_category_products(supplier, safe_int(row.get("categoryId"))) for row in categories if safe_int(row.get("categoryId")) > 0)
+        *(fetch_one(safe_int(row.get("categoryId"))) for row in categories if safe_int(row.get("categoryId")) > 0)
     )
     category_names = {
         safe_int(row.get("categoryId")): str(row.get("categoryName") or "")
@@ -5857,7 +5878,7 @@ async def build_catalog_search_rows(supplier: SupplierClient) -> list[dict[str, 
             if category_id > 0 and category_names.get(category_id):
                 item.setdefault("categoryName", category_names[category_id])
             search_rows.append(item)
-    CATALOG_SEARCH_CACHE[cache_key] = (now, search_rows)
+    CATALOG_SEARCH_CACHE[cache_key] = (time.monotonic(), search_rows)
     return search_rows
 
 
@@ -6025,62 +6046,119 @@ async def search_products_cached(supplier: SupplierClient, keyword: str) -> list
     return rows
 
 
+def search_catalog_slot(context: ContextTypes.DEFAULT_TYPE, source: str) -> tuple[dict, Any]:
+    supplier = get_supplier_for_source(context, source)
+    if source == LEGACY_SOURCE:
+        return CATALOG_SEARCH_CACHE, id(supplier)
+    return (DAXI_PRODUCTS_CACHE if source == DAXI_SOURCE else RZ_PRODUCTS_CACHE), (id(supplier), "")
+
+
+def ensure_search_catalog_refresh(context: ContextTypes.DEFAULT_TYPE, source: str) -> asyncio.Task | None:
+    settings, _, _ = get_services(context)
+    if not effective_account_list_enabled(context, source) or (source == TGSTOREX_SOURCE and not settings.tgstorex_api_key):
+        return None
+    state = context.application.bot_data
+    tasks = state.setdefault("search_catalog_refresh_tasks", {})
+    running = tasks.get(source)
+    if running is not None and not running.done():
+        return running
+    cache, key = search_catalog_slot(context, source)
+    cached = cache.get(key)
+    now = time.monotonic()
+    if cached is not None and now - cached[0] < CATALOG_REFRESH_SECONDS:
+        return None
+    failures = state.setdefault("search_catalog_failures", {})
+    if source in failures and now - failures[source] < CATALOG_RETRY_SECONDS:
+        return None
+
+    async def refresh_catalog() -> None:
+        try:
+            supplier = get_supplier_for_source(context, source)
+            if source == LEGACY_SOURCE:
+                rows = await build_catalog_search_rows(supplier, refresh=True)
+            elif source == DAXI_SOURCE:
+                rows = await fetch_daxi_products(supplier, refresh=True)
+            elif source == RZ_SOURCE:
+                rows = await fetch_rz_products(supplier, refresh=True)
+            else:
+                rows = await fetch_tgstorex_products(context, refresh=True)
+            # Publish a complete snapshot; readers keep the old one during I/O.
+            cache[key] = (time.monotonic(), rows)
+            failures.pop(source, None)
+        except Exception:
+            failures[source] = time.monotonic()
+            logger.exception("Search catalog refresh failed; keeping last snapshot: %s", source)
+        finally:
+            tasks.pop(source, None)
+
+    task = asyncio.create_task(refresh_catalog(), name=f"search-catalog-{source}")
+    tasks[source] = task
+    return task
+
+
+async def get_fast_search_catalogs(context: ContextTypes.DEFAULT_TYPE) -> tuple[dict[str, list[dict[str, Any]]], list[str]]:
+    settings, _, _ = get_services(context)
+    sources = [source for source in (LEGACY_SOURCE, DAXI_SOURCE, RZ_SOURCE, TGSTOREX_SOURCE)
+               if effective_account_list_enabled(context, source) and (source != TGSTOREX_SOURCE or settings.tgstorex_api_key)]
+    slots = {source: search_catalog_slot(context, source) for source in sources}
+    has_snapshot = any(key in cache for cache, key in slots.values())
+    tasks = [task for source in sources if (task := ensure_search_catalog_refresh(context, source)) is not None]
+    # Only a completely cold process gets a bounded wait; never cancel refreshes.
+    if not has_snapshot and tasks:
+        await asyncio.wait(tasks, timeout=SEARCH_COLD_WAIT_SECONDS)
+    catalogs = {}
+    unavailable = []
+    for source in sources:
+        if not effective_account_list_enabled(context, source):
+            continue
+        cache, key = slots[source]
+        snapshot = cache.get(key)
+        catalogs[source] = snapshot[1] if snapshot is not None else []
+        if snapshot is None:
+            unavailable.append(source)
+    return catalogs, unavailable
+
+
+def search_group_index_map(context: ContextTypes.DEFAULT_TYPE, source: str, rows: list[dict[str, Any]], lang: str) -> dict[str, int]:
+    indexes = context.application.bot_data.setdefault("search_group_indexes", {})
+    cached = indexes.get((source, lang))
+    if cached is not None and cached[0] is rows:
+        return cached[1]
+    if source == DAXI_SOURCE:
+        mapping = build_daxi_group_index_map(rows)
+    elif source == RZ_SOURCE:
+        mapping = build_rz_group_index_map(rows, lang)
+    else:
+        mapping = {str(row["productId"]): group["index"] for group in group_tgstorex_products(rows, lang) for row in group["rows"]}
+    indexes[(source, lang)] = (rows, mapping)
+    return mapping
+
+
+async def warm_catalog_source(context: ContextTypes.DEFAULT_TYPE, source: str) -> None:
+    task = ensure_search_catalog_refresh(context, source)
+    if task is not None:
+        await asyncio.shield(task)
+
+
 async def warm_supplier_catalog(context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not effective_account_list_enabled(context, LEGACY_SOURCE):
-        return
-    _, _, supplier = get_services(context)
-    try:
-        await build_catalog_search_rows(supplier)
-    except Exception:
-        logger.exception("supplier catalog warmup failed")
+    await warm_catalog_source(context, LEGACY_SOURCE)
 
 
 async def warm_daxi_catalog(context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not effective_account_list_enabled(context, DAXI_SOURCE):
-        return
-    supplier = get_daxi_supplier(context)
-    try:
-        DAXI_PRODUCTS_CACHE.pop((id(supplier), ""), None)
-        DAXI_GROUPS_CACHE.pop(id(supplier), None)
-        await fetch_daxi_products(supplier)
-    except Exception:
-        logger.exception("daxi catalog warmup failed")
+    await warm_catalog_source(context, DAXI_SOURCE)
 
 
 async def warm_rz_catalog(context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not effective_account_list_enabled(context, RZ_SOURCE):
-        return
-    supplier = get_rz_supplier(context)
-    try:
-        RZ_PRODUCTS_CACHE.pop((id(supplier), ""), None)
-        RZ_GROUPS_CACHE.pop(id(supplier), None)
-        await fetch_rz_products(supplier)
-    except Exception:
-        logger.exception("rz catalog warmup failed")
+    await warm_catalog_source(context, RZ_SOURCE)
+
+
+async def warm_tgstorex_catalog(context: ContextTypes.DEFAULT_TYPE) -> None:
+    await warm_catalog_source(context, TGSTOREX_SOURCE)
 
 
 def ensure_modern_catalog_warmup(context: ContextTypes.DEFAULT_TYPE) -> None:
-    now = time.monotonic()
-    warmups = (
-        ("daxi", get_daxi_supplier(context), DAXI_GROUPS_CACHE, warm_daxi_catalog),
-        ("rz", get_rz_supplier(context), RZ_GROUPS_CACHE, warm_rz_catalog),
-    )
-    for name, supplier, cache_store, warm_func in warmups:
-        cached = cache_store.get(id(supplier))
-        if cached and now - cached[0] < CATEGORY_CACHE_TTL_SECONDS:
-            continue
-        task_key = f"{name}:{id(supplier)}"
-        running = CATALOG_WARMUP_TASKS.get(task_key)
-        if running is not None and not running.done():
-            continue
-
-        async def _runner(key: str, fn: Any) -> None:
-            try:
-                await fn(context)
-            finally:
-                CATALOG_WARMUP_TASKS.pop(key, None)
-
-        CATALOG_WARMUP_TASKS[task_key] = asyncio.create_task(_runner(task_key, warm_func))
+    for source in (LEGACY_SOURCE, DAXI_SOURCE, RZ_SOURCE, TGSTOREX_SOURCE):
+        ensure_search_catalog_refresh(context, source)
 
 
 async def build_main_menu_message(
@@ -8948,7 +9026,7 @@ async def search_text_rich(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if pending_purchase is not None:
         quantity = safe_int(keyword, -1)
         if quantity <= 0:
-            await update.message.reply_text("请输入要购买的数量，直接发数字即可，例如：1", reply_markup=MENU_KEYBOARD)
+            await update.message.reply_text("✋请发送需要购买的数量：\n例如： 10", reply_markup=MENU_KEYBOARD)
             return
         clear_pending_purchase(context)
         product_id = safe_int(pending_purchase.get("product_id"), -1)
@@ -9749,52 +9827,27 @@ async def search_text_rich(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return
     if not should_trigger_product_search(keyword):
         return
-    daxi_supplier = get_daxi_supplier(context)
-    rz_supplier = get_rz_supplier(context)
-    modern_errors: list[str] = []
-
-    daxi_result, rz_result, tgstorex_result = await asyncio.gather(
-        fetch_daxi_products(daxi_supplier) if effective_account_list_enabled(context, DAXI_SOURCE) else asyncio.sleep(0, result=[]),
-        fetch_rz_products(rz_supplier) if effective_account_list_enabled(context, RZ_SOURCE) else asyncio.sleep(0, result=[]),
-        fetch_tgstorex_products(context),
-        return_exceptions=True,
-    )
-    if isinstance(tgstorex_result, Exception):
-        modern_errors.append(f"{ui_text('search_source_account_list_4', lang)}: {tgstorex_result}")
-        tgstorex_all_rows = []
-    else:
-        tgstorex_all_rows = tgstorex_result
+    search_started = time.perf_counter()
+    catalogs, unavailable = await get_fast_search_catalogs(context)
+    daxi_all_rows = catalogs.get(DAXI_SOURCE, [])
+    rz_all_rows = catalogs.get(RZ_SOURCE, [])
+    tgstorex_all_rows = catalogs.get(TGSTOREX_SOURCE, [])
+    loading_notice = ui_text(
+        "search_catalog_loading", lang,
+        lists=" / ".join(f"{'账号列表' if lang == 'zh' else 'List '}{account_list_number(source, lang)}" for source in unavailable),
+    ) if unavailable else ""
     tgstorex_rows = search_rz_products_locally(tgstorex_all_rows, keyword)
-    tgstorex_index_map = {
-        str(row["productId"]): group["index"]
-        for group in group_tgstorex_products(tgstorex_all_rows, lang)
-        for row in group["rows"]
-    }
-    if isinstance(daxi_result, Exception):
-        modern_errors.append(f"{ui_text('search_source_account_list_2', lang)}: {daxi_result}")
-        daxi_all_rows = []
-    else:
-        daxi_all_rows = daxi_result
-
-    if isinstance(rz_result, Exception):
-        modern_errors.append(f"{ui_text('search_source_account_list_3', lang)}: {rz_result}")
-        rz_all_rows = []
-    else:
-        rz_all_rows = rz_result
+    tgstorex_index_map = search_group_index_map(context, TGSTOREX_SOURCE, tgstorex_all_rows, lang) if tgstorex_rows else {}
 
     combined_items: list[dict[str, Any]] = []
-    legacy_rows: list[dict[str, Any]] = []
-    if effective_legacy_supplier_enabled(context):
-        try:
-            legacy_rows = await search_products_cached(supplier, keyword)
-        except SupplierApiError as exc:
-            modern_errors.append(f"{ui_text('search_source_account_list_1', lang)}: {exc}")
-            legacy_rows = []
+    legacy_rows = search_products_locally(catalogs.get(LEGACY_SOURCE, []), keyword)
 
     daxi_rows = search_daxi_products_locally(daxi_all_rows, keyword)
     rz_rows = search_rz_products_locally(rz_all_rows, keyword)
-    daxi_group_index_map = build_daxi_group_index_map(daxi_all_rows) if daxi_rows else {}
-    rz_group_index_map = build_rz_group_index_map(rz_all_rows, lang) if rz_rows else {}
+    daxi_group_index_map = search_group_index_map(context, DAXI_SOURCE, daxi_all_rows, lang) if daxi_rows else {}
+    rz_group_index_map = search_group_index_map(context, RZ_SOURCE, rz_all_rows, lang) if rz_rows else {}
+    logger.info("Local search ready: user_id=%s elapsed_ms=%.1f rows=%s missing=%s", update.effective_user.id if update.effective_user else None,
+                (time.perf_counter() - search_started) * 1000, sum(len(rows) for rows in catalogs.values()), len(unavailable))
 
     ordered_rows: list[tuple[str, dict[str, Any]]] = []
     source_buckets: list[tuple[str, list[dict[str, Any]]]] = []
@@ -9876,6 +9929,9 @@ async def search_text_rich(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     if combined_items:
         text, entities = build_modern_search_results_text_localized(keyword, combined_items, lang)
+        text += "\n\n" + ui_text("search_cached_notice", lang)
+        if loading_notice:
+            text += "\n" + loading_notice
         nav_buttons = []
         if effective_legacy_supplier_enabled(context):
             nav_buttons.append(InlineKeyboardButton(ui_text("button_account_list", lang), callback_data="nav:cats"))
@@ -9889,11 +9945,8 @@ async def search_text_rich(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await update.message.reply_text(text, entities=entities, reply_markup=InlineKeyboardMarkup(buttons))
         return
     rows = legacy_rows
-    if not rows and modern_errors:
-        await update.message.reply_text(ui_text("search_failed", lang, error=" | ".join(modern_errors)))
-        return
     if not rows:
-        await update.message.reply_text(ui_text("search_empty", lang), reply_markup=build_menu_keyboard(lang))
+        await update.message.reply_text(loading_notice or ui_text("search_empty", lang), reply_markup=build_menu_keyboard(lang))
         return
 
     text, entities = build_search_results_text_localized(keyword, rows, lambda row: resolve_sell_price(settings, row), lang)
@@ -10091,6 +10144,7 @@ async def poll_processing_orders(context: ContextTypes.DEFAULT_TYPE) -> None:
 async def on_application_post_init(application: Application) -> None:
     application.bot_data["main_loop"] = asyncio.get_running_loop()
     await ensure_okpay_callback_server(application)
+    ensure_modern_catalog_warmup(ContextTypes.DEFAULT_TYPE(application=application))
 
 
 def get_supplier_balance_targets(
@@ -10252,36 +10306,43 @@ def build_application(settings: Settings) -> Application:
     if application.job_queue is not None:
         application.job_queue.run_once(
             warm_supplier_catalog,
-            when=5,
+            when=1,
             name="warm_supplier_catalog_initial",
         )
         application.job_queue.run_repeating(
             warm_supplier_catalog,
-            interval=max(120, CATEGORY_CACHE_TTL_SECONDS - 60),
-            first=max(120, CATEGORY_CACHE_TTL_SECONDS - 60),
+            interval=CATALOG_REFRESH_SECONDS,
+            first=CATALOG_REFRESH_SECONDS,
             name="warm_supplier_catalog",
         )
         application.job_queue.run_once(
             warm_daxi_catalog,
-            when=8,
+            when=2,
             name="warm_daxi_catalog_initial",
         )
         application.job_queue.run_repeating(
             warm_daxi_catalog,
-            interval=max(120, CATEGORY_CACHE_TTL_SECONDS - 60),
-            first=max(120, CATEGORY_CACHE_TTL_SECONDS - 40),
+            interval=CATALOG_REFRESH_SECONDS,
+            first=CATALOG_REFRESH_SECONDS + 2,
             name="warm_daxi_catalog",
         )
         application.job_queue.run_once(
             warm_rz_catalog,
-            when=10,
+            when=3,
             name="warm_rz_catalog_initial",
         )
         application.job_queue.run_repeating(
             warm_rz_catalog,
-            interval=max(120, CATEGORY_CACHE_TTL_SECONDS - 60),
-            first=max(120, CATEGORY_CACHE_TTL_SECONDS - 20),
+            interval=CATALOG_REFRESH_SECONDS,
+            first=CATALOG_REFRESH_SECONDS + 4,
             name="warm_rz_catalog",
+        )
+        application.job_queue.run_once(warm_tgstorex_catalog, when=4, name="warm_tgstorex_catalog_initial")
+        application.job_queue.run_repeating(
+            warm_tgstorex_catalog,
+            interval=CATALOG_REFRESH_SECONDS,
+            first=CATALOG_REFRESH_SECONDS + 6,
+            name="warm_tgstorex_catalog",
         )
         application.job_queue.run_repeating(
             poll_processing_orders,

@@ -1,15 +1,20 @@
 from __future__ import annotations
 
+import json
 import math
 import threading
 import time
-from pathlib import PurePosixPath
+import zipfile
+from pathlib import Path, PurePosixPath
 from typing import Any
 from urllib.parse import quote, urljoin, urlparse
 
 import requests
 
 from supplier_client import SupplierApiError, SupplierClient
+
+
+COUNTRY_METADATA = json.loads(Path(__file__).with_name("country_metadata.json").read_text(encoding="utf-8"))
 
 
 class TgstorexPurchaseUncertain(SupplierApiError):
@@ -93,14 +98,18 @@ class TgstorexSupplierClient(SupplierClient):
             return None
         if not math.isfinite(price) or price <= 0 or stock < 0:
             return None
-        country = str(row.get("name") or code).strip()
+        # ISO code is stable even when the upstream omits names and dial codes.
+        metadata = COUNTRY_METADATA.get(code)
+        country = metadata[0] if metadata else str(row.get("name") or code).strip()
         return {
             **row,
             "productId": code,
             "productName": country,
             "categoryName": "Sessions",
             "country": country,
-            "prefix": str(row.get("dial_code") or "").strip(),
+            "country_en": metadata[1] if metadata else str(row.get("name") or code).strip(),
+            "prefix": str(row.get("dial_code") or (metadata[2] if metadata else "")).strip(),
+            "region": metadata[3] if metadata else "",
             "kind": "api_country",
             "totalStock": stock,
             "price": price,
@@ -222,3 +231,43 @@ class TgstorexSupplierClient(SupplierClient):
 
     def build_download_headers(self) -> dict[str, str]:
         return {**self._headers(), "Accept": "application/zip, application/octet-stream"}
+
+    def validate_delivery_file(self, path: Path) -> None:
+        try:
+            with zipfile.ZipFile(path) as archive:
+                if not any(not item.is_dir() for item in archive.infolist()) or archive.testzip() is not None:
+                    raise SupplierApiError("会话包为空或 ZIP 校验失败，请重试下载原订单，无需重新购买。")
+        except (zipfile.BadZipFile, EOFError, RuntimeError, NotImplementedError, OSError) as exc:
+            raise SupplierApiError("上游会话包不是完整可读的 ZIP，请重试下载原订单，无需重新购买。") from exc
+
+    def download_session_file(self, file_url: str, target_path: Path) -> Path:
+        if target_path.exists():
+            try:
+                self.validate_delivery_file(target_path)
+                return target_path
+            except SupplierApiError:
+                pass  # Never reuse corrupt files cached by an older version.
+        temp_path = target_path.with_suffix(target_path.suffix + ".part")
+        try:
+            with self.session.get(
+                self.resolve_download_url(file_url),
+                headers=self.build_download_headers(),
+                timeout=self.settings.tgstorex_api_timeout_seconds,
+                stream=True,
+                allow_redirects=False,
+            ) as response:
+                response.raise_for_status()
+                if 300 <= response.status_code < 400:
+                    raise SupplierApiError("会话包下载被上游重定向，请检查下载权限后重试原订单。")
+                content_type = str(response.headers.get("Content-Type") or "").lower()
+                if "html" in content_type or "json" in content_type:
+                    raise SupplierApiError("上游下载返回了网页或错误信息，而不是 ZIP；请重试原订单。")
+                with temp_path.open("wb") as handle:
+                    for chunk in response.iter_content(chunk_size=65536):
+                        if chunk:
+                            handle.write(chunk)
+            self.validate_delivery_file(temp_path)
+            temp_path.replace(target_path)
+            return target_path
+        finally:
+            temp_path.unlink(missing_ok=True)

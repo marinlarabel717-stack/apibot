@@ -396,9 +396,11 @@ UI_TEXTS.update(
 )
 UI_TEXTS.update(
     {
-        "legacy_supplier_enabled_notice": {"zh": "旧接口已开启。", "en": "Legacy supplier is enabled."},
-        "legacy_supplier_closed_set_notice": {"zh": "旧接口已关闭，请使用新账号列表。", "en": "Legacy supplier is disabled. Please use the new account list."},
-        "legacy_supplier_disabled_notice": {"zh": "旧接口已暂停，请使用新账号列表。", "en": "Legacy supplier is unavailable. Please use the new account list."},
+        "legacy_supplier_enabled_notice": {"zh": "账号列表①已开启。", "en": "Account list 1 is enabled."},
+        "legacy_supplier_closed_set_notice": {"zh": "账号列表①已关闭，请使用其他账号列表。", "en": "Account list 1 is disabled. Please use another account list."},
+        "legacy_supplier_disabled_notice": {"zh": "账号列表①已关闭，请使用其他账号列表。", "en": "Account list 1 is disabled. Please use another account list."},
+        "account_list_disabled_notice": {"zh": "账号列表{number}已关闭，请使用其他账号列表。", "en": "Account list {number} is disabled. Please use another account list."},
+        "account_list_toggled_notice": {"zh": "账号列表{number}{status}。", "en": "Account list {number} is {status}."},
         "account_list_2_intro": {
             "zh": "请先选择分类：",
             "en": "Please choose a category first:",
@@ -755,6 +757,8 @@ RUNTIME_KEY_CUSTOMER_SERVICE = "customer_service_contact"
 RUNTIME_KEY_RESTOCK_CHANNEL = "restock_channel"
 RUNTIME_KEY_BUSINESS_STATUS = "business_status"
 RUNTIME_KEY_LEGACY_SUPPLIER_ENABLED = "legacy_supplier_enabled"
+RUNTIME_KEY_DAXI_SUPPLIER_ENABLED = "daxi_supplier_enabled"
+RUNTIME_KEY_RZ_SUPPLIER_ENABLED = "rz_supplier_enabled"
 RUNTIME_KEY_SELL_PRICE_MODE = "sell_price_mode"
 RUNTIME_KEY_SELL_PRICE_VALUE = "sell_price_value"
 ADMIN_SETTING_SELL_PRICE_PERCENT = "__sell_price_percent__"
@@ -1025,6 +1029,28 @@ def legacy_supplier_is_enabled(raw_value: str) -> bool:
 
 def effective_legacy_supplier_enabled(context: ContextTypes.DEFAULT_TYPE) -> bool:
     return legacy_supplier_is_enabled(runtime_value(context, RUNTIME_KEY_LEGACY_SUPPLIER_ENABLED, "1"))
+
+
+def account_list_runtime_key(source: str) -> str | None:
+    return {
+        LEGACY_SOURCE: RUNTIME_KEY_LEGACY_SUPPLIER_ENABLED,
+        DAXI_SOURCE: RUNTIME_KEY_DAXI_SUPPLIER_ENABLED,
+        RZ_SOURCE: RUNTIME_KEY_RZ_SUPPLIER_ENABLED,
+    }.get(source)
+
+
+def effective_account_list_enabled(context: ContextTypes.DEFAULT_TYPE, source: str) -> bool:
+    key = account_list_runtime_key(source)
+    return key is None or legacy_supplier_is_enabled(runtime_value(context, key, "1"))
+
+
+def account_list_number(source: str, lang: str = DEFAULT_LANG) -> str:
+    index = {LEGACY_SOURCE: 1, DAXI_SOURCE: 2, RZ_SOURCE: 3, TGSTOREX_SOURCE: 4}[source]
+    return "①②③④"[index - 1] if lang == "zh" else str(index)
+
+
+def account_list_disabled_notice(source: str, lang: str) -> str:
+    return ui_text("account_list_disabled_notice", lang, number=account_list_number(source, lang))
 
 
 def legacy_supplier_status_label(context: ContextTypes.DEFAULT_TYPE) -> str:
@@ -2937,6 +2963,8 @@ def download_delivery_file(
 ) -> Path:
     DELIVERY_FILES_DIR.mkdir(parents=True, exist_ok=True)
     target_path = DELIVERY_FILES_DIR / delivery_storage_filename(task_id, file_url, file_name, index)
+    if isinstance(supplier, TgstorexSupplierClient):
+        return supplier.download_session_file(file_url, target_path)
     if target_path.exists() and target_path.stat().st_size > 0:
         return target_path
 
@@ -3062,14 +3090,14 @@ def should_bundle_delivery_files(downloaded_files: list[dict[str, Any]]) -> bool
     return False
 
 
-def build_delivery_bundle(task_id: str, downloaded_files: list[dict[str, Any]]) -> Path:
+def build_delivery_bundle(task_id: str, downloaded_files: list[dict[str, Any]], preserve_archives: bool = False) -> Path:
     bundle_path = build_delivery_bundle_path(task_id)
     with zipfile.ZipFile(bundle_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         used_names: set[str] = set()
         for index, item in enumerate(downloaded_files, start=1):
             path = Path(item["path"])
             preferred_name = delivery_display_filename("", 0, "", str(item.get("file_name") or path.name))
-            if path.suffix.lower() == ".zip" and zipfile.is_zipfile(path):
+            if not preserve_archives and path.suffix.lower() == ".zip" and zipfile.is_zipfile(path):
                 with zipfile.ZipFile(path, "r") as nested_archive:
                     for member in nested_archive.infolist():
                         if member.is_dir():
@@ -3188,13 +3216,14 @@ async def deliver_order_file(
     supplier: SupplierClient,
     include_ready_photo: bool = True,
     notify_failure: bool = True,
+    force_resend: bool = False,
 ) -> bool:
     settings, store, _ = get_services(context)
     task_id = str(order_row.get("task_id") or "").strip()
     file_url = str(order_row.get("file_url") or "").strip()
     if not task_id or not file_url:
         return False
-    if str(order_row.get("delivery_sent_at") or "").strip():
+    if str(order_row.get("delivery_sent_at") or "").strip() and not force_resend:
         return True
 
     quantity = safe_int(order_row.get("quantity"))
@@ -3233,8 +3262,9 @@ async def deliver_order_file(
             order_row = await call_blocking(store.mark_order_delivery_ready_sent, task_id) or order_row
         if not downloaded_files:
             raise SupplierApiError("no delivery files available")
-        if is_modern_supplier(supplier) and should_bundle_delivery_files(downloaded_files):
-            send_path = await call_blocking(build_delivery_bundle, task_id, downloaded_files)
+        preserve_archives = isinstance(supplier, TgstorexSupplierClient)
+        if is_modern_supplier(supplier) and (len(downloaded_files) > 1 if preserve_archives else should_bundle_delivery_files(downloaded_files)):
+            send_path = await call_blocking(build_delivery_bundle, task_id, downloaded_files, preserve_archives)
             send_name = delivery_display_filename(product_name, quantity, "", "")
         else:
             first_file = downloaded_files[0]
@@ -3266,9 +3296,12 @@ async def deliver_order_file(
         await call_blocking(store.mark_order_delivery_failed, task_id, repr(exc))
         logger.exception("发送订单 zip 文件失败: %s", task_id)
         if notify_failure:
+            failure_text = f"zip 文件发送失败，请稍后用 /order {task_id} 重试。"
+            if isinstance(supplier, TgstorexSupplierClient) and isinstance(exc, SupplierApiError):
+                failure_text = f"会话包下载失败：{exc}\n重试原订单：/order {task_id} download"
             await context.bot.send_message(
                 chat_id=user_id,
-                text=f"zip 文件发送失败，请稍后用 /order {task_id} 重试。",
+                text=failure_text,
                 reply_markup=MENU_KEYBOARD,
             )
         return False
@@ -4054,8 +4087,13 @@ async def should_ignore_for_closed_business(update: Update, context: ContextType
 
 
 async def reply_legacy_supplier_disabled(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await reply_account_list_disabled(update, context, LEGACY_SOURCE)
+
+
+async def reply_account_list_disabled(update: Update, context: ContextTypes.DEFAULT_TYPE, source: str) -> None:
+    clear_pending_purchase(context)
     lang = await ensure_user_with_lang(context, update.effective_user)
-    notice = ui_text("legacy_supplier_disabled_notice", lang)
+    notice = account_list_disabled_notice(source, lang)
     if update.callback_query is not None:
         await answer_callback_query_safely(update.callback_query, notice, show_alert=True)
         return
@@ -4089,17 +4127,22 @@ async def handle_admin_legacy_supplier_toggle(update: Update, context: ContextTy
     normalized = normalize_search_keyword(text)
     if user is None or not is_admin(settings, user.id):
         return False
-    if normalized not in {"开启旧接口", "关闭旧接口"}:
+    command = re.sub(r"\s+", "", normalized).translate(str.maketrans("①②③", "123"))
+    command = command.replace("旧接口", "账号列表1")
+    match = re.fullmatch(r"(开启|关闭)账号列表([123])", command)
+    if match is None:
         return False
-    value = "1" if normalized == "开启旧接口" else "0"
+    source = {"1": LEGACY_SOURCE, "2": DAXI_SOURCE, "3": RZ_SOURCE}[match.group(2)]
+    key = account_list_runtime_key(source)
+    value = "1" if match.group(1) == "开启" else "0"
     runtime_config = get_runtime_config(context)
-    await call_blocking(store.set_runtime_setting, RUNTIME_KEY_LEGACY_SUPPLIER_ENABLED, value, user.id)
-    runtime_config[RUNTIME_KEY_LEGACY_SUPPLIER_ENABLED] = value
-    await call_blocking(store.log_admin_action, user.id, "legacy_supplier_enabled", value, normalized)
+    await call_blocking(store.set_runtime_setting, key, value, user.id)
+    runtime_config[key] = value
+    await call_blocking(store.log_admin_action, user.id, key, value, command)
     clear_pending_admin_action(context)
     lang = await ensure_user_with_lang(context, user)
-    message_key = "legacy_supplier_enabled_notice" if value == "1" else "legacy_supplier_closed_set_notice"
-    await send_menu_message(update, ui_text(message_key, lang))
+    status = ("已开启" if value == "1" else "已关闭") if lang == "zh" else ("enabled" if value == "1" else "disabled")
+    await send_menu_message(update, ui_text("account_list_toggled_notice", lang, number=account_list_number(source, lang), status=status))
     return True
 
 
@@ -4163,40 +4206,27 @@ def build_runtime_main_menu_inline_localized(
     settings: Settings,
     lang: str,
     show_legacy_supplier: bool,
+    show_daxi_supplier: bool = True,
+    show_rz_supplier: bool = True,
 ) -> InlineKeyboardMarkup:
-    if show_legacy_supplier:
-        rows = [
-            [build_main_menu_button(settings, ui_text("button_account_list", lang), "nav:cats", MAIN_MENU_EMOJI_ACCOUNT_LIST_ID, "📂")],
-            [
-                build_main_menu_button(settings, ui_text("button_account_list_2", lang), "nav:cats2", MAIN_MENU_EMOJI_ACCOUNT_LIST_ID, "🧩"),
-                build_main_menu_button(settings, ui_text("button_account_list_3", lang), "nav:cats3", MAIN_MENU_EMOJI_ACCOUNT_LIST_ID, "🧪"),
-            ],
-            [
-                build_main_menu_button(settings, ui_text("button_recharge_balance", lang), "nav:recharge", MAIN_MENU_EMOJI_RECHARGE_BALANCE_ID, "💰"),
-            ],
-            [
-                build_main_menu_button(settings, ui_text("button_purchase_notice", lang), "nav:notice", MAIN_MENU_EMOJI_PURCHASE_NOTICE_ID, "📖"),
-                build_main_menu_button(settings, ui_text("button_order_history", lang), "nav:orders", MAIN_MENU_EMOJI_ORDER_HISTORY_ID, "📦"),
-            ],
-            [build_main_menu_button(settings, ui_text("button_switch_language", lang), "nav:language", MAIN_MENU_EMOJI_SWITCH_LANGUAGE_ID, "🌐")],
-        ]
-    else:
-        rows = [
-            [
-                build_main_menu_button(settings, ui_text("button_account_list_2", lang), "nav:cats2", MAIN_MENU_EMOJI_ACCOUNT_LIST_ID, "🧩"),
-                build_main_menu_button(settings, ui_text("button_account_list_3", lang), "nav:cats3", MAIN_MENU_EMOJI_ACCOUNT_LIST_ID, "🧪"),
-            ],
-            [
-                build_main_menu_button(settings, ui_text("button_recharge_balance", lang), "nav:recharge", MAIN_MENU_EMOJI_RECHARGE_BALANCE_ID, "💰"),
-            ],
-            [
-                build_main_menu_button(settings, ui_text("button_purchase_notice", lang), "nav:notice", MAIN_MENU_EMOJI_PURCHASE_NOTICE_ID, "📖"),
-                build_main_menu_button(settings, ui_text("button_order_history", lang), "nav:orders", MAIN_MENU_EMOJI_ORDER_HISTORY_ID, "📦"),
-            ],
-            [build_main_menu_button(settings, ui_text("button_switch_language", lang), "nav:language", MAIN_MENU_EMOJI_SWITCH_LANGUAGE_ID, "🌐")],
-        ]
-    rows.insert(2 if show_legacy_supplier else 1, [
-        build_main_menu_button(settings, ui_text("button_account_list_4", lang), "nav:cats4", MAIN_MENU_EMOJI_ACCOUNT_LIST_ID, "📦")
+    catalog_buttons = [
+        build_main_menu_button(settings, ui_text(label, lang), callback, MAIN_MENU_EMOJI_ACCOUNT_LIST_ID, icon)
+        for enabled, label, callback, icon in (
+            (show_legacy_supplier, "button_account_list", "nav:cats", "📂"),
+            (show_daxi_supplier, "button_account_list_2", "nav:cats2", "🧩"),
+            (show_rz_supplier, "button_account_list_3", "nav:cats3", "🧪"),
+            (True, "button_account_list_4", "nav:cats4", "📦"),
+        )
+        if enabled
+    ]
+    rows = [catalog_buttons[i:i + 2] for i in range(0, len(catalog_buttons), 2)]
+    rows.extend([
+        [build_main_menu_button(settings, ui_text("button_recharge_balance", lang), "nav:recharge", MAIN_MENU_EMOJI_RECHARGE_BALANCE_ID, "💰")],
+        [
+            build_main_menu_button(settings, ui_text("button_purchase_notice", lang), "nav:notice", MAIN_MENU_EMOJI_PURCHASE_NOTICE_ID, "📖"),
+            build_main_menu_button(settings, ui_text("button_order_history", lang), "nav:orders", MAIN_MENU_EMOJI_ORDER_HISTORY_ID, "📦"),
+        ],
+        [build_main_menu_button(settings, ui_text("button_switch_language", lang), "nav:language", MAIN_MENU_EMOJI_SWITCH_LANGUAGE_ID, "🌐")],
     ])
     return InlineKeyboardMarkup(rows)
 
@@ -5062,6 +5092,9 @@ async def show_daxi_categories(
     context: ContextTypes.DEFAULT_TYPE,
     page: int = 0,
 ) -> None:
+    if not effective_account_list_enabled(context, DAXI_SOURCE):
+        await reply_account_list_disabled(update, context, DAXI_SOURCE)
+        return
     supplier = get_daxi_supplier(context)
     lang = await ensure_user_with_lang(context, update.effective_user)
     await answer_callback_query_safely(update.callback_query)
@@ -5083,6 +5116,9 @@ async def show_daxi_products(
     category_index: int,
     page: int = 0,
 ) -> None:
+    if not effective_account_list_enabled(context, DAXI_SOURCE):
+        await reply_account_list_disabled(update, context, DAXI_SOURCE)
+        return
     settings, _, _ = get_services(context)
     supplier = get_daxi_supplier(context)
     lang = await ensure_user_with_lang(context, update.effective_user)
@@ -5225,6 +5261,8 @@ def format_rz_kind_label(kind: str, lang: str) -> str:
 
 
 def resolve_rz_region_key(row: dict[str, Any]) -> str:
+    if row.get("source") == TGSTOREX_SOURCE and row.get("region") in {"asia", "europe", "africa", "americas", "oceania"}:
+        return str(row["region"])
     country_name = str(row.get("country") or row.get("country_name") or "").strip()
     normalized = compact_search_text(country_name)
     if not normalized:
@@ -5310,7 +5348,7 @@ def format_rz_product_title(row: dict[str, Any], lang: str) -> str:
     if row.get("source") == TGSTOREX_SOURCE:
         code = str(row.get("productId") or "").upper()
         flag = "".join(chr(127397 + ord(letter)) for letter in code) if len(code) == 2 else ""
-        country = translate_category_name(str(row.get("country") or code), lang)
+        country = str(row.get("country_en") or code) if lang == "en" else translate_category_name(str(row.get("country") or code), lang)
         return " ".join(part for part in (flag, str(row.get("prefix") or ""), country) if part)
     country = translate_category_name(str(row.get("country") or row.get("country_name") or "").strip(), lang)
     phone_code = str(row.get("prefix") or row.get("phone_code") or "").strip()
@@ -5578,6 +5616,9 @@ async def show_rz_categories(
     context: ContextTypes.DEFAULT_TYPE,
     page: int = 0,
 ) -> None:
+    if not effective_account_list_enabled(context, RZ_SOURCE):
+        await reply_account_list_disabled(update, context, RZ_SOURCE)
+        return
     supplier = get_rz_supplier(context)
     lang = await ensure_user_with_lang(context, update.effective_user)
     await answer_callback_query_safely(update.callback_query)
@@ -5599,6 +5640,9 @@ async def show_rz_products(
     category_index: int,
     page: int = 0,
 ) -> None:
+    if not effective_account_list_enabled(context, RZ_SOURCE):
+        await reply_account_list_disabled(update, context, RZ_SOURCE)
+        return
     settings, _, _ = get_services(context)
     supplier = get_rz_supplier(context)
     lang = await ensure_user_with_lang(context, update.effective_user)
@@ -5647,7 +5691,7 @@ async def fetch_tgstorex_products(context: ContextTypes.DEFAULT_TYPE, *, refresh
         row = dict(item)
         country = translate_category_name(str(row.get("country") or ""), "zh")
         row["country"] = country
-        row["productName"] = f"{country} {item.get('productName', '')} {row['productId']}"
+        row["productName"] = f"{country} {row.get('country_en', '')} {item.get('productName', '')} {row['productId']}"
         rows.append(row)
     RZ_PRODUCTS_CACHE[cache_key] = (time.monotonic(), rows)
     return rows
@@ -5976,6 +6020,8 @@ async def search_products_cached(supplier: SupplierClient, keyword: str) -> list
 
 
 async def warm_supplier_catalog(context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not effective_account_list_enabled(context, LEGACY_SOURCE):
+        return
     _, _, supplier = get_services(context)
     try:
         await build_catalog_search_rows(supplier)
@@ -5984,6 +6030,8 @@ async def warm_supplier_catalog(context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def warm_daxi_catalog(context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not effective_account_list_enabled(context, DAXI_SOURCE):
+        return
     supplier = get_daxi_supplier(context)
     try:
         DAXI_PRODUCTS_CACHE.pop((id(supplier), ""), None)
@@ -5994,6 +6042,8 @@ async def warm_daxi_catalog(context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def warm_rz_catalog(context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not effective_account_list_enabled(context, RZ_SOURCE):
+        return
     supplier = get_rz_supplier(context)
     try:
         RZ_PRODUCTS_CACHE.pop((id(supplier), ""), None)
@@ -6049,6 +6099,8 @@ async def build_main_menu_message(
         settings,
         lang,
         effective_legacy_supplier_enabled(context),
+        effective_account_list_enabled(context, DAXI_SOURCE),
+        effective_account_list_enabled(context, RZ_SOURCE),
     )
     return text, entities, main_menu_inline
 
@@ -6393,21 +6445,31 @@ def build_profile_keyboard_localized(lang: str) -> InlineKeyboardMarkup:
     )
 
 
-def build_runtime_profile_keyboard_localized(lang: str, show_legacy_supplier: bool) -> InlineKeyboardMarkup:
-    catalog_callback = "nav:cats" if show_legacy_supplier else "nav:cats2"
-    catalog_label = ui_text("button_account_list", lang) if show_legacy_supplier else ui_text("button_account_list_2", lang)
-    return InlineKeyboardMarkup(
+def build_runtime_profile_keyboard_localized(
+    lang: str,
+    show_legacy_supplier: bool,
+    show_daxi_supplier: bool = True,
+    show_rz_supplier: bool = True,
+) -> InlineKeyboardMarkup:
+    catalog_buttons = [
+        InlineKeyboardButton(ui_text(label, lang), callback_data=callback)
+        for enabled, label, callback in (
+            (show_legacy_supplier, "button_account_list", "nav:cats"),
+            (show_daxi_supplier, "button_account_list_2", "nav:cats2"),
+            (show_rz_supplier, "button_account_list_3", "nav:cats3"),
+            (True, "button_account_list_4", "nav:cats4"),
+        )
+        if enabled
+    ]
+    rows = [catalog_buttons[i:i + 2] for i in range(0, len(catalog_buttons), 2)]
+    rows.extend([
         [
-            [InlineKeyboardButton(ui_text("profile_recharge", lang), callback_data="nav:recharge")],
-            [
-                InlineKeyboardButton(catalog_label, callback_data=catalog_callback),
-                InlineKeyboardButton(ui_text("profile_orders", lang), callback_data="nav:orders"),
-            ],
-            [InlineKeyboardButton(ui_text("button_account_list_3", lang), callback_data="nav:cats3")],
-            [InlineKeyboardButton(ui_text("button_account_list_4", lang), callback_data="nav:cats4")],
-            [premium_inline_button(ui_text("button_main_menu", lang), "nav:menu", HOME_EMOJI_ID)],
-        ]
-    )
+            InlineKeyboardButton(ui_text("profile_recharge", lang), callback_data="nav:recharge"),
+            InlineKeyboardButton(ui_text("profile_orders", lang), callback_data="nav:orders"),
+        ],
+        [premium_inline_button(ui_text("button_main_menu", lang), "nav:menu", HOME_EMOJI_ID)],
+    ])
+    return InlineKeyboardMarkup(rows)
 
 
 def build_language_keyboard(lang: str = DEFAULT_LANG) -> InlineKeyboardMarkup:
@@ -6433,7 +6495,12 @@ async def show_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await reply_inline(
         update,
         build_profile_text_localized(user, balance, rows, lang),
-        build_runtime_profile_keyboard_localized(lang, effective_legacy_supplier_enabled(context)),
+        build_runtime_profile_keyboard_localized(
+            lang,
+            effective_legacy_supplier_enabled(context),
+            effective_account_list_enabled(context, DAXI_SOURCE),
+            effective_account_list_enabled(context, RZ_SOURCE),
+        ),
     )
     return
     await call_blocking(store.ensure_user, user.id, user.username or "", user.full_name or "")
@@ -7254,8 +7321,12 @@ async def show_admin_home(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     )
     text = (
         f"{text}\n"
-        f"旧接口状态：{legacy_supplier_status_label(context)}\n"
-        f"售价模式：{sell_price_mode_label(str(sell_price_config.get('mode') or 'fixed_add'))}\n"
+        + "".join(
+            f"账号列表{account_list_number(source)}：{'已开启' if effective_account_list_enabled(context, source) else '已关闭'}\n"
+            for source in (LEGACY_SOURCE, DAXI_SOURCE, RZ_SOURCE)
+        )
+        + "开关指令：开启账号列表1 / 关闭账号列表1（2、3同理）\n"
+        + f"售价模式：{sell_price_mode_label(str(sell_price_config.get('mode') or 'fixed_add'))}\n"
         f"当前加价：{format_sell_price_value(str(sell_price_config.get('mode') or 'fixed_add'), safe_float(sell_price_config.get('value'), 0.0))}"
     )
     await reply_inline(update, text, build_admin_home_keyboard(), entities=entities)
@@ -7994,6 +8065,8 @@ async def execute_purchase(
 ) -> tuple[str, tuple[MessageEntity, ...] | None, InlineKeyboardMarkup | None] | None:
     settings, store, legacy_supplier = get_services(context)
     normalized_source = normalize_order_source(source)
+    if not effective_account_list_enabled(context, normalized_source):
+        return account_list_disabled_notice(normalized_source, lang), None, None
     if normalized_source == TGSTOREX_SOURCE:
         supplier = get_tgstorex_supplier(context)
         row = (await call_blocking(supplier.get_product_detail, str(product_id)))["data"]
@@ -8020,6 +8093,10 @@ async def execute_purchase(
 
     if total_stock < quantity:
         return ui_text("stock_not_enough", lang, stock=total_stock, quantity=quantity), None, None
+
+    # A list may have been closed while its product details were loading.
+    if not effective_account_list_enabled(context, normalized_source):
+        return account_list_disabled_notice(normalized_source, lang), None, None
 
     ok, remain = await call_blocking(
         store.debit_balance,
@@ -8728,8 +8805,9 @@ async def send_admin_cha_order_file(
             await answer_callback_query_safely(query, "正在发送文件…")
         if not downloaded_files:
             raise SupplierApiError("no delivery files available")
-        if is_modern_supplier(supplier) and should_bundle_delivery_files(downloaded_files):
-            send_path = await call_blocking(build_delivery_bundle, str(fresh_order.get("task_id") or ""), downloaded_files)
+        preserve_archives = isinstance(supplier, TgstorexSupplierClient)
+        if is_modern_supplier(supplier) and (len(downloaded_files) > 1 if preserve_archives else should_bundle_delivery_files(downloaded_files)):
+            send_path = await call_blocking(build_delivery_bundle, str(fresh_order.get("task_id") or ""), downloaded_files, preserve_archives)
             send_name = delivery_display_filename(product_name, quantity, "", "")
         else:
             first_file = downloaded_files[0]
@@ -8923,16 +9001,26 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     parts = query.data.split(":")
     action = parts[0]
+    catalog_source = None
+    for source, actions in (
+        (LEGACY_SOURCE, {"cat", "prd", "qbuy", "cbuy"}),
+        (DAXI_SOURCE, {"cats2", "cat2", "prd2", "qbuy2", "cbuy2"}),
+        (RZ_SOURCE, {"cats3", "cat3", "prd3", "qbuy3", "cbuy3"}),
+    ):
+        if action in actions:
+            catalog_source = source
+            break
+    if action == "nav" and len(parts) > 1:
+        catalog_source = {"cats": LEGACY_SOURCE, "cats2": DAXI_SOURCE, "cats3": RZ_SOURCE}.get(parts[1])
+    if catalog_source is not None and not effective_account_list_enabled(context, catalog_source):
+        await reply_account_list_disabled(update, context, catalog_source)
+        return
     if action in {"cats4", "cat4", "prd4", "qbuy4", "cbuy4"}:
         clear_pending_recharge(context)
         await on_tgstorex_callback(update, context, parts)
         return
     if action != "rchg":
         clear_pending_recharge(context)
-    if action in {"cat", "prd", "qbuy", "cbuy"} and not effective_legacy_supplier_enabled(context):
-        await reply_legacy_supplier_disabled(update, context)
-        return
-
     if action == "lang" and len(parts) >= 3 and parts[1] == "set":
         user = update.effective_user
         lang = normalize_lang_code(parts[2])
@@ -9481,7 +9569,7 @@ async def route_menu_text(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         if effective_legacy_supplier_enabled(context):
             await show_categories(update, context)
         else:
-            await show_daxi_categories(update, context, 0)
+            await reply_legacy_supplier_disabled(update, context)
         return
     if button_matches(text, "button_account_list_2"):
         clear_pending_purchase(context)
@@ -9598,6 +9686,9 @@ async def search_text_rich(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             return
         clear_pending_purchase(context)
         source = normalize_order_source(pending_purchase.get("source"))
+        if not effective_account_list_enabled(context, source):
+            await reply_account_list_disabled(update, context, source)
+            return
         raw_product_id = pending_purchase.get("product_id")
         category_id = safe_int(pending_purchase.get("category_id"), 0)
         page = safe_int(pending_purchase.get("page"), 0)
@@ -9656,8 +9747,8 @@ async def search_text_rich(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     modern_errors: list[str] = []
 
     daxi_result, rz_result, tgstorex_result = await asyncio.gather(
-        fetch_daxi_products(daxi_supplier),
-        fetch_rz_products(rz_supplier),
+        fetch_daxi_products(daxi_supplier) if effective_account_list_enabled(context, DAXI_SOURCE) else asyncio.sleep(0, result=[]),
+        fetch_rz_products(rz_supplier) if effective_account_list_enabled(context, RZ_SOURCE) else asyncio.sleep(0, result=[]),
         fetch_tgstorex_products(context),
         return_exceptions=True,
     )
@@ -9781,24 +9872,19 @@ async def search_text_rich(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         nav_buttons = []
         if effective_legacy_supplier_enabled(context):
             nav_buttons.append(InlineKeyboardButton(ui_text("button_account_list", lang), callback_data="nav:cats"))
-        nav_buttons.append(InlineKeyboardButton(ui_text("button_account_list_2", lang), callback_data="nav:cats2"))
-        nav_buttons.append(InlineKeyboardButton(ui_text("button_account_list_3", lang), callback_data="nav:cats3"))
+        if effective_account_list_enabled(context, DAXI_SOURCE):
+            nav_buttons.append(InlineKeyboardButton(ui_text("button_account_list_2", lang), callback_data="nav:cats2"))
+        if effective_account_list_enabled(context, RZ_SOURCE):
+            nav_buttons.append(InlineKeyboardButton(ui_text("button_account_list_3", lang), callback_data="nav:cats3"))
         if settings.tgstorex_api_key:
             nav_buttons.append(InlineKeyboardButton(ui_text("button_account_list_4", lang), callback_data="nav:cats4"))
-        buttons.append(nav_buttons)
+        buttons.extend(nav_buttons[i:i + 2] for i in range(0, len(nav_buttons), 2))
         await update.message.reply_text(text, entities=entities, reply_markup=InlineKeyboardMarkup(buttons))
         return
-    if effective_legacy_supplier_enabled(context):
-        rows = legacy_rows
-    else:
-        if modern_errors:
-            await update.message.reply_text(ui_text("search_failed", lang, error=" | ".join(modern_errors)))
-            return
-        try:
-            rows = await search_products_cached(supplier, keyword)
-        except SupplierApiError as exc:
-            await update.message.reply_text(ui_text("search_failed", lang, error=exc))
-            return
+    rows = legacy_rows
+    if not rows and modern_errors:
+        await update.message.reply_text(ui_text("search_failed", lang, error=" | ".join(modern_errors)))
+        return
     if not rows:
         await update.message.reply_text(ui_text("search_empty", lang), reply_markup=build_menu_keyboard(lang))
         return
@@ -9869,12 +9955,15 @@ async def order(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     task_id = context.args[0].strip()
     local_order = await call_blocking(store.get_order, task_id)
-    if not local_order:
+    user = update.effective_user
+    settings, _, _ = get_services(context)
+    if not local_order or user is None or (safe_int(local_order.get("user_id")) != user.id and not is_admin(settings, user.id)):
         await update.message.reply_text(ui_text("local_order_missing", lang), reply_markup=build_menu_keyboard(lang))
         return
+    force_resend = len(context.args) > 1 and context.args[1].lower() in {"download", "下载"}
     _, summary = await finalize_remote_order(context, task_id, notify_user=False, lang=lang)
     local_order = await call_blocking(store.get_order, task_id) or local_order
-    if local_order.get("file_url") and not str(local_order.get("delivery_sent_at") or "").strip():
+    if local_order.get("file_url") and (force_resend or not str(local_order.get("delivery_sent_at") or "").strip()):
         supplier = get_supplier_for_source(context, str(local_order.get("source") or LEGACY_SOURCE))
         await deliver_order_file(
             context,
@@ -9882,6 +9971,7 @@ async def order(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             supplier,
             include_ready_photo=True,
             notify_failure=True,
+            force_resend=force_resend,
         )
         local_order = await call_blocking(store.get_order, task_id) or local_order
     lines = [
@@ -9898,6 +9988,7 @@ async def order(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             lines.append("Delivery file: zip sent" if lang == "en" else "发货文件: zip 已发送")
         else:
             lines.append("Delivery file: pending, retry with /order" if lang == "en" else "发货文件: zip 待发送，可用 /order 重试")
+        lines.append(f"Download again: /order {task_id} download" if lang == "en" else f"重新下载：/order {task_id} download")
     await update.message.reply_text("\n".join(lines), reply_markup=build_menu_keyboard(lang))
 
 

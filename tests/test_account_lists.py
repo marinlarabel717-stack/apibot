@@ -59,6 +59,31 @@ def response(body, content_type="application/zip", status=200):
 
 
 class AccountListTests(unittest.IsolatedAsyncioTestCase):
+    async def test_bottom_keyboard_has_two_rows_and_search_is_not_a_query(self):
+        for lang, expected in (
+            ("zh", [["主菜单", "🔎搜索国家"], ["充值余额", "联系客服"]]),
+            ("en", [["Main Menu", "🔎Search Country"], ["Balance", "Support"]]),
+        ):
+            keyboard = bot.build_menu_keyboard(lang)
+            self.assertEqual([[button.text for button in row] for row in keyboard.keyboard], expected)
+            self.assertTrue(keyboard.resize_keyboard)
+            self.assertTrue(keyboard.is_persistent)
+            self.assertIn(expected[0][1], bot.NON_SEARCH_BUTTON_TEXTS)
+            self.assertFalse(bot.should_trigger_product_search(expected[0][1]))
+
+    async def test_country_search_button_clears_numeric_input_and_prompts(self):
+        for lang in ("zh", "en"):
+            context = make_context()
+            bot.set_pending_purchase(context, "test", 0, 0)
+            bot.set_pending_recharge(context, "okpay")
+            update = make_update(bot.ui_text("bottom_search_country", lang))
+            with patch.object(bot, "should_ignore_for_closed_business", AsyncMock(return_value=False)), \
+                 patch.object(bot, "ensure_user_with_lang", AsyncMock(return_value=lang)):
+                await bot.route_menu_text(update, context)
+            self.assertIsNone(bot.get_pending_purchase(context))
+            self.assertIsNone(bot.get_pending_recharge(context))
+            self.assertEqual(update.message.reply_text.await_args.args[0], bot.ui_text("search_country_prompt", lang))
+
     async def test_broadcast_text_preserves_newlines_through_input_preview_and_delivery(self):
         text = "第一行\n\n第二行  保留空格\n第三行"
         context = make_context()

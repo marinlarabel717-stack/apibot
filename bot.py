@@ -764,6 +764,7 @@ RUNTIME_KEY_BUSINESS_STATUS = "business_status"
 RUNTIME_KEY_LEGACY_SUPPLIER_ENABLED = "legacy_supplier_enabled"
 RUNTIME_KEY_DAXI_SUPPLIER_ENABLED = "daxi_supplier_enabled"
 RUNTIME_KEY_RZ_SUPPLIER_ENABLED = "rz_supplier_enabled"
+RUNTIME_KEY_TGSTOREX_SUPPLIER_ENABLED = "tgstorex_supplier_enabled"
 RUNTIME_KEY_SELL_PRICE_MODE = "sell_price_mode"
 RUNTIME_KEY_SELL_PRICE_VALUE = "sell_price_value"
 ADMIN_SETTING_SELL_PRICE_PERCENT = "__sell_price_percent__"
@@ -1042,6 +1043,7 @@ def account_list_runtime_key(source: str) -> str | None:
         LEGACY_SOURCE: RUNTIME_KEY_LEGACY_SUPPLIER_ENABLED,
         DAXI_SOURCE: RUNTIME_KEY_DAXI_SUPPLIER_ENABLED,
         RZ_SOURCE: RUNTIME_KEY_RZ_SUPPLIER_ENABLED,
+        TGSTOREX_SOURCE: RUNTIME_KEY_TGSTOREX_SUPPLIER_ENABLED,
     }.get(source)
 
 
@@ -4241,12 +4243,12 @@ async def handle_admin_legacy_supplier_toggle(update: Update, context: ContextTy
     normalized = normalize_search_keyword(text)
     if user is None or not is_admin(settings, user.id):
         return False
-    command = re.sub(r"\s+", "", normalized).translate(str.maketrans("①②③", "123"))
+    command = re.sub(r"\s+", "", normalized).translate(str.maketrans("①②③④", "1234"))
     command = command.replace("旧接口", "账号列表1")
-    match = re.fullmatch(r"(开启|关闭)账号列表([123])", command)
+    match = re.fullmatch(r"(开启|关闭)账号列表([1234])", command)
     if match is None:
         return False
-    source = {"1": LEGACY_SOURCE, "2": DAXI_SOURCE, "3": RZ_SOURCE}[match.group(2)]
+    source = {"1": LEGACY_SOURCE, "2": DAXI_SOURCE, "3": RZ_SOURCE, "4": TGSTOREX_SOURCE}[match.group(2)]
     key = account_list_runtime_key(source)
     value = "1" if match.group(1) == "开启" else "0"
     runtime_config = get_runtime_config(context)
@@ -4322,6 +4324,7 @@ def build_runtime_main_menu_inline_localized(
     show_legacy_supplier: bool,
     show_daxi_supplier: bool = True,
     show_rz_supplier: bool = True,
+    show_tgstorex_supplier: bool = True,
 ) -> InlineKeyboardMarkup:
     catalog_buttons = [
         build_main_menu_button(settings, ui_text(label, lang), callback, MAIN_MENU_EMOJI_ACCOUNT_LIST_ID, icon)
@@ -4329,7 +4332,7 @@ def build_runtime_main_menu_inline_localized(
             (show_legacy_supplier, "button_account_list", "nav:cats", "📂"),
             (show_daxi_supplier, "button_account_list_2", "nav:cats2", "🧩"),
             (show_rz_supplier, "button_account_list_3", "nav:cats3", "🧪"),
-            (True, "button_account_list_4", "nav:cats4", "📦"),
+            (show_tgstorex_supplier, "button_account_list_4", "nav:cats4", "📦"),
         )
         if enabled
     ]
@@ -5860,6 +5863,9 @@ async def show_tgstorex_catalog(
     settings, _, _ = get_services(context)
     lang = await ensure_user_with_lang(context, update.effective_user)
     await answer_callback_query_safely(update.callback_query)
+    if not effective_account_list_enabled(context, TGSTOREX_SOURCE):
+        await reply_account_list_disabled(update, context, TGSTOREX_SOURCE)
+        return
     if not settings.tgstorex_api_key:
         await reply_inline(update, ui_text("account_list_4_unconfigured", lang))
         return
@@ -5883,6 +5889,9 @@ async def show_tgstorex_catalog(
 
 
 async def on_tgstorex_callback(update: Update, context: ContextTypes.DEFAULT_TYPE, parts: list[str]) -> None:
+    if not effective_account_list_enabled(context, TGSTOREX_SOURCE):
+        await reply_account_list_disabled(update, context, TGSTOREX_SOURCE)
+        return
     settings, _, _ = get_services(context)
     user = update.effective_user
     query = update.callback_query
@@ -6287,6 +6296,7 @@ async def build_main_menu_message(
         effective_legacy_supplier_enabled(context),
         effective_account_list_enabled(context, DAXI_SOURCE),
         effective_account_list_enabled(context, RZ_SOURCE),
+        effective_account_list_enabled(context, TGSTOREX_SOURCE),
     )
     return text, entities, main_menu_inline
 
@@ -6636,6 +6646,7 @@ def build_runtime_profile_keyboard_localized(
     show_legacy_supplier: bool,
     show_daxi_supplier: bool = True,
     show_rz_supplier: bool = True,
+    show_tgstorex_supplier: bool = True,
 ) -> InlineKeyboardMarkup:
     catalog_buttons = [
         InlineKeyboardButton(ui_text(label, lang), callback_data=callback)
@@ -6643,7 +6654,7 @@ def build_runtime_profile_keyboard_localized(
             (show_legacy_supplier, "button_account_list", "nav:cats"),
             (show_daxi_supplier, "button_account_list_2", "nav:cats2"),
             (show_rz_supplier, "button_account_list_3", "nav:cats3"),
-            (True, "button_account_list_4", "nav:cats4"),
+            (show_tgstorex_supplier, "button_account_list_4", "nav:cats4"),
         )
         if enabled
     ]
@@ -6686,6 +6697,7 @@ async def show_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             effective_legacy_supplier_enabled(context),
             effective_account_list_enabled(context, DAXI_SOURCE),
             effective_account_list_enabled(context, RZ_SOURCE),
+            effective_account_list_enabled(context, TGSTOREX_SOURCE),
         ),
     )
     return
@@ -7510,9 +7522,9 @@ async def show_admin_home(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         f"{text}\n"
         + "".join(
             f"账号列表{account_list_number(source)}：{'已开启' if effective_account_list_enabled(context, source) else '已关闭'}\n"
-            for source in (LEGACY_SOURCE, DAXI_SOURCE, RZ_SOURCE)
+            for source in (LEGACY_SOURCE, DAXI_SOURCE, RZ_SOURCE, TGSTOREX_SOURCE)
         )
-        + "开关指令：开启账号列表1 / 关闭账号列表1（2、3同理）\n"
+        + "开关指令：开启账号列表1 / 关闭账号列表1（2、3、4同理）\n"
         + f"售价模式：{sell_price_mode_label(str(sell_price_config.get('mode') or 'fixed_add'))}\n"
         f"当前加价：{format_sell_price_value(str(sell_price_config.get('mode') or 'fixed_add'), safe_float(sell_price_config.get('value'), 0.0))}"
     )
@@ -9205,12 +9217,13 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         (LEGACY_SOURCE, {"cat", "prd", "qbuy", "cbuy"}),
         (DAXI_SOURCE, {"cats2", "cat2", "prd2", "qbuy2", "cbuy2"}),
         (RZ_SOURCE, {"cats3", "cat3", "prd3", "qbuy3", "cbuy3"}),
+        (TGSTOREX_SOURCE, {"cats4", "cat4", "prd4", "qbuy4", "cbuy4"}),
     ):
         if action in actions:
             catalog_source = source
             break
     if action == "nav" and len(parts) > 1:
-        catalog_source = {"cats": LEGACY_SOURCE, "cats2": DAXI_SOURCE, "cats3": RZ_SOURCE}.get(parts[1])
+        catalog_source = {"cats": LEGACY_SOURCE, "cats2": DAXI_SOURCE, "cats3": RZ_SOURCE, "cats4": TGSTOREX_SOURCE}.get(parts[1])
     if catalog_source is not None and not effective_account_list_enabled(context, catalog_source):
         await reply_account_list_disabled(update, context, catalog_source)
         return
@@ -10053,7 +10066,7 @@ async def search_text_rich(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             nav_buttons.append(InlineKeyboardButton(ui_text("button_account_list_2", lang), callback_data="nav:cats2"))
         if effective_account_list_enabled(context, RZ_SOURCE):
             nav_buttons.append(InlineKeyboardButton(ui_text("button_account_list_3", lang), callback_data="nav:cats3"))
-        if settings.tgstorex_api_key:
+        if settings.tgstorex_api_key and effective_account_list_enabled(context, TGSTOREX_SOURCE):
             nav_buttons.append(InlineKeyboardButton(ui_text("button_account_list_4", lang), callback_data="nav:cats4"))
         buttons.extend(nav_buttons[i:i + 2] for i in range(0, len(nav_buttons), 2))
         await update.message.reply_text(text, entities=entities, reply_markup=InlineKeyboardMarkup(buttons))

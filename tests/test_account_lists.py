@@ -140,8 +140,8 @@ class AccountListTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(store.record_order.call_args.kwargs["unit_cost"], row["price"])
 
     def test_all_menu_combinations(self):
-        for enabled in itertools.product((False, True), repeat=3):
-            expected = [cb for flag, cb in zip(enabled, ("nav:cats", "nav:cats2", "nav:cats3")) if flag] + ["nav:cats4"]
+        for enabled in itertools.product((False, True), repeat=4):
+            expected = [cb for flag, cb in zip(enabled, ("nav:cats", "nav:cats2", "nav:cats3", "nav:cats4")) if flag]
             for lang in ("zh", "en"):
                 menus = (
                     bot.build_runtime_main_menu_inline_localized(SETTINGS, lang, *enabled),
@@ -160,22 +160,25 @@ class AccountListTests(unittest.IsolatedAsyncioTestCase):
             context = make_context(store)
             update = make_update()
             with patch.object(bot, "ensure_user_with_lang", AsyncMock(return_value="zh")), patch.object(bot, "send_menu_message", AsyncMock()):
-                for index, source in enumerate(SOURCES, 1):
+                all_sources = (*SOURCES, bot.TGSTOREX_SOURCE)
+                for index, source in enumerate(all_sources, 1):
                     self.assertTrue(await bot.handle_admin_legacy_supplier_toggle(update, context, f"关闭账号列表{index}"))
                     self.assertFalse(bot.effective_account_list_enabled(context, source))
                 self.assertTrue(await bot.handle_admin_legacy_supplier_toggle(update, context, "开启 账号列表②"))
                 persisted = store.get_runtime_settings()
-                self.assertEqual([persisted[bot.account_list_runtime_key(s)] for s in SOURCES], ["0", "1", "0"])
+                self.assertEqual([persisted[bot.account_list_runtime_key(s)] for s in all_sources], ["0", "1", "0", "0"])
                 context.application.bot_data["runtime_config"] = persisted
-                self.assertEqual([bot.effective_account_list_enabled(context, s) for s in SOURCES], [False, True, False])
+                self.assertEqual([bot.effective_account_list_enabled(context, s) for s in all_sources], [False, True, False, False])
+                self.assertTrue(await bot.handle_admin_legacy_supplier_toggle(update, context, "开启 账号列表④"))
                 self.assertTrue(bot.effective_account_list_enabled(context, bot.TGSTOREX_SOURCE))
+                persisted = store.get_runtime_settings()
                 update.effective_user.id = 99
-                self.assertFalse(await bot.handle_admin_legacy_supplier_toggle(update, context, "开启账号列表1"))
+                self.assertFalse(await bot.handle_admin_legacy_supplier_toggle(update, context, "关闭账号列表4"))
                 self.assertEqual(store.get_runtime_settings(), persisted)
 
     async def test_disabled_callbacks_quantity_and_purchase_are_blocked(self):
         context = make_context()
-        for source, suffix in zip(SOURCES, ("", "2", "3")):
+        for source, suffix in zip((*SOURCES, bot.TGSTOREX_SOURCE), ("", "2", "3", "4")):
             context.application.bot_data["runtime_config"][bot.account_list_runtime_key(source)] = "0"
             for action in (f"nav:cats{suffix}", f"prd{suffix}:1:0:0", f"qbuy{suffix}:1:0:0", f"cbuy{suffix}:1:2:0:0"):
                 with patch.object(bot, "should_ignore_for_closed_business", AsyncMock(return_value=False)), patch.object(bot, "reply_account_list_disabled", AsyncMock()) as disabled:
@@ -209,7 +212,7 @@ class AccountListTests(unittest.IsolatedAsyncioTestCase):
     async def test_existing_delivery_still_works_when_lists_closed(self):
         context = make_context()
         context.application.bot_data["store"].get_user_lang.return_value = "zh"
-        for source in SOURCES:
+        for source in (*SOURCES, bot.TGSTOREX_SOURCE):
             context.application.bot_data["runtime_config"][bot.account_list_runtime_key(source)] = "0"
         order = {"task_id": "test-order", "file_url": "https://tgstorex.com/file", "user_id": 1, "quantity": 1}
         with tempfile.TemporaryDirectory() as directory, patch.object(bot, "DELIVERY_FILES_DIR", Path(directory)):
@@ -236,6 +239,7 @@ class AccountListTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_redownload_command_checks_ownership_and_never_purchases(self):
         context = make_context()
+        context.application.bot_data["runtime_config"][bot.account_list_runtime_key(bot.TGSTOREX_SOURCE)] = "0"
         context.args = ["existing-order", "download"]
         local_order = {"task_id": "existing-order", "user_id": 2, "source": "tgstorex", "file_url": "/file", "delivery_sent_at": "2026-11-01"}
         store = context.application.bot_data["store"]
@@ -253,6 +257,27 @@ class AccountListTests(unittest.IsolatedAsyncioTestCase):
             await bot.order(update, context)
             self.assertTrue(deliver.await_args.kwargs["force_resend"])
             store.debit_balance.assert_not_called()
+
+    async def test_list_four_closed_catalog_and_direct_callbacks_never_fetch(self):
+        context = make_context()
+        context.application.bot_data["runtime_config"][bot.account_list_runtime_key(bot.TGSTOREX_SOURCE)] = "0"
+        with patch.object(bot, "ensure_user_with_lang", AsyncMock(return_value="zh")), \
+             patch.object(bot, "reply_account_list_disabled", AsyncMock()) as disabled, \
+             patch.object(bot, "fetch_tgstorex_products", AsyncMock()) as fetch:
+            await bot.route_menu_text(make_update("账号列表④"), context)
+            await bot.on_tgstorex_callback(make_update(callback="qbuy4:BR:0:0"), context, ["qbuy4", "BR", "0", "0"])
+        self.assertEqual(disabled.await_count, 2)
+        fetch.assert_not_awaited()
+
+    async def test_all_four_closed_do_not_search_or_start_refresh(self):
+        context = make_context()
+        for source in (*SOURCES, bot.TGSTOREX_SOURCE):
+            context.application.bot_data["runtime_config"][bot.account_list_runtime_key(source)] = "0"
+        with patch.object(bot, "ensure_search_catalog_refresh") as refresh:
+            catalogs, missing = await bot.get_fast_search_catalogs(context)
+        self.assertEqual(catalogs, {})
+        self.assertEqual(missing, [])
+        refresh.assert_not_called()
 
 
 class SessionFileTests(unittest.TestCase):

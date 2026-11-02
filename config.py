@@ -137,6 +137,9 @@ class Settings:
     delivery_retry_cooldown_seconds: int
     telegram_media_write_timeout_seconds: int
     telegram_media_read_timeout_seconds: int
+    tgstorex_api_base_url: str = "https://tgstorex.com/api/v1"
+    tgstorex_api_key: str = ""
+    tgstorex_api_timeout_seconds: int = 20
 
 
 def load_settings() -> Settings:
@@ -218,4 +221,7 @@ def load_settings() -> Settings:
         delivery_retry_cooldown_seconds=max(5, int(os.getenv("DELIVERY_RETRY_COOLDOWN_SECONDS", "60"))),
         telegram_media_write_timeout_seconds=max(20, int(os.getenv("TELEGRAM_MEDIA_WRITE_TIMEOUT_SECONDS", "180"))),
         telegram_media_read_timeout_seconds=max(20, int(os.getenv("TELEGRAM_MEDIA_READ_TIMEOUT_SECONDS", "120"))),
+        tgstorex_api_base_url=os.getenv("TGSTOREX_API_BASE_URL", "https://tgstorex.com/api/v1").strip().rstrip("/"),
+        tgstorex_api_key=os.getenv("TGSTOREX_API_KEY", "").strip(),
+        tgstorex_api_timeout_seconds=max(5, int(os.getenv("TGSTOREX_API_TIMEOUT_SECONDS", "20"))),
     )

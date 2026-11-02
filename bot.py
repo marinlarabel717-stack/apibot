@@ -18,6 +18,7 @@ from decimal import Decimal, ROUND_DOWN
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
+from uuid import uuid4
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -49,6 +50,7 @@ from telegram.ext import (
 from config import Settings, load_settings
 from store import Store
 from supplier_client import DaxiSupplierClient, RzSupplierClient, SupplierApiError, SupplierClient
+from tgstorex_client import TgstorexPurchaseUncertain, TgstorexSupplierClient
 
 
 logging.basicConfig(
@@ -129,6 +131,7 @@ BUTTON_RECHARGE = "我要充值"
 BUTTON_ACCOUNT_LIST = "账号列表①"
 BUTTON_ACCOUNT_LIST_2 = "账号列表②"
 BUTTON_ACCOUNT_LIST_3 = "账号列表③"
+BUTTON_ACCOUNT_LIST_4 = "账号列表④"
 BUTTON_RECHARGE_BALANCE = "充值余额"
 BUTTON_PURCHASE_NOTICE = "购买须知"
 BUTTON_ORDER_HISTORY = "购买记录"
@@ -178,6 +181,8 @@ LEGACY_MENU_BUTTON_TEXTS = {
     BUTTON_SWITCH_LANGUAGE_EN,
 }
 NON_SEARCH_BUTTON_TEXTS = MENU_BUTTON_TEXTS | LEGACY_MENU_BUTTON_TEXTS | {
+    BUTTON_ACCOUNT_LIST_4,
+    "Account List 4",
     BUTTON_PRODUCTS,
     BUTTON_MAIN_MENU,
     BUTTON_PROFILE,
@@ -190,10 +195,19 @@ NON_SEARCH_BUTTON_TEXTS = MENU_BUTTON_TEXTS | LEGACY_MENU_BUTTON_TEXTS | {
 LEGACY_SOURCE = "legacy"
 DAXI_SOURCE = "daxi"
 RZ_SOURCE = "rz"
-MODERN_SOURCE_SET = {DAXI_SOURCE, RZ_SOURCE}
+TGSTOREX_SOURCE = "tgstorex"
+MODERN_SOURCE_SET = {DAXI_SOURCE, RZ_SOURCE, TGSTOREX_SOURCE}
 DEFAULT_LANG = "zh"
 SUPPORTED_LANGS = {"zh", "en"}
 UI_TEXTS: dict[str, dict[str, str]] = {
+    "button_account_list_4": {"zh": BUTTON_ACCOUNT_LIST_4, "en": "Account List 4"},
+    "search_source_account_list_4": {"zh": "列表④", "en": "List 4"},
+    "back_account_list_4": {"zh": "返回账号列表④", "en": "Back to Account List 4"},
+    "account_list_4_intro": {"zh": "账号列表④ · 会话包，请选择大洲地区", "en": "Account List 4 - Session packages: select a region"},
+    "fetch_account_list_4_failed": {"zh": "获取账号列表④失败: {error}", "en": "Failed to load Account List 4: {error}"},
+    "no_products_in_account_list_4": {"zh": "账号列表④当前没有可用会话包。", "en": "No session packages available in Account List 4."},
+    "account_list_4_unconfigured": {"zh": "账号列表④尚未配置，请联系管理员。", "en": "Account List 4 is not configured. Please contact support."},
+    "order_needs_review": {"zh": "订单结果待核查，请勿重复购买，客服会核对上游订单。", "en": "Order outcome under review. Do not purchase again; contact support."},
     "button_products": {"zh": BUTTON_PRODUCTS, "en": BUTTON_PRODUCTS_EN},
     "button_main_menu": {"zh": BUTTON_MAIN_MENU, "en": BUTTON_MAIN_MENU_EN},
     "button_profile": {"zh": BUTTON_PROFILE, "en": BUTTON_PROFILE_EN},
@@ -3987,6 +4001,8 @@ def get_rz_supplier(context: ContextTypes.DEFAULT_TYPE) -> RzSupplierClient:
 
 def normalize_order_source(value: Any) -> str:
     normalized = str(value or "").strip().lower()
+    if normalized == TGSTOREX_SOURCE:
+        return TGSTOREX_SOURCE
     if normalized == DAXI_SOURCE:
         return DAXI_SOURCE
     if normalized == RZ_SOURCE:
@@ -3999,6 +4015,8 @@ def get_supplier_for_source(
     source: str,
 ) -> SupplierClient | DaxiSupplierClient | RzSupplierClient:
     normalized = normalize_order_source(source)
+    if normalized == TGSTOREX_SOURCE:
+        return get_tgstorex_supplier(context)
     if normalized == DAXI_SOURCE:
         return get_daxi_supplier(context)
     if normalized == RZ_SOURCE:
@@ -4007,10 +4025,12 @@ def get_supplier_for_source(
 
 
 def is_modern_supplier(supplier: SupplierClient | DaxiSupplierClient | RzSupplierClient) -> bool:
-    return isinstance(supplier, (DaxiSupplierClient, RzSupplierClient))
+    return isinstance(supplier, (DaxiSupplierClient, RzSupplierClient, TgstorexSupplierClient))
 
 
 def supplier_request_timeout_seconds(supplier: SupplierClient | DaxiSupplierClient | RzSupplierClient) -> int:
+    if isinstance(supplier, TgstorexSupplierClient):
+        return supplier.settings.tgstorex_api_timeout_seconds
     if isinstance(supplier, DaxiSupplierClient):
         return supplier.settings.daxi_api_timeout_seconds
     if isinstance(supplier, RzSupplierClient):
@@ -4175,6 +4195,9 @@ def build_runtime_main_menu_inline_localized(
             ],
             [build_main_menu_button(settings, ui_text("button_switch_language", lang), "nav:language", MAIN_MENU_EMOJI_SWITCH_LANGUAGE_ID, "🌐")],
         ]
+    rows.insert(2 if show_legacy_supplier else 1, [
+        build_main_menu_button(settings, ui_text("button_account_list_4", lang), "nav:cats4", MAIN_MENU_EMOJI_ACCOUNT_LIST_ID, "📦")
+    ])
     return InlineKeyboardMarkup(rows)
 
 
@@ -5284,6 +5307,11 @@ def build_rz_category_icon(row: dict[str, Any]) -> str:
 
 
 def format_rz_product_title(row: dict[str, Any], lang: str) -> str:
+    if row.get("source") == TGSTOREX_SOURCE:
+        code = str(row.get("productId") or "").upper()
+        flag = "".join(chr(127397 + ord(letter)) for letter in code) if len(code) == 2 else ""
+        country = translate_category_name(str(row.get("country") or code), lang)
+        return " ".join(part for part in (flag, str(row.get("prefix") or ""), country) if part)
     country = translate_category_name(str(row.get("country") or row.get("country_name") or "").strip(), lang)
     phone_code = str(row.get("prefix") or row.get("phone_code") or "").strip()
     section = translate_category_name(str(row.get("section") or "").strip(), lang)
@@ -5599,6 +5627,160 @@ async def show_rz_products(
         build_rz_product_keyboard_localized(settings, group_rows, category_index, page, lang),
         entities=entities,
     )
+
+
+def get_tgstorex_supplier(context: ContextTypes.DEFAULT_TYPE) -> TgstorexSupplierClient:
+    return context.application.bot_data["supplier_tgstorex"]
+
+
+async def fetch_tgstorex_products(context: ContextTypes.DEFAULT_TYPE, *, refresh: bool = False) -> list[dict[str, Any]]:
+    supplier = get_tgstorex_supplier(context)
+    if not supplier.settings.tgstorex_api_key:
+        return []
+    cache_key = (id(supplier), "")
+    cached = RZ_PRODUCTS_CACHE.get(cache_key)
+    if not refresh and cached and time.monotonic() - cached[0] < 60:
+        return cached[1]
+    payload = await call_blocking(supplier.get_products)
+    rows = []
+    for item in payload.get("data") or []:
+        row = dict(item)
+        country = translate_category_name(str(row.get("country") or ""), "zh")
+        row["country"] = country
+        row["productName"] = f"{country} {item.get('productName', '')} {row['productId']}"
+        rows.append(row)
+    RZ_PRODUCTS_CACHE[cache_key] = (time.monotonic(), rows)
+    return rows
+
+
+def group_tgstorex_products(rows: list[dict[str, Any]], lang: str) -> list[dict[str, Any]]:
+    grouped = []
+    for item in rows:
+        row = dict(item)
+        if not resolve_rz_region_key(row):
+            row["kind"] = "other"
+        grouped.append(row)
+    groups = group_rz_products(grouped, lang)
+    for group in groups:
+        if group["key"] == "other":
+            group["name"] = "其他地区" if lang == "zh" else "Other regions"
+    return groups
+
+
+def tgstorex_keyboard(keyboard: InlineKeyboardMarkup, lang: str) -> InlineKeyboardMarkup:
+    rows = []
+    for buttons in keyboard.inline_keyboard:
+        converted = []
+        for button in buttons:
+            payload = button.to_dict()
+            callback = str(payload.get("callback_data") or "")
+            prefix, separator, tail = callback.partition(":")
+            if prefix in {"cats3", "cat3", "prd3", "qbuy3", "cbuy3"}:
+                payload["callback_data"] = f"{prefix[:-1]}4{separator}{tail}"
+            if payload.get("text") == ui_text("back_account_list_3", lang):
+                payload["text"] = ui_text("back_account_list_4", lang)
+            converted.append(InlineKeyboardButton.de_json(payload, None))
+        rows.append(converted)
+    return InlineKeyboardMarkup(rows)
+
+
+async def show_tgstorex_catalog(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    category_index: int | None = None,
+    page: int = 0,
+) -> None:
+    settings, _, _ = get_services(context)
+    lang = await ensure_user_with_lang(context, update.effective_user)
+    await answer_callback_query_safely(update.callback_query)
+    if not settings.tgstorex_api_key:
+        await reply_inline(update, ui_text("account_list_4_unconfigured", lang))
+        return
+    try:
+        rows = await fetch_tgstorex_products(context)
+    except SupplierApiError as exc:
+        await reply_inline(update, ui_text("fetch_account_list_4_failed", lang, error=exc))
+        return
+    groups = group_tgstorex_products(rows, lang)
+    if not groups:
+        await reply_inline(update, ui_text("no_products_in_account_list_4", lang))
+        return
+    if category_index is None or not 0 <= category_index < len(groups):
+        keyboard = build_rz_category_keyboard_localized(groups, page, lang)
+        await reply_inline(update, ui_text("account_list_4_intro", lang), tgstorex_keyboard(keyboard, lang))
+        return
+    group = groups[category_index]
+    text, entities = build_rz_products_group_intro_text_localized(group["name"], lang)
+    keyboard = build_rz_product_keyboard_localized(settings, group["rows"], category_index, page, lang)
+    await reply_inline(update, text, tgstorex_keyboard(keyboard, lang), entities=entities)
+
+
+async def on_tgstorex_callback(update: Update, context: ContextTypes.DEFAULT_TYPE, parts: list[str]) -> None:
+    settings, _, _ = get_services(context)
+    user = update.effective_user
+    query = update.callback_query
+    lang = await ensure_user_with_lang(context, user)
+    if not settings.tgstorex_api_key:
+        await reply_inline(update, ui_text("account_list_4_unconfigured", lang))
+        return
+    action = parts[0]
+    if action == "cats4" and len(parts) == 2:
+        clear_pending_purchase(context)
+        await show_tgstorex_catalog(update, context, page=safe_int(parts[1]))
+        return
+    if action == "cat4" and len(parts) == 3:
+        clear_pending_purchase(context)
+        await show_tgstorex_catalog(update, context, safe_int(parts[1], -1), safe_int(parts[2]))
+        return
+    if action in {"prd4", "qbuy4"} and len(parts) == 4:
+        product_id, category_index, page = parts[1], safe_int(parts[2], -1), safe_int(parts[3])
+        if action == "qbuy4":
+            set_pending_purchase(context, product_id, category_index, page, source=TGSTOREX_SOURCE)
+            await reply_inline(update, ui_text("quick_buy_prompt", lang))
+            return
+        clear_pending_purchase(context)
+        try:
+            row = (await call_blocking(get_tgstorex_supplier(context).get_product_detail, product_id))["data"]
+        except SupplierApiError as exc:
+            await reply_inline(update, ui_text("fetch_product_detail_failed", lang, error=exc))
+            return
+        text, entities, keyboard = render_rz_product_detail_view_localized(settings, row, category_index, page, lang)
+        await reply_inline(update, text, tgstorex_keyboard(keyboard, lang), entities=entities)
+        return
+    if action == "cbuy4" and len(parts) == 5 and user is not None and query is not None:
+        clear_pending_purchase(context)
+        quantity = safe_int(parts[2])
+        if quantity <= 0:
+            await reply_inline(update, ui_text("quick_buy_param_invalid", lang))
+            return
+        confirmation = context.user_data.get("tgstorex_confirmation")
+        if confirmation != query.data:
+            await answer_callback_query_safely(query, ui_text("unsupported_button", lang))
+            return
+        context.user_data.pop("tgstorex_confirmation", None)
+        await answer_callback_query_safely(query, ui_text("creating_order", lang))
+        if query.message is not None:
+            try:
+                await query.edit_message_reply_markup(reply_markup=None)
+            except BadRequest:
+                pass
+        try:
+            result = await execute_purchase(
+                context, user.id, user.username or "", user.full_name or "", parts[1], quantity, lang,
+                source=TGSTOREX_SOURCE,
+                expected_unit_price=context.user_data.pop("tgstorex_quoted_price", None),
+            )
+        except SupplierApiError as exc:
+            await reply_inline(update, ui_text("fetch_product_detail_failed", lang, error=exc))
+            return
+        if query.message is not None:
+            if result:
+                text, entities, markup = result
+                await query.message.reply_text(text, entities=entities, reply_markup=markup or build_menu_keyboard(lang))
+            else:
+                await query.message.reply_text(order_created_caption_localized(lang), reply_markup=build_menu_keyboard(lang), parse_mode="HTML")
+        return
+    await reply_inline(update, ui_text("unsupported_button", lang))
 
 
 async def build_catalog_search_rows(supplier: SupplierClient) -> list[dict[str, Any]]:
@@ -6222,6 +6404,7 @@ def build_runtime_profile_keyboard_localized(lang: str, show_legacy_supplier: bo
                 InlineKeyboardButton(ui_text("profile_orders", lang), callback_data="nav:orders"),
             ],
             [InlineKeyboardButton(ui_text("button_account_list_3", lang), callback_data="nav:cats3")],
+            [InlineKeyboardButton(ui_text("button_account_list_4", lang), callback_data="nav:cats4")],
             [premium_inline_button(ui_text("button_main_menu", lang), "nav:menu", HOME_EMOJI_ID)],
         ]
     )
@@ -7807,10 +7990,18 @@ async def execute_purchase(
     quantity: int,
     lang: str = DEFAULT_LANG,
     source: str = LEGACY_SOURCE,
+    expected_unit_price: float | None = None,
 ) -> tuple[str, tuple[MessageEntity, ...] | None, InlineKeyboardMarkup | None] | None:
     settings, store, legacy_supplier = get_services(context)
     normalized_source = normalize_order_source(source)
-    if normalized_source == DAXI_SOURCE:
+    if normalized_source == TGSTOREX_SOURCE:
+        supplier = get_tgstorex_supplier(context)
+        row = (await call_blocking(supplier.get_product_detail, str(product_id)))["data"]
+        if quantity <= 0 or safe_float(row.get("price")) <= 0:
+            raise SupplierApiError("Invalid session purchase quantity or price")
+        if expected_unit_price is not None and abs(resolve_sell_price(settings, row) - expected_unit_price) > 0.000001:
+            return ("价格已变化，请重新选择商品并确认。" if lang == "zh" else "Price changed. Please select the product and confirm again."), None, None
+    elif normalized_source == DAXI_SOURCE:
         supplier: SupplierClient | DaxiSupplierClient | RzSupplierClient = get_daxi_supplier(context)
         row = await fetch_daxi_product_detail_cached(supplier, str(product_id))
     elif normalized_source == RZ_SOURCE:
@@ -7856,6 +8047,8 @@ async def execute_purchase(
             )
         else:
             buy_payload = await call_blocking(supplier.buy_product, int(product_id), quantity)
+    except TgstorexPurchaseUncertain:
+        buy_payload = {"success": True, "data": {"orderId": f"tgx-review-{uuid4().hex}", "needsReview": True}}
     except SupplierApiError as exc:
         refunded = await call_blocking(
             store.add_balance,
@@ -7919,6 +8112,16 @@ async def execute_purchase(
         remain,
     )
     schedule_fast_order_probe(context, task_id)
+    if data.get("needsReview"):
+        for admin_id in settings.admin_user_ids:
+            try:
+                await context.bot.send_message(
+                    chat_id=admin_id,
+                    text=f"列表④订单结果待核查，请在上游核实，不要重复下单或直接退款。\n本地订单：{task_id}\n用户：{user_id}\n国家：{product_id}\n数量：{quantity}\n金额：{total_price:.2f}",
+                )
+            except Exception:
+                logger.exception("Session purchase review notification failed: %s", task_id)
+        return ui_text("order_needs_review", lang), None, None
     return None
 
 
@@ -8001,6 +8204,9 @@ async def finalize_remote_order(
     try:
         payload = await call_blocking(supplier.query_order, task_id)
     except SupplierApiError as exc:
+        if isinstance(supplier, TgstorexSupplierClient):
+            logger.warning("Session order query unavailable; no automatic refund: %s", task_id)
+            return "error", ui_text("order_processing", lang)
         if is_missing_remote_order_error(exc) or order_age_seconds >= settings.order_stuck_timeout_seconds:
             logger.warning(
                 "上游订单查单异常，按失败退款: task_id=%s age=%ss error=%s",
@@ -8035,6 +8241,10 @@ async def finalize_remote_order(
     total_price = safe_float(order["total_price"])
     if is_modern_supplier(supplier):
         status = str(data.get("status") or "").strip().lower()
+        if data.get("needsReview"):
+            return "processing", ui_text("order_needs_review", lang)
+        if isinstance(supplier, TgstorexSupplierClient) and safe_int(data.get("quantityRequested")) != quantity:
+            return "processing", ui_text("order_processing", lang)
         quantity_success = safe_int(data.get("quantityDelivered"))
         file_url = extract_daxi_file_url(payload)
         if status == "processing":
@@ -8713,6 +8923,10 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     parts = query.data.split(":")
     action = parts[0]
+    if action in {"cats4", "cat4", "prd4", "qbuy4", "cbuy4"}:
+        clear_pending_recharge(context)
+        await on_tgstorex_callback(update, context, parts)
+        return
     if action != "rchg":
         clear_pending_recharge(context)
     if action in {"cat", "prd", "qbuy", "cbuy"} and not effective_legacy_supplier_enabled(context):
@@ -8877,6 +9091,9 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             return
         if target == "cats3":
             await show_rz_categories(update, context, 0)
+            return
+        if target == "cats4":
+            await show_tgstorex_catalog(update, context)
             return
         if target == "menu":
             await show_start_menu(update, context)
@@ -9245,6 +9462,11 @@ async def route_menu_text(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if update.message is None or not update.message.text:
         return
     text = update.message.text.strip()
+    if button_matches(text, "button_account_list_4"):
+        clear_pending_purchase(context)
+        clear_pending_recharge(context)
+        await show_tgstorex_catalog(update, context)
+        return
     if button_matches(text, "button_products"):
         if not effective_legacy_supplier_enabled(context):
             await reply_legacy_supplier_disabled(update, context)
@@ -9380,7 +9602,10 @@ async def search_text_rich(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         category_id = safe_int(pending_purchase.get("category_id"), 0)
         page = safe_int(pending_purchase.get("page"), 0)
         try:
-            if source == DAXI_SOURCE:
+            if source == TGSTOREX_SOURCE:
+                product_id = str(raw_product_id or "").strip()
+                row = (await call_blocking(get_tgstorex_supplier(context).get_product_detail, product_id))["data"]
+            elif source == DAXI_SOURCE:
                 product_id = str(raw_product_id or "").strip()
                 row = await fetch_daxi_product_detail_cached(get_daxi_supplier(context), product_id)
             elif source == RZ_SOURCE:
@@ -9394,7 +9619,7 @@ async def search_text_rich(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             return
         if source == DAXI_SOURCE:
             product_name = format_daxi_product_title(row, lang) or str(row.get("productName") or f"商品 {product_id}")
-        elif source == RZ_SOURCE:
+        elif source in {RZ_SOURCE, TGSTOREX_SOURCE}:
             product_name = format_rz_product_title(row, lang) or str(row.get("productName") or f"商品 {product_id}")
         else:
             product_name = str(row.get("productName") or f"商品 {product_id}")
@@ -9402,6 +9627,13 @@ async def search_text_rich(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         caption, caption_entities = build_purchase_confirm_text_localized(product_name, unit_price, quantity, lang)
         if source == DAXI_SOURCE:
             keyboard = build_daxi_purchase_confirm_keyboard_localized(str(product_id), quantity, category_id, page, lang)
+        elif source == TGSTOREX_SOURCE:
+            if quantity > safe_int(row.get("totalStock")):
+                await update.message.reply_text(ui_text("stock_not_enough", lang, stock=safe_int(row.get("totalStock")), quantity=quantity))
+                return
+            keyboard = tgstorex_keyboard(build_rz_purchase_confirm_keyboard_localized(str(product_id), quantity, category_id, page, lang), lang)
+            context.user_data["tgstorex_confirmation"] = f"cbuy4:{product_id}:{quantity}:{category_id}:{page}"
+            context.user_data["tgstorex_quoted_price"] = unit_price
         elif source == RZ_SOURCE:
             keyboard = build_rz_purchase_confirm_keyboard_localized(str(product_id), quantity, category_id, page, lang)
         else:
@@ -9423,11 +9655,23 @@ async def search_text_rich(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     rz_supplier = get_rz_supplier(context)
     modern_errors: list[str] = []
 
-    daxi_result, rz_result = await asyncio.gather(
+    daxi_result, rz_result, tgstorex_result = await asyncio.gather(
         fetch_daxi_products(daxi_supplier),
         fetch_rz_products(rz_supplier),
+        fetch_tgstorex_products(context),
         return_exceptions=True,
     )
+    if isinstance(tgstorex_result, Exception):
+        modern_errors.append(f"{ui_text('search_source_account_list_4', lang)}: {tgstorex_result}")
+        tgstorex_all_rows = []
+    else:
+        tgstorex_all_rows = tgstorex_result
+    tgstorex_rows = search_rz_products_locally(tgstorex_all_rows, keyword)
+    tgstorex_index_map = {
+        str(row["productId"]): group["index"]
+        for group in group_tgstorex_products(tgstorex_all_rows, lang)
+        for row in group["rows"]
+    }
     if isinstance(daxi_result, Exception):
         modern_errors.append(f"{ui_text('search_source_account_list_2', lang)}: {daxi_result}")
         daxi_all_rows = []
@@ -9462,6 +9706,8 @@ async def search_text_rich(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         source_buckets.append(("daxi", daxi_rows))
     if rz_rows:
         source_buckets.append(("rz", rz_rows))
+    if tgstorex_rows:
+        source_buckets.append((TGSTOREX_SOURCE, tgstorex_rows))
     if source_buckets:
         max_bucket_size = max(len(rows) for _, rows in source_buckets)
         for index in range(max_bucket_size):
@@ -9491,6 +9737,13 @@ async def search_text_rich(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             display_name = shorten(format_daxi_product_title(row, lang), 28)
             source_label = ui_text("search_source_account_list_2", lang)
             callback_data = f"prd2:{product_id}:{category_index}:0"
+        elif source_name == TGSTOREX_SOURCE:
+            product_id = str(row["productId"])
+            category_index = tgstorex_index_map.get(product_id, 0)
+            sell_price = resolve_sell_price(settings, row)
+            display_name = shorten(format_rz_product_title(row, lang), 28)
+            source_label = ui_text("search_source_account_list_4", lang)
+            callback_data = f"prd4:{product_id}:{category_index}:0"
         else:
             product_id = str(row.get("productId") or "").strip()
             if not product_id:
@@ -9530,6 +9783,8 @@ async def search_text_rich(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             nav_buttons.append(InlineKeyboardButton(ui_text("button_account_list", lang), callback_data="nav:cats"))
         nav_buttons.append(InlineKeyboardButton(ui_text("button_account_list_2", lang), callback_data="nav:cats2"))
         nav_buttons.append(InlineKeyboardButton(ui_text("button_account_list_3", lang), callback_data="nav:cats3"))
+        if settings.tgstorex_api_key:
+            nav_buttons.append(InlineKeyboardButton(ui_text("button_account_list_4", lang), callback_data="nav:cats4"))
         buttons.append(nav_buttons)
         await update.message.reply_text(text, entities=entities, reply_markup=InlineKeyboardMarkup(buttons))
         return
@@ -9847,6 +10102,7 @@ def build_application(settings: Settings) -> Application:
     supplier = SupplierClient(settings)
     supplier_daxi = DaxiSupplierClient(settings)
     supplier_rz = RzSupplierClient(settings)
+    supplier_tgstorex = TgstorexSupplierClient(settings)
     application = (
         ApplicationBuilder()
         .token(settings.bot_token)
@@ -9868,6 +10124,7 @@ def build_application(settings: Settings) -> Application:
     application.bot_data["supplier"] = supplier
     application.bot_data["supplier_daxi"] = supplier_daxi
     application.bot_data["supplier_rz"] = supplier_rz
+    application.bot_data["supplier_tgstorex"] = supplier_tgstorex
     application.bot_data["runtime_config"] = store.get_runtime_settings()
     apply_runtime_sell_price_settings(settings, application.bot_data["runtime_config"])
 

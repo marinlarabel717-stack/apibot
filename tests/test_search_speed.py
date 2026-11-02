@@ -13,6 +13,8 @@ class FastSearchTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         for cache in (bot.CATALOG_SEARCH_CACHE, bot.DAXI_PRODUCTS_CACHE, bot.RZ_PRODUCTS_CACHE):
             cache.clear()
+        bot.CATALOG_SEARCH_INCOMPLETE.clear()
+        bot.CATEGORY_PRODUCTS_CACHE.clear()
         self.context = make_context()
         self.sources = (bot.LEGACY_SOURCE, bot.DAXI_SOURCE, bot.RZ_SOURCE, bot.TGSTOREX_SOURCE)
 
@@ -108,6 +110,100 @@ class FastSearchTests(unittest.IsolatedAsyncioTestCase):
             self.assertLess(time.perf_counter() - started, 0.2)
             self.assertIs(catalogs[bot.TGSTOREX_SOURCE], rows)
             self.assertEqual(len(missing), 3)
+
+    async def test_legacy_publishes_ready_categories_before_slow_category(self):
+        supplier = self.context.application.bot_data["supplier"]
+        release = asyncio.Event()
+        ready = asyncio.Event()
+        async def products(client, category_id, **kwargs):
+            if category_id == 2:
+                await release.wait()
+            else:
+                ready.set()
+            return [{"productId": category_id, "productName": "Session"}]
+        with patch.object(bot, "fetch_categories", AsyncMock(return_value=[
+            {"categoryId": 1, "categoryName": "巴西", "prefix": "+55"},
+            {"categoryId": 2, "categoryName": "日本"},
+        ])), patch.object(bot, "fetch_category_products", AsyncMock(side_effect=products)):
+            task = bot.ensure_search_catalog_refresh(self.context, bot.LEGACY_SOURCE)
+            try:
+                await ready.wait()
+                rows = bot.CATALOG_SEARCH_CACHE[id(supplier)][1]
+                self.assertEqual(rows[0]["categoryId"], 1)
+                self.assertEqual(rows[0]["categoryName"], "巴西")
+                self.assertTrue(bot.search_products_locally(rows, "巴西"))
+                self.assertTrue(bot.search_products_locally(rows, "+55"))
+                self.assertFalse(task.done())
+            finally:
+                release.set()
+                await task
+            self.assertNotIn(id(supplier), bot.CATALOG_SEARCH_INCOMPLETE)
+
+    async def test_legacy_failed_category_keeps_previous_rows_and_new_successes(self):
+        supplier = self.context.application.bot_data["supplier"]
+        self.seed(bot.LEGACY_SOURCE, [
+            {"productId": 1, "categoryId": 1, "productName": "old"},
+            {"productId": 2, "categoryId": 2, "productName": "日本"},
+        ], age=120)
+        async def products(client, category_id, **kwargs):
+            if category_id == 2:
+                raise SupplierApiError("timeout")
+            return [{"productId": 3, "productName": "巴西"}]
+        for source in self.sources[1:]:
+            self.seed(source, [])
+        with patch.object(bot, "fetch_categories", AsyncMock(return_value=[
+            {"categoryId": 1}, {"categoryId": 2},
+        ])), patch.object(bot, "fetch_category_products", AsyncMock(side_effect=products)), self.assertLogs("apibot", level="ERROR"):
+            await bot.ensure_search_catalog_refresh(self.context, bot.LEGACY_SOURCE)
+        catalogs, missing = await bot.get_fast_search_catalogs(self.context)
+        self.assertEqual({row["productId"] for row in catalogs[bot.LEGACY_SOURCE]}, {2, 3})
+        self.assertIn(bot.LEGACY_SOURCE, missing)
+        self.assertIn(bot.LEGACY_SOURCE, self.context.application.bot_data["search_catalog_failures"])
+        self.assertIsNone(bot.ensure_search_catalog_refresh(self.context, bot.LEGACY_SOURCE))
+
+    async def test_legacy_cold_failure_still_publishes_successful_categories(self):
+        supplier = self.context.application.bot_data["supplier"]
+        async def products(client, category_id, **kwargs):
+            if category_id == 2:
+                raise SupplierApiError("timeout")
+            return [{"productId": 1, "country": "巴西", "productName": "Session"}]
+        with patch.object(bot, "fetch_categories", AsyncMock(return_value=[
+            {"categoryId": 1}, {"categoryId": 2},
+        ])), patch.object(bot, "fetch_category_products", AsyncMock(side_effect=products)), self.assertLogs("apibot", level="ERROR"):
+            with self.assertRaises(SupplierApiError):
+                await bot.build_catalog_search_rows(supplier, refresh=True)
+        rows = bot.CATALOG_SEARCH_CACHE[id(supplier)][1]
+        self.assertEqual(len(bot.search_products_locally(rows, "巴西")), 1)
+        self.assertIn(id(supplier), bot.CATALOG_SEARCH_INCOMPLETE)
+
+    async def test_legacy_all_failed_does_not_publish_false_empty_snapshot(self):
+        supplier = self.context.application.bot_data["supplier"]
+        with patch.object(bot, "fetch_categories", AsyncMock(return_value=[{"categoryId": 1}])), patch.object(
+            bot, "fetch_category_products", AsyncMock(side_effect=SupplierApiError("timeout"))
+        ), self.assertLogs("apibot", level="ERROR"):
+            with self.assertRaises(SupplierApiError):
+                await bot.build_catalog_search_rows(supplier, refresh=True)
+        self.assertNotIn(id(supplier), bot.CATALOG_SEARCH_CACHE)
+
+    async def test_legacy_successful_empty_category_removes_previous_stock(self):
+        supplier = self.context.application.bot_data["supplier"]
+        self.seed(bot.LEGACY_SOURCE, [{"productId": 1, "categoryId": 1}])
+        with patch.object(bot, "fetch_categories", AsyncMock(return_value=[{"categoryId": 1}])), patch.object(
+            bot, "fetch_category_products", AsyncMock(return_value=[])
+        ):
+            rows = await bot.build_catalog_search_rows(supplier, refresh=True)
+        self.assertEqual(rows, [])
+        self.assertNotIn(id(supplier), bot.CATALOG_SEARCH_INCOMPLETE)
+
+    def test_legacy_prefix_from_title_is_exact_and_country_fields_are_searchable(self):
+        rows = [
+            {"productId": 1, "productName": "3年 +55 巴西"},
+            {"productId": 2, "productName": "3年 +550 Other"},
+            {"productId": 3, "productName": "Session", "country_name": "巴西", "country_en": "Brazil"},
+        ]
+        self.assertEqual([row["productId"] for row in bot.search_products_locally(rows, "+55")], [1])
+        self.assertEqual({row["productId"] for row in bot.search_products_locally(rows, "巴西")}, {1, 3})
+        self.assertEqual([row["productId"] for row in bot.search_products_locally(rows, "Brazil")], [3])
 
     async def test_startup_schedules_all_catalogs_without_waiting_for_network(self):
         release = asyncio.Event()

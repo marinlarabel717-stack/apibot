@@ -71,6 +71,7 @@ CATEGORY_PRODUCTS_CACHE: dict[tuple[int, int], tuple[float, list[dict[str, Any]]
 PRODUCT_DETAIL_CACHE: dict[tuple[int, int], tuple[float, dict[str, Any]]] = {}
 SEARCH_RESULTS_CACHE: dict[tuple[int, str], tuple[float, list[dict[str, Any]]]] = {}
 CATALOG_SEARCH_CACHE: dict[int, tuple[float, list[dict[str, Any]]]] = {}
+CATALOG_SEARCH_INCOMPLETE: set[int] = set()
 DAXI_PRODUCTS_CACHE: dict[tuple[int, str], tuple[float, list[dict[str, Any]]]] = {}
 DAXI_PRODUCT_DETAIL_CACHE: dict[tuple[int, str], tuple[float, dict[str, Any]]] = {}
 DAXI_GROUPS_CACHE: dict[int, tuple[float, list[dict[str, Any]]]] = {}
@@ -5966,30 +5967,61 @@ async def build_catalog_search_rows(supplier: SupplierClient, *, refresh: bool =
     if not refresh and cached and now - cached[0] < CATEGORY_CACHE_TTL_SECONDS:
         return cached[1]
 
+    CATALOG_SEARCH_INCOMPLETE.add(cache_key)
     categories = await fetch_categories(supplier, refresh=refresh)
-    semaphore = asyncio.Semaphore(4)
-
-    async def fetch_one(category_id: int) -> list[dict[str, Any]]:
-        async with semaphore:
-            return await fetch_category_products(supplier, category_id, refresh=refresh)
-
-    rows_by_category = await asyncio.gather(
-        *(fetch_one(safe_int(row.get("categoryId"))) for row in categories if safe_int(row.get("categoryId")) > 0)
-    )
-    category_names = {
-        safe_int(row.get("categoryId")): str(row.get("categoryName") or "")
+    category_map = {
+        safe_int(row.get("categoryId")): row
         for row in categories
         if safe_int(row.get("categoryId")) > 0
     }
-    search_rows: list[dict[str, Any]] = []
-    for category_rows in rows_by_category:
+    semaphore = asyncio.Semaphore(4)
+    rows_by_category: dict[int, list[dict[str, Any]]] = {}
+
+    def enrich(category_id: int, category_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        category = category_map[category_id]
+        result = []
         for row in category_rows:
             item = dict(row)
-            category_id = safe_int(item.get("categoryId"))
-            if category_id > 0 and category_names.get(category_id):
-                item.setdefault("categoryName", category_names[category_id])
-            search_rows.append(item)
-    CATALOG_SEARCH_CACHE[cache_key] = (time.monotonic(), search_rows)
+            item["categoryId"] = category_id
+            for field in ("categoryName", "country", "country_name", "country_en", "prefix", "phone_code"):
+                if not item.get(field) and category.get(field):
+                    item[field] = category[field]
+            result.append(item)
+        return result
+
+    for category_id in category_map:
+        previous = CATEGORY_PRODUCTS_CACHE.get((cache_key, category_id))
+        if previous is not None:
+            rows_by_category[category_id] = enrich(category_id, previous[1])
+        elif cached is not None:
+            rows_by_category[category_id] = enrich(category_id, [
+                row for row in cached[1] if safe_int(row.get("categoryId")) == category_id
+            ])
+
+    def publish() -> list[dict[str, Any]]:
+        rows = [row for category_id in category_map for row in rows_by_category.get(category_id, [])]
+        CATALOG_SEARCH_CACHE[cache_key] = (time.monotonic(), rows)
+        return rows
+
+    async def fetch_one(category_id: int) -> bool:
+        try:
+            async with semaphore:
+                category_rows = await fetch_category_products(supplier, category_id, refresh=refresh)
+            rows_by_category[category_id] = enrich(category_id, category_rows)
+            # A slow or failed category must not hide categories already available.
+            publish()
+            return True
+        except Exception:
+            logger.exception("Legacy search category refresh failed; retaining cached rows: category_id=%s", category_id)
+            return False
+
+    outcomes = await asyncio.gather(*(fetch_one(category_id) for category_id in category_map))
+    if not all(outcomes):
+        if rows_by_category:
+            publish()
+        raise SupplierApiError(f"Legacy search catalog incomplete: {outcomes.count(False)}/{len(outcomes)} categories failed")
+    search_rows = publish()
+    CATALOG_SEARCH_INCOMPLETE.discard(cache_key)
     return search_rows
 
 
@@ -6007,16 +6039,24 @@ def search_products_locally(rows: list[dict[str, Any]], keyword: str) -> list[di
         product_id = safe_int(row.get("productId"))
         if product_id <= 0 or product_id in seen_product_ids:
             continue
+        raw_name = str(row.get("productName") or "")
+        raw_category = str(row.get("categoryName") or "")
         if exact_prefix_search:
-            if not prefix_matches_keyword(row.get("prefix") or row.get("phone_code"), normalized):
+            prefix = row.get("prefix") or row.get("phone_code")
+            matches = prefix_matches_keyword(prefix, normalized) if prefix else any(
+                prefix_matches_keyword(code, normalized)
+                for code in re.findall(r"(?<!\d)\+\d{1,4}(?!\d)", f"{raw_name} {raw_category}")
+            )
+            if not matches:
                 continue
             stock = max(0, safe_int(row.get("totalStock")))
             scored_rows.append((0, 0, -stock, row))
             seen_product_ids.add(product_id)
             continue
-        raw_name = str(row.get("productName") or "")
-        raw_category = str(row.get("categoryName") or "")
-        haystack = compact_search_text(f"{raw_name} {raw_category}")
+        parts = [raw_name, raw_category] + [str(row.get(field) or "") for field in (
+            "country", "country_name", "country_en", "prefix", "phone_code",
+        )]
+        haystack = compact_search_text(" ".join(parts))
         if not haystack:
             continue
         exact_match = haystack == compact_keyword or haystack == code_keyword
@@ -6176,7 +6216,8 @@ def ensure_search_catalog_refresh(context: ContextTypes.DEFAULT_TYPE, source: st
     cache, key = search_catalog_slot(context, source)
     cached = cache.get(key)
     now = time.monotonic()
-    if cached is not None and now - cached[0] < CATALOG_REFRESH_SECONDS:
+    incomplete = source == LEGACY_SOURCE and key in CATALOG_SEARCH_INCOMPLETE
+    if cached is not None and not incomplete and now - cached[0] < CATALOG_REFRESH_SECONDS:
         return None
     failures = state.setdefault("search_catalog_failures", {})
     if source in failures and now - failures[source] < CATALOG_RETRY_SECONDS:
@@ -6225,7 +6266,7 @@ async def get_fast_search_catalogs(context: ContextTypes.DEFAULT_TYPE) -> tuple[
         cache, key = slots[source]
         snapshot = cache.get(key)
         catalogs[source] = snapshot[1] if snapshot is not None else []
-        if snapshot is None:
+        if snapshot is None or (source == LEGACY_SOURCE and key in CATALOG_SEARCH_INCOMPLETE):
             unavailable.append(source)
     return catalogs, unavailable
 

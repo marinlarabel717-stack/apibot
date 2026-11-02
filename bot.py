@@ -830,6 +830,7 @@ INSUFFICIENT_BALANCE_HOME_EMOJI_ID = "6334564870217795443"
 ADMIN_NEW_ORDER_TITLE_EMOJI_ID = "5994502837327892086"
 ADMIN_NEW_ORDER_USER_EMOJI_ID = "5886412370347036129"
 ADMIN_NEW_ORDER_USER_ID_EMOJI_ID = "5771887475421090729"
+ADMIN_NEW_ORDER_SOURCE_EMOJI_ID = "5879585266426973039"
 ADMIN_NEW_ORDER_PRODUCT_EMOJI_ID = "5985472565508838112"
 ADMIN_NEW_ORDER_QUANTITY_EMOJI_ID = "5877485980901971030"
 ADMIN_NEW_ORDER_AMOUNT_EMOJI_ID = "5931546553868095844"
@@ -2406,6 +2407,7 @@ def build_admin_new_order_text(
     quantity: int,
     total_price: float,
     remain_balance: float,
+    source: str = LEGACY_SOURCE,
 ) -> tuple[str, tuple[MessageEntity, ...]]:
     parts: list[tuple[str, str | None]] = []
     code_spans: list[tuple[int, int]] = []
@@ -2432,6 +2434,8 @@ def build_admin_new_order_text(
     add_text(" 用户ID: ")
     add_text(str(buyer_user_id), code=True)
     add_text("\n")
+    add_text("🌐", ADMIN_NEW_ORDER_SOURCE_EMOJI_ID)
+    add_text(f" 购买来源：账号列表{account_list_number(normalize_order_source(source))}\n")
     add_text("🎁", ADMIN_NEW_ORDER_PRODUCT_EMOJI_ID)
     add_text(f" 购买商品: {product_label}\n")
     add_text("📊", ADMIN_NEW_ORDER_QUANTITY_EMOJI_ID)
@@ -2453,6 +2457,7 @@ async def notify_admin_new_purchase(
     quantity: int,
     total_price: float,
     remain_balance: float,
+    source: str = LEGACY_SOURCE,
 ) -> None:
     if not admin_user_ids:
         return
@@ -2464,6 +2469,7 @@ async def notify_admin_new_purchase(
         quantity,
         total_price,
         remain_balance,
+        source=source,
     )
     for admin_user_id in admin_user_ids:
         try:
@@ -8187,6 +8193,7 @@ async def execute_purchase(
         quantity,
         total_price,
         remain,
+        source=normalized_source,
     )
     schedule_fast_order_probe(context, task_id)
     if data.get("needsReview"):

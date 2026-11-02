@@ -58,6 +58,38 @@ def response(body, content_type="application/zip", status=200):
 
 
 class AccountListTests(unittest.IsolatedAsyncioTestCase):
+    async def test_admin_purchase_notification_reports_exact_source(self):
+        context = make_context()
+        for source, number in zip((*SOURCES, bot.TGSTOREX_SOURCE), "①②③④"):
+            context.bot.send_message.reset_mock()
+            await bot.notify_admin_new_purchase(context, {1}, 7737512051, "buyer", "Buyer", "Brazil", 20, 30, 75.74, source=source)
+            message = context.bot.send_message.await_args.kwargs
+            self.assertIn(f"购买来源：账号列表{number}\n", message["text"])
+            self.assertEqual(message["text"].count("购买来源"), 1)
+            self.assertLess(message["text"].index("购买来源"), message["text"].index("购买商品"))
+            entities = message["entities"]
+            self.assertTrue(any(e.custom_emoji_id == "5879585266426973039" for e in entities))
+            encoded = message["text"].encode("utf-16-le")
+            self.assertTrue(any(e.type == "code" and encoded[e.offset * 2:(e.offset + e.length) * 2].decode("utf-16-le") == "7737512051" for e in entities))
+
+    async def test_purchase_notification_matches_stored_source(self):
+        context = make_context()
+        store = context.application.bot_data["store"]
+        store.debit_balance.return_value = (True, 98)
+        row = {"productName": "test", "price": 2, "totalStock": 10}
+        with patch.object(bot, "fetch_product_detail_cached", AsyncMock(return_value=row)), \
+             patch.object(bot, "fetch_daxi_product_detail_cached", AsyncMock(return_value=row)), \
+             patch.object(bot, "fetch_rz_product_detail_cached", AsyncMock(return_value=row)), \
+             patch.object(bot, "notify_admin_new_purchase", AsyncMock()) as notify, \
+             patch.object(bot, "schedule_fast_order_probe"):
+            for source in (*SOURCES, bot.TGSTOREX_SOURCE):
+                supplier = bot.get_supplier_for_source(context, source)
+                supplier.get_product_detail = MagicMock(return_value={"data": row})
+                supplier.buy_product = MagicMock(return_value={"data": {"orderId": "test-order", "taskId": "test-order"}})
+                await bot.execute_purchase(context, 1, "buyer", "Buyer", "1", 1, source=source)
+                self.assertEqual(notify.await_args.kwargs["source"], source)
+                self.assertEqual(store.record_order.call_args.args[-1], source)
+
     def test_all_menu_combinations(self):
         for enabled in itertools.product((False, True), repeat=3):
             expected = [cb for flag, cb in zip(enabled, ("nav:cats", "nav:cats2", "nav:cats3")) if flag] + ["nav:cats4"]

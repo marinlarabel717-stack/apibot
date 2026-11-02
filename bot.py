@@ -126,7 +126,7 @@ BUTTON_PRODUCTS = "商品列表"
 BUTTON_MAIN_MENU = "主菜单"
 BUTTON_PROFILE = "个人中心"
 BUTTON_RECHARGE = "我要充值"
-BUTTON_ACCOUNT_LIST = "账号列表"
+BUTTON_ACCOUNT_LIST = "账号列表①"
 BUTTON_ACCOUNT_LIST_2 = "账号列表②"
 BUTTON_ACCOUNT_LIST_3 = "账号列表③"
 BUTTON_RECHARGE_BALANCE = "充值余额"
@@ -137,7 +137,7 @@ BUTTON_PRODUCTS_EN = "Product Catalog"
 BUTTON_MAIN_MENU_EN = "Main Menu"
 BUTTON_PROFILE_EN = "Profile"
 BUTTON_RECHARGE_EN = "Recharge"
-BUTTON_ACCOUNT_LIST_EN = "Account List"
+BUTTON_ACCOUNT_LIST_EN = "Account List 1"
 BUTTON_ACCOUNT_LIST_2_EN = "Account List"
 BUTTON_ACCOUNT_LIST_3_EN = "Account List 3"
 BUTTON_RECHARGE_BALANCE_EN = "Balance"
@@ -223,6 +223,7 @@ UI_TEXTS: dict[str, dict[str, str]] = {
     "virtual_notice": {"zh": "虚拟商品一经发货通常不支持无理由处理，请先看清分类与说明。", "en": "Virtual goods are usually not refundable after delivery. Please confirm the details first."},
         "search_results_title": {"zh": "搜索结果：{keyword}", "en": "Search results: {keyword}"},
         "search_results_hint": {"zh": "点击下面商品按钮查看详情：", "en": "Tap a product below to view details:"},
+        "search_source_account_list_1": {"zh": "列表①", "en": "List 1"},
         "search_source_account_list_2": {"zh": "列表②", "en": "List 2"},
         "search_source_account_list_3": {"zh": "列表③", "en": "List 3"},
         "stock_short": {"zh": "库存", "en": "Stock"},
@@ -9439,45 +9440,67 @@ async def search_text_rich(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     else:
         rz_all_rows = rz_result
 
-    modern_items: list[dict[str, Any]] = []
+    combined_items: list[dict[str, Any]] = []
+    legacy_rows: list[dict[str, Any]] = []
+    if effective_legacy_supplier_enabled(context):
+        try:
+            legacy_rows = await search_products_cached(supplier, keyword)
+        except SupplierApiError as exc:
+            modern_errors.append(f"{ui_text('search_source_account_list_1', lang)}: {exc}")
+            legacy_rows = []
+
     daxi_rows = search_daxi_products_locally(daxi_all_rows, keyword)
     rz_rows = search_rz_products_locally(rz_all_rows, keyword)
     daxi_group_index_map = build_daxi_group_index_map(daxi_all_rows) if daxi_rows else {}
     rz_group_index_map = build_rz_group_index_map(rz_all_rows, lang) if rz_rows else {}
 
-    if daxi_rows and rz_rows:
-        primary_limit = max(1, SEARCH_RESULTS_LIMIT // 2)
-        ordered_rows = (
-            [("daxi", row) for row in daxi_rows[:primary_limit]]
-            + [("rz", row) for row in rz_rows[:primary_limit]]
-            + [("daxi", row) for row in daxi_rows[primary_limit:]]
-            + [("rz", row) for row in rz_rows[primary_limit:]]
-        )
-    elif daxi_rows:
-        ordered_rows = [("daxi", row) for row in daxi_rows]
-    else:
-        ordered_rows = [("rz", row) for row in rz_rows]
+    ordered_rows: list[tuple[str, dict[str, Any]]] = []
+    source_buckets: list[tuple[str, list[dict[str, Any]]]] = []
+    if legacy_rows:
+        source_buckets.append(("legacy", legacy_rows))
+    if daxi_rows:
+        source_buckets.append(("daxi", daxi_rows))
+    if rz_rows:
+        source_buckets.append(("rz", rz_rows))
+    if source_buckets:
+        max_bucket_size = max(len(rows) for _, rows in source_buckets)
+        for index in range(max_bucket_size):
+            for source_name, rows in source_buckets:
+                if index < len(rows):
+                    ordered_rows.append((source_name, rows[index]))
 
     buttons: list[list[InlineKeyboardButton]] = []
     for source_name, row in ordered_rows:
-        if len(modern_items) >= SEARCH_RESULTS_LIMIT:
+        if len(combined_items) >= SEARCH_RESULTS_LIMIT:
             break
-        product_id = str(row.get("productId") or "").strip()
-        if not product_id:
-            continue
-        if source_name == "daxi":
+        if source_name == "legacy":
+            product_id = safe_int(row.get("productId"))
+            if product_id <= 0:
+                continue
+            category_index = safe_int(row.get("categoryId"), 0)
+            sell_price = resolve_sell_price(settings, row)
+            display_name = shorten(translate_product_name(str(row.get("productName") or ""), lang), 28)
+            source_label = ui_text("search_source_account_list_1", lang)
+            callback_data = f"prd:{product_id}:{category_index}:0"
+        elif source_name == "daxi":
+            product_id = str(row.get("productId") or "").strip()
+            if not product_id:
+                continue
             category_index = daxi_group_index_map.get(product_id, 0)
             sell_price = resolve_sell_price(settings, row)
             display_name = shorten(format_daxi_product_title(row, lang), 28)
             source_label = ui_text("search_source_account_list_2", lang)
             callback_data = f"prd2:{product_id}:{category_index}:0"
         else:
+            product_id = str(row.get("productId") or "").strip()
+            if not product_id:
+                continue
             category_index = rz_group_index_map.get(product_id, 0)
             sell_price = resolve_sell_price(settings, row)
             display_name = shorten(format_rz_product_title(row, lang), 28)
             source_label = ui_text("search_source_account_list_3", lang)
             callback_data = f"prd3:{product_id}:{category_index}:0"
-        modern_items.append(
+        combined_items.append(
             {
                 "row": row,
                 "price": sell_price,
@@ -9500,24 +9523,27 @@ async def search_text_rich(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             ]
         )
 
-    if modern_items:
-        text, entities = build_modern_search_results_text_localized(keyword, modern_items, lang)
-        buttons.append(
-            [
-                InlineKeyboardButton(ui_text("button_account_list_2", lang), callback_data="nav:cats2"),
-                InlineKeyboardButton(ui_text("button_account_list_3", lang), callback_data="nav:cats3"),
-            ]
-        )
+    if combined_items:
+        text, entities = build_modern_search_results_text_localized(keyword, combined_items, lang)
+        nav_buttons = []
+        if effective_legacy_supplier_enabled(context):
+            nav_buttons.append(InlineKeyboardButton(ui_text("button_account_list", lang), callback_data="nav:cats"))
+        nav_buttons.append(InlineKeyboardButton(ui_text("button_account_list_2", lang), callback_data="nav:cats2"))
+        nav_buttons.append(InlineKeyboardButton(ui_text("button_account_list_3", lang), callback_data="nav:cats3"))
+        buttons.append(nav_buttons)
         await update.message.reply_text(text, entities=entities, reply_markup=InlineKeyboardMarkup(buttons))
         return
-    if modern_errors and not effective_legacy_supplier_enabled(context):
-        await update.message.reply_text(ui_text("search_failed", lang, error=" | ".join(modern_errors)))
-        return
-    try:
-        rows = await search_products_cached(supplier, keyword)
-    except SupplierApiError as exc:
-        await update.message.reply_text(ui_text("search_failed", lang, error=exc))
-        return
+    if effective_legacy_supplier_enabled(context):
+        rows = legacy_rows
+    else:
+        if modern_errors:
+            await update.message.reply_text(ui_text("search_failed", lang, error=" | ".join(modern_errors)))
+            return
+        try:
+            rows = await search_products_cached(supplier, keyword)
+        except SupplierApiError as exc:
+            await update.message.reply_text(ui_text("search_failed", lang, error=exc))
+            return
     if not rows:
         await update.message.reply_text(ui_text("search_empty", lang), reply_markup=build_menu_keyboard(lang))
         return

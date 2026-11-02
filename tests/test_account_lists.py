@@ -59,6 +59,42 @@ def response(body, content_type="application/zip", status=200):
 
 
 class AccountListTests(unittest.IsolatedAsyncioTestCase):
+    async def test_broadcast_text_preserves_newlines_through_input_preview_and_delivery(self):
+        text = "第一行\n\n第二行  保留空格\n第三行"
+        context = make_context()
+        update = make_update(text)
+        await bot.prompt_admin_broadcast_content(update, context)
+        with patch.object(bot, "handle_admin_business_toggle", AsyncMock(return_value=False)), \
+             patch.object(bot, "handle_admin_legacy_supplier_toggle", AsyncMock(return_value=False)), \
+             patch.object(bot, "should_ignore_for_closed_business", AsyncMock(return_value=False)), \
+             patch.object(bot, "show_admin_broadcast_panel", AsyncMock()):
+            await bot.search_text_rich(update, context)
+        payload = bot.get_or_create_admin_broadcast_draft(context)["payload"]
+        self.assertEqual(payload["text"], text)
+        self.assertIn(text, bot.format_admin_broadcast_summary(payload))
+        await bot.send_admin_preview(update, context, payload)
+        self.assertEqual(update.message.reply_text.await_args.args[0], text)
+        await bot.deliver_admin_payload(context.bot, 99, payload)
+        self.assertEqual(context.bot.send_message.await_args.kwargs["text"], text)
+
+    async def test_broadcast_photo_preserves_multiline_caption(self):
+        text = "图片第一行\n\n图片第二行"
+        context = make_context()
+        update = make_update()
+        update.message.photo = [SimpleNamespace(file_id="test-photo")]
+        update.message.caption = text
+        update.message.reply_photo = AsyncMock()
+        context.bot.send_photo = AsyncMock()
+        bot.set_pending_admin_action(context, {"kind": "broadcast_wait_content", "scope": bot.ADMIN_SEND_SCOPE_ALL})
+        with patch.object(bot, "show_admin_broadcast_panel", AsyncMock()):
+            await bot.handle_admin_photo_input(update, context)
+        payload = bot.get_or_create_admin_broadcast_draft(context)["payload"]
+        self.assertEqual(payload["text"], text)
+        await bot.send_admin_preview(update, context, payload)
+        self.assertEqual(update.message.reply_photo.await_args.kwargs["caption"], text)
+        await bot.deliver_admin_payload(context.bot, 99, payload)
+        self.assertEqual(context.bot.send_photo.await_args.kwargs["caption"], text)
+
     async def test_admin_purchase_notification_reports_exact_source(self):
         context = make_context()
         for source, number in zip((*SOURCES, bot.TGSTOREX_SOURCE), "①②③④"):

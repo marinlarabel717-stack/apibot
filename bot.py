@@ -7481,7 +7481,9 @@ def format_admin_broadcast_summary(payload: dict[str, Any]) -> str:
     has_content = bool(str(payload.get("text") or "").strip() or str(payload.get("photo_file_id") or "").strip())
     has_button = bool(str(payload.get("button_text") or "").strip() and str(payload.get("button_url") or "").strip())
     content_type = "图片" if str(payload.get("content_type") or "") == "photo" and str(payload.get("photo_file_id") or "").strip() else "文本"
-    text_preview = shorten(str(payload.get("text") or "").strip() or "未设置", 60)
+    text_preview = str(payload.get("text") or "").strip() or "未设置"
+    if len(text_preview) > 60:
+        text_preview = f"{text_preview[:59]}…"
     button_preview = "未设置"
     if has_button:
         button_preview = f"{shorten(str(payload.get('button_text') or '').strip(), 20)} -> {shorten(str(payload.get('button_url') or '').strip(), 36)}"
@@ -9003,7 +9005,7 @@ async def search_text_rich(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if await should_ignore_for_closed_business(update, context):
         return
     settings, _, supplier = get_services(context)
-    if await handle_admin_text_input(update, context, keyword):
+    if await handle_admin_text_input(update, context, update.message.text):
         return
     pending_recharge = get_pending_recharge(context)
     if pending_recharge is not None:
@@ -9743,7 +9745,7 @@ async def search_text_rich(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if await should_ignore_for_closed_business(update, context):
         return
     settings, _, supplier = get_services(context)
-    if await handle_admin_text_input(update, context, keyword):
+    if await handle_admin_text_input(update, context, update.message.text):
         return
     lang = await ensure_user_with_lang(context, update.effective_user)
     pending_recharge = get_pending_recharge(context)

@@ -151,7 +151,6 @@ BUTTON_PURCHASE_NOTICE_EN = "Purchase Notice"
 BUTTON_ORDER_HISTORY_EN = "Order History"
 BUTTON_SWITCH_LANGUAGE_EN = "Language"
 BOTTOM_BUTTON_MAIN_MENU = "主菜单"
-BOTTOM_BUTTON_SEARCH_COUNTRY = "🔎搜索国家"
 BOTTOM_BUTTON_CUSTOMER_SERVICE = "联系客服"
 BOTTOM_BUTTON_RECHARGE_BALANCE = "充值余额"
 LEGACY_BOTTOM_BUTTON_MAIN_MENU = "🏠主菜单"
@@ -161,8 +160,6 @@ BOTTOM_BUTTON_HOME_EMOJI_ID = "6334492495723890409"
 BOTTOM_BUTTON_CUSTOMER_SERVICE_EMOJI_ID = "6334344946417404152"
 BOTTOM_BUTTON_RECHARGE_EMOJI_ID = "6334575946938451719"
 MENU_BUTTON_TEXTS = {
-    BOTTOM_BUTTON_SEARCH_COUNTRY,
-    "🔎Search Country",
     BOTTOM_BUTTON_MAIN_MENU,
     BOTTOM_BUTTON_CUSTOMER_SERVICE,
     BOTTOM_BUTTON_RECHARGE_BALANCE,
@@ -226,8 +223,6 @@ UI_TEXTS: dict[str, dict[str, str]] = {
     "button_order_history": {"zh": BUTTON_ORDER_HISTORY, "en": BUTTON_ORDER_HISTORY_EN},
     "button_switch_language": {"zh": BUTTON_SWITCH_LANGUAGE, "en": BUTTON_SWITCH_LANGUAGE_EN},
     "bottom_main_menu": {"zh": BOTTOM_BUTTON_MAIN_MENU, "en": "Main Menu"},
-    "bottom_search_country": {"zh": BOTTOM_BUTTON_SEARCH_COUNTRY, "en": "🔎Search Country"},
-    "search_country_prompt": {"zh": "请输入国家名称或区号，例如：巴西、日本、+55。", "en": "Enter a country name or dialing code, for example: Brazil, Japan, +55."},
     "bottom_customer_service": {"zh": BOTTOM_BUTTON_CUSTOMER_SERVICE, "en": "Support"},
     "bottom_recharge_balance": {"zh": BOTTOM_BUTTON_RECHARGE_BALANCE, "en": "Balance"},
     "bottom_menu_refreshed": {"zh": "底部菜单已刷新。", "en": "Bottom menu refreshed."},
@@ -2134,18 +2129,15 @@ def build_menu_keyboard(lang: str = DEFAULT_LANG) -> ReplyKeyboardMarkup:
                     icon_custom_emoji_id=BOTTOM_BUTTON_HOME_EMOJI_ID,
                     style=KeyboardButtonStyle.PRIMARY,
                 ),
-                KeyboardButton(ui_text("bottom_search_country", normalized)),
-            ],
-            [
-                KeyboardButton(
-                    ui_text("bottom_recharge_balance", normalized),
-                    icon_custom_emoji_id=BOTTOM_BUTTON_RECHARGE_EMOJI_ID,
-                    style=KeyboardButtonStyle.SUCCESS,
-                ),
                 KeyboardButton(
                     ui_text("bottom_customer_service", normalized),
                     icon_custom_emoji_id=BOTTOM_BUTTON_CUSTOMER_SERVICE_EMOJI_ID,
                     style=KeyboardButtonStyle.DANGER,
+                ),
+                KeyboardButton(
+                    ui_text("bottom_recharge_balance", normalized),
+                    icon_custom_emoji_id=BOTTOM_BUTTON_RECHARGE_EMOJI_ID,
+                    style=KeyboardButtonStyle.SUCCESS,
                 ),
             ],
         ],
@@ -4032,7 +4024,7 @@ async def reply_help(update: Update, context: ContextTypes.DEFAULT_TYPE | None =
         "/supplier_balance - 管理员查看上游余额\n"
         "/add <user_id> <+金额/-金额> - 管理员调整余额\n"
         "/credit <user_id> <金额> - 兼容旧命令\n\n"
-        "底部也有常驻按钮：主菜单 / 🔎搜索国家 / 充值余额 / 联系客服。"
+        "底部也有常驻按钮：🏠主菜单 / ☎️ 联系客服 / 💰充值余额。"
     )
     await send_menu_message(update, text)
 
@@ -9649,12 +9641,6 @@ async def route_menu_text(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         clear_pending_purchase(context)
         clear_pending_recharge(context)
         await show_tgstorex_catalog(update, context)
-        return
-    if button_matches(text, "bottom_search_country"):
-        clear_pending_purchase(context)
-        clear_pending_recharge(context)
-        lang = await ensure_user_with_lang(context, update.effective_user)
-        await update.message.reply_text(ui_text("search_country_prompt", lang), reply_markup=build_menu_keyboard(lang))
         return
     if button_matches(text, "button_products"):
         if not effective_legacy_supplier_enabled(context):

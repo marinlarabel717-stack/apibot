@@ -10199,11 +10199,14 @@ async def show_admin_supplier_balances(update: Update, context: ContextTypes.DEF
             stats_lines.extend([
                 f"累计售出：{safe_int(stats.get('sold_quantity'))} 个 / {safe_int(stats.get('sold_orders'))} 单",
                 f"实收销售额：{format_money(safe_float(stats.get('net_sales')))} U",
-                f"商品利润（已记录成本）：{format_money(safe_float(stats.get('known_profit')))} U",
+                f"累计商品利润：{format_money(safe_float(stats.get('total_profit')))} U",
             ])
             missing = safe_int(stats.get("missing_cost_orders"))
             if missing:
-                stats_lines.append(f"成本缺失：{missing} 单，未计入利润")
+                stats_lines.append(
+                    f"其中历史补算：{missing} 单 / {safe_int(stats.get('historical_quantity'))} 个 × 0.10 U"
+                    f" = {format_money(safe_float(stats.get('historical_profit')))} U"
+                )
         supplier = targets.get(name)
         if supplier is None:
             return "\n".join([*lines, "可用余额：未配置", *stats_lines])
@@ -10233,7 +10236,8 @@ async def show_admin_supplier_balances(update: Update, context: ContextTypes.DEF
     sections = await asyncio.gather(*(query_one(name, note) for name, note in notes))
     text = "上游余额与销售统计\n\n" + "\n\n".join(sections)
     text += "\n\n销量仅计已结算订单的实际成功数量；销售额已扣退款。"
-    text += "\n商品利润按下单时成本计算，未扣手续费、汇差及运营费用；历史缺失成本不估算。"
+    text += "\n历史缺失成本订单按每个成功账号 0.10 U 补算利润；有成本记录的订单按实际差价计算。"
+    text += "\n商品利润未扣手续费、汇差及运营费用；补算仅用于统计，不变更钱包余额。"
     text += "\n各上游余额独立，不合并计算。点击刷新可重新查询。"
     keyboard = InlineKeyboardMarkup([[
         InlineKeyboardButton("刷新余额", callback_data="adm:balances"),

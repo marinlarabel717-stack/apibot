@@ -403,13 +403,22 @@ class Store:
                     COALESCE(SUM(CASE WHEN unit_cost IS NOT NULL THEN
                         total_price - refund_amount - unit_cost * MIN(quantity, MAX(0, quantity_success))
                         ELSE 0 END), 0) AS known_profit,
+                    COALESCE(SUM(CASE WHEN unit_cost IS NULL THEN
+                        MIN(quantity, MAX(0, quantity_success)) ELSE 0 END), 0) AS historical_quantity,
                     COUNT(CASE WHEN unit_cost IS NULL AND quantity_success > 0 THEN 1 END) AS missing_cost_orders
                 FROM orders
                 WHERE state IN ('completed', 'partial')
                 GROUP BY COALESCE(NULLIF(source, ''), 'legacy')
                 """
             ).fetchall()
-            return {row["source"]: dict(row) for row in rows}
+            stats = {}
+            for row in rows:
+                item = dict(row)
+                historical_profit = Decimal(item["historical_quantity"]) * Decimal("0.10")
+                item["historical_profit"] = float(historical_profit)
+                item["total_profit"] = float(Decimal(str(item["known_profit"])) + historical_profit)
+                stats[row["source"]] = item
+            return stats
 
     def get_admin_home_stats(
         self,

@@ -94,7 +94,8 @@ class SupplierBalanceTests(unittest.IsolatedAsyncioTestCase):
         context = make_context()
         context.application.bot_data["store"].get_supplier_sales_stats.return_value = {
             "legacy": {"sold_quantity": 16, "sold_orders": 3, "net_sales": 48,
-                       "known_profit": 12, "missing_cost_orders": 1},
+                       "known_profit": 12, "missing_cost_orders": 1, "historical_quantity": 4,
+                       "historical_profit": 0.4, "total_profit": 12.4},
         }
         with patch.object(bot, "get_supplier_balance_targets", return_value=[]), \
              patch.object(bot, "reply_inline", AsyncMock()) as reply:
@@ -102,8 +103,8 @@ class SupplierBalanceTests(unittest.IsolatedAsyncioTestCase):
         text = reply.await_args.args[1]
         self.assertIn("累计售出：16 个 / 3 单", text)
         self.assertIn("实收销售额：48.00 U", text)
-        self.assertIn("商品利润（已记录成本）：12.00 U", text)
-        self.assertIn("成本缺失：1 单，未计入利润", text)
+        self.assertIn("累计商品利润：12.40 U", text)
+        self.assertIn("其中历史补算：1 单 / 4 个 × 0.10 U = 0.40 U", text)
 
     async def test_database_failure_does_not_hide_supplier_balances(self):
         context = make_context()
@@ -177,6 +178,9 @@ class SalesStatsTests(unittest.TestCase):
                 self.assertEqual(stats["net_sales"], 48)
                 self.assertEqual(stats["known_profit"], 12)
                 self.assertEqual(stats["missing_cost_orders"], 1)
+                self.assertEqual(stats["historical_quantity"], 4)
+                self.assertEqual(stats["historical_profit"], 0.4)
+                self.assertEqual(stats["total_profit"], 12.4)
             reopened = Store(store.db_path)
             self.assertEqual(reopened.get_supplier_sales_stats(), store.get_supplier_sales_stats())
             gc.collect()
@@ -200,4 +204,29 @@ class SalesStatsTests(unittest.TestCase):
             self.assertEqual(stats["net_sales"], 6)
             self.assertEqual(stats["known_profit"], 0)
             self.assertEqual(stats["missing_cost_orders"], 1)
+            self.assertEqual(stats["total_profit"], 0.2)
+            gc.collect()
+
+    def test_historical_profit_only_counts_successful_accounts_without_mutating_orders_or_wallet(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = Store(Path(directory) / "historical.db")
+            store.ensure_user(1)
+            for task, qty, success, state in (
+                ("partial", 10, 3, "partial"), ("failed", 20, 0, "failed"),
+                ("empty", 7, 0, "partial"), ("pending", 30, 0, "processing"),
+            ):
+                store.record_order(task, 1, "", "DE", "test", qty, 2, qty * 2, {}, "tgstorex")
+                if state != "processing":
+                    store.finalize_order(task, state, success, "", (qty - success) * 2, {})
+            balance = store.get_balance(1)
+            original = store.get_order("partial")
+            for _ in range(3):
+                stats = store.get_supplier_sales_stats()["tgstorex"]
+                self.assertEqual(stats["historical_quantity"], 3)
+                self.assertEqual(stats["historical_profit"], 0.3)
+                self.assertEqual(stats["total_profit"], 0.3)
+                self.assertEqual(stats["missing_cost_orders"], 1)
+            self.assertEqual(store.get_order("partial"), original)
+            self.assertIsNone(original["unit_cost"])
+            self.assertEqual(store.get_balance(1), balance)
             gc.collect()

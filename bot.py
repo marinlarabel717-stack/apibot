@@ -3058,6 +3058,11 @@ def build_delivery_entries(order_row: dict[str, Any], supplier: SupplierClient) 
         payload = parse_order_raw_payload(order_row)
         files = extract_daxi_files(payload)
         if files:
+            if isinstance(supplier, TgstorexSupplierClient):
+                unique_files = {}
+                for item in files:
+                    unique_files.setdefault(item["download_url"], item)
+                files = list(unique_files.values())
             return files
     return [{"download_url": file_url, "file_name": ""}] if file_url else []
 
@@ -3122,6 +3127,101 @@ def build_delivery_bundle(task_id: str, downloaded_files: list[dict[str, Any]], 
             archive_name = unique_bundle_member_name(used_names, archive_name, index)
             archive.write(path, arcname=archive_name)
     return bundle_path
+
+
+def build_tgstorex_delivery_bundle(task_id: str, downloaded_files: list[dict[str, Any]]) -> Path:
+    bundle_path = build_delivery_bundle_path(task_id)
+    temp_path = bundle_path.with_suffix(f".{uuid4().hex}.part")
+    used_names: dict[str, str] = {}
+    seen_archives: set[str] = set()
+    seen_groups: set[tuple[tuple[str, str], ...]] = set()
+    expanded_bytes = 0
+    member_count = 0
+    group_number = 0
+    max_bytes = 256 * 1024 * 1024
+
+    def safe_name(value: str) -> str:
+        raw = value.replace('\\', '/')
+        if raw.startswith("/") or ".." in raw.split("/") or ":" in raw or "\x00" in raw:
+            raise SupplierApiError("会话包包含不安全的文件路径，已停止打包。")
+        return normalize_bundle_member_name(raw, "session.bin")
+
+    try:
+        with zipfile.ZipFile(temp_path, "w", compression=zipfile.ZIP_DEFLATED) as output:
+            def write_group(entries: list[tuple[str, bytes]]) -> None:
+                nonlocal group_number
+                if not entries:
+                    return
+                group: dict[str, tuple[str, bytes, str]] = {}
+                for name, body in entries:
+                    key, digest = name.casefold(), hashlib.sha256(body).hexdigest()
+                    if key in group and group[key][2] != digest:
+                        raise SupplierApiError("同一会话包包含同名但内容不同的文件，已停止打包，避免损坏会话。")
+                    group[key] = (name, body, digest)
+                signature = tuple(sorted((key, item[2]) for key, item in group.items()))
+                if signature in seen_groups:
+                    return
+                seen_groups.add(signature)
+                group_number += 1
+                prefix = ""
+                # Keep conflicting accounts together instead of renaming individual tdata files.
+                if any(key in used_names and used_names[key] != item[2] for key, item in group.items()):
+                    prefix = f"package-{group_number}/"
+                    while any((prefix + key) in used_names for key in group):
+                        prefix = "package-" + prefix
+                for name, body, digest in group.values():
+                    name = prefix + name
+                    key = name.casefold()
+                    if used_names.get(key) == digest:
+                        continue
+                    used_names[key] = digest
+                    output.writestr(name, body)
+
+            def unpack(source, digest: str, depth: int = 0, prefix: str = "") -> None:
+                nonlocal expanded_bytes, member_count
+                if digest in seen_archives:
+                    return
+                if depth > 5:
+                    raise SupplierApiError("会话包嵌套层数过多，已停止打包。")
+                seen_archives.add(digest)
+                entries = []
+                with zipfile.ZipFile(source) as package:
+                    for member in package.infolist():
+                        if member.is_dir():
+                            continue
+                        name = prefix + safe_name(member.filename)
+                        member_count += 1
+                        expanded_bytes += member.file_size
+                        if member_count > 10000 or expanded_bytes > max_bytes:
+                            raise SupplierApiError("会话包解压后超过安全限制（256 MB / 10000 文件），已停止打包。")
+                        if (member.external_attr >> 16) & 0o170000 == 0o120000:
+                            raise SupplierApiError("会话包包含符号链接，已停止打包。")
+                        body = package.read(member)
+                        stream = io.BytesIO(body)
+                        if zipfile.is_zipfile(stream):
+                            parent = name.rpartition("/")[0]
+                            unpack(stream, hashlib.sha256(body).hexdigest(), depth + 1, parent + "/" if parent else "")
+                        elif name.lower().endswith(".zip"):
+                            raise SupplierApiError("会话包内有无法解开的 ZIP，已停止打包。")
+                        else:
+                            entries.append((name, body))
+                write_group(entries)
+
+            for item in downloaded_files:
+                path = Path(item["path"])
+                digest = hashlib.sha256()
+                with path.open("rb") as source:
+                    for chunk in iter(lambda: source.read(65536), b""):
+                        digest.update(chunk)
+                unpack(path, digest.hexdigest())
+            if not used_names:
+                raise SupplierApiError("会话包内没有可发送的文件。")
+        temp_path.replace(bundle_path)
+        return bundle_path
+    except (zipfile.BadZipFile, RuntimeError, EOFError, NotImplementedError) as exc:
+        raise SupplierApiError("会话包解包校验失败，请重试原订单，无需重新购买。") from exc
+    finally:
+        temp_path.unlink(missing_ok=True)
 
 
 async def refresh_delivery_file_url(
@@ -3274,9 +3374,11 @@ async def deliver_order_file(
             order_row = await call_blocking(store.mark_order_delivery_ready_sent, task_id) or order_row
         if not downloaded_files:
             raise SupplierApiError("no delivery files available")
-        preserve_archives = isinstance(supplier, TgstorexSupplierClient)
-        if is_modern_supplier(supplier) and (len(downloaded_files) > 1 if preserve_archives else should_bundle_delivery_files(downloaded_files)):
-            send_path = await call_blocking(build_delivery_bundle, task_id, downloaded_files, preserve_archives)
+        if isinstance(supplier, TgstorexSupplierClient):
+            send_path = await call_blocking(build_tgstorex_delivery_bundle, task_id, downloaded_files)
+            send_name = delivery_display_filename(product_name, quantity, "", "")
+        elif is_modern_supplier(supplier) and should_bundle_delivery_files(downloaded_files):
+            send_path = await call_blocking(build_delivery_bundle, task_id, downloaded_files)
             send_name = delivery_display_filename(product_name, quantity, "", "")
         else:
             first_file = downloaded_files[0]
@@ -8900,9 +9002,11 @@ async def send_admin_cha_order_file(
             await answer_callback_query_safely(query, "正在发送文件…")
         if not downloaded_files:
             raise SupplierApiError("no delivery files available")
-        preserve_archives = isinstance(supplier, TgstorexSupplierClient)
-        if is_modern_supplier(supplier) and (len(downloaded_files) > 1 if preserve_archives else should_bundle_delivery_files(downloaded_files)):
-            send_path = await call_blocking(build_delivery_bundle, str(fresh_order.get("task_id") or ""), downloaded_files, preserve_archives)
+        if isinstance(supplier, TgstorexSupplierClient):
+            send_path = await call_blocking(build_tgstorex_delivery_bundle, str(fresh_order.get("task_id") or ""), downloaded_files)
+            send_name = delivery_display_filename(product_name, quantity, "", "")
+        elif is_modern_supplier(supplier) and should_bundle_delivery_files(downloaded_files):
+            send_path = await call_blocking(build_delivery_bundle, str(fresh_order.get("task_id") or ""), downloaded_files)
             send_name = delivery_display_filename(product_name, quantity, "", "")
         else:
             first_file = downloaded_files[0]

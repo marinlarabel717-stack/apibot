@@ -212,7 +212,7 @@ class AccountListTests(unittest.IsolatedAsyncioTestCase):
         for source in SOURCES:
             context.application.bot_data["runtime_config"][bot.account_list_runtime_key(source)] = "0"
         order = {"task_id": "test-order", "file_url": "https://tgstorex.com/file", "user_id": 1, "quantity": 1}
-        with tempfile.TemporaryDirectory() as directory:
+        with tempfile.TemporaryDirectory() as directory, patch.object(bot, "DELIVERY_FILES_DIR", Path(directory)):
             path = Path(directory) / "original.zip"
             original = zip_bytes()
             path.write_bytes(original)
@@ -226,9 +226,13 @@ class AccountListTests(unittest.IsolatedAsyncioTestCase):
                 self.assertTrue(await bot.deliver_order_file(context, order, supplier, include_ready_photo=False))
                 order["delivery_sent_at"] = "2026-11-01"
                 self.assertTrue(await bot.deliver_order_file(context, order, supplier, include_ready_photo=False))
-                self.assertEqual(sent, [original])
+                self.assertEqual(len(sent), 1)
                 self.assertTrue(await bot.deliver_order_file(context, order, supplier, include_ready_photo=False, force_resend=True))
-            self.assertEqual(sent, [original, original])
+            self.assertEqual(len(sent), 2)
+            for body in sent:
+                with zipfile.ZipFile(io.BytesIO(body)) as archive:
+                    self.assertEqual(archive.namelist(), ["account/account.session"])
+                    self.assertEqual(archive.read("account/account.session"), b"session")
 
     async def test_redownload_command_checks_ownership_and_never_purchases(self):
         context = make_context()
@@ -356,19 +360,18 @@ class SessionFileTests(unittest.TestCase):
                 self.assertEqual(self.client.session.get.call_count, expected_calls)
                 self.assertFalse(target.exists())
 
-    def test_multiple_packages_keep_original_directory_layout(self):
+    def test_duplicate_packages_are_merged_once_without_nested_zip(self):
         original = zip_bytes("tdata/key_data")
         with tempfile.TemporaryDirectory() as directory, patch.object(bot, "DELIVERY_FILES_DIR", Path(directory)):
             entries = []
-            for index in (1, 2):
+            for index in (1, 2, 3):
                 path = Path(directory) / f"source{index}.zip"
                 path.write_bytes(original)
                 entries.append({"path": path, "file_name": path.name})
-            bundle = bot.build_delivery_bundle("order", entries, preserve_archives=True)
+            bundle = bot.build_tgstorex_delivery_bundle("order", entries)
             with zipfile.ZipFile(bundle) as archive:
-                self.assertEqual(len(archive.namelist()), 2)
-                for name in archive.namelist():
-                    self.assertEqual(archive.read(name), original)
+                self.assertEqual(archive.namelist(), ["tdata/key_data"])
+                self.assertEqual(archive.read("tdata/key_data"), b"session")
 
 
 if __name__ == "__main__":

@@ -71,13 +71,20 @@ class TgstorexSupplierClient(SupplierClient):
             raise error_type("Session supplier returned invalid data")
         return payload
 
-    def _normalize_product_row(self, row: dict[str, Any]) -> dict[str, Any] | None:
+    def _normalize_product_row(
+        self,
+        row: dict[str, Any],
+        *,
+        shared_catalog: bool = False,
+    ) -> dict[str, Any] | None:
         code = str(row.get("country_code") or row.get("code") or "").strip().upper()
         if len(code) != 2 or not code.isascii() or not code.isalpha():
             return None
         if row.get("is_active") in (False, 0, "0", "false"):
             return None
-        if str(row.get("type") or "sessions").lower() not in {"sessions", "any"}:
+        row_type = str(row.get("type") or "sessions").strip().lower()
+        allowed_types = {"sessions", "any", "number"} if shared_catalog else {"sessions", "any"}
+        if row_type not in allowed_types:
             return None
         try:
             price = float(row["price"])
@@ -105,15 +112,29 @@ class TgstorexSupplierClient(SupplierClient):
         rows = payload["data"]
         if not isinstance(rows, list):
             raise SupplierApiError("Session price list is not an array")
+        meta = payload.get("meta")
+        pricing_mode = str(meta.get("pricing_mode") or "").strip().lower() if isinstance(meta, dict) else ""
+        shared_catalog = pricing_mode == "shared"
         products: dict[str, dict[str, Any]] = {}
         for row in rows:
-            item = self._normalize_product_row(row) if isinstance(row, dict) else None
+            item = self._normalize_product_row(row, shared_catalog=shared_catalog) if isinstance(row, dict) else None
             if item is None:
                 continue
             code = item["productId"]
             if code in products:
                 raise SupplierApiError(f"Ambiguous session price for country {code}")
             products[code] = item
+        if rows and not products:
+            number_rows = sum(
+                1 for row in rows
+                if isinstance(row, dict) and str(row.get("type") or "").strip().lower() == "number"
+            )
+            mode_label = "shared" if shared_catalog else "not confirmed shared"
+            raise SupplierApiError(
+                f"Upstream returned {len(rows)} price rows but no usable session countries "
+                f"(pricing mode: {mode_label}; number rows: {number_rows}). "
+                "Check the upstream session/shared pricing configuration."
+            )
         return {"success": True, "data": list(products.values())}
 
     def get_product_detail(self, product_id: str) -> dict[str, Any]:

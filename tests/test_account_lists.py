@@ -135,7 +135,11 @@ class AccountListTests(unittest.IsolatedAsyncioTestCase):
                 supplier.get_product_detail = MagicMock(return_value={"data": row})
                 supplier.buy_product = MagicMock(return_value={"data": {"orderId": "test-order", "taskId": "test-order"}})
                 await bot.execute_purchase(context, 1, "buyer", "Buyer", "1", 1, source=source)
-                self.assertEqual(notify.await_args.kwargs["source"], source)
+                if source == bot.DAXI_SOURCE:
+                    notify.assert_not_awaited()
+                else:
+                    self.assertEqual(notify.await_args.kwargs["source"], source)
+                notify.reset_mock()
                 self.assertEqual(store.record_order.call_args.args[-1], source)
                 self.assertEqual(store.record_order.call_args.kwargs["unit_cost"], row["price"])
 

@@ -839,7 +839,10 @@ ADMIN_NEW_ORDER_USER_EMOJI_ID = "5886412370347036129"
 ADMIN_NEW_ORDER_USER_ID_EMOJI_ID = "5771887475421090729"
 ADMIN_NEW_ORDER_SOURCE_EMOJI_ID = "5879585266426973039"
 ADMIN_NEW_ORDER_PRODUCT_EMOJI_ID = "5985472565508838112"
+ADMIN_NEW_ORDER_UNIT_PRICE_EMOJI_ID = "5926783847453692661"
 ADMIN_NEW_ORDER_QUANTITY_EMOJI_ID = "5877485980901971030"
+ADMIN_NEW_ORDER_DELIVERED_EMOJI_ID = "5960551395730919906"
+ADMIN_NEW_ORDER_REFUND_EMOJI_ID = "5845943483382110702"
 ADMIN_NEW_ORDER_AMOUNT_EMOJI_ID = "5931546553868095844"
 ADMIN_NEW_ORDER_BALANCE_EMOJI_ID = "5992430854909989581"
 ADMIN_CHA_TITLE_EMOJI_ID = "5874960879434338403"
@@ -2417,6 +2420,9 @@ def build_admin_new_order_text(
     total_price: float,
     remain_balance: float,
     source: str = LEGACY_SOURCE,
+    quantity_success: int | None = None,
+    refund_amount: float = 0.0,
+    unit_price: float | None = None,
 ) -> tuple[str, tuple[MessageEntity, ...]]:
     parts: list[tuple[str, str | None]] = []
     code_spans: list[tuple[int, int]] = []
@@ -2447,8 +2453,16 @@ def build_admin_new_order_text(
     add_text(f" 购买来源：账号列表{account_list_number(normalize_order_source(source))}\n")
     add_text("🎁", ADMIN_NEW_ORDER_PRODUCT_EMOJI_ID)
     add_text(f" 购买商品: {product_label}\n")
+    if unit_price is not None:
+        add_text("🛡", ADMIN_NEW_ORDER_UNIT_PRICE_EMOJI_ID)
+        add_text(f" 商品单价：{format_money(unit_price)} USDT\n")
     add_text("📊", ADMIN_NEW_ORDER_QUANTITY_EMOJI_ID)
     add_text(f" 购买数量：{quantity}\n")
+    if quantity_success is not None:
+        add_text("📝", ADMIN_NEW_ORDER_DELIVERED_EMOJI_ID)
+        add_text(f" 实发数量：{quantity_success}\n")
+        add_text("🔄", ADMIN_NEW_ORDER_REFUND_EMOJI_ID)
+        add_text(f" 退款余额：{format_money(refund_amount)} USDT\n")
     add_text("🔨", ADMIN_NEW_ORDER_AMOUNT_EMOJI_ID)
     add_text(f" 扣除金额：{format_money(total_price)}\n")
     add_text("🪙", ADMIN_NEW_ORDER_BALANCE_EMOJI_ID)
@@ -2467,6 +2481,9 @@ async def notify_admin_new_purchase(
     total_price: float,
     remain_balance: float,
     source: str = LEGACY_SOURCE,
+    quantity_success: int | None = None,
+    refund_amount: float = 0.0,
+    unit_price: float | None = None,
 ) -> None:
     if not admin_user_ids:
         return
@@ -2479,6 +2496,9 @@ async def notify_admin_new_purchase(
         total_price,
         remain_balance,
         source=source,
+        quantity_success=quantity_success,
+        refund_amount=refund_amount,
+        unit_price=unit_price,
     )
     for admin_user_id in admin_user_ids:
         try:
@@ -2489,6 +2509,31 @@ async def notify_admin_new_purchase(
             )
         except Exception:
             logger.exception("发送管理员新订单提醒失败: admin=%s buyer=%s", admin_user_id, buyer_user_id)
+
+
+async def notify_admin_daxi_settlement(
+    context: ContextTypes.DEFAULT_TYPE,
+    order: dict[str, Any],
+) -> None:
+    if normalize_order_source(order.get("source")) != DAXI_SOURCE:
+        return
+    settings, store, _ = get_services(context)
+    buyer_user_id = int(order["user_id"])
+    user = await call_blocking(store.get_user, buyer_user_id) or {}
+    refund_amount = safe_float(order.get("refund_amount"))
+    await notify_admin_new_purchase(
+        context, settings.admin_user_ids, buyer_user_id,
+        str(order.get("username") or user.get("username") or ""),
+        str(user.get("display_name") or ""),
+        str(order.get("product_name") or ""),
+        safe_int(order.get("quantity")),
+        max(0.0, safe_float(order.get("total_price")) - refund_amount),
+        safe_float(user.get("balance")),
+        source=DAXI_SOURCE,
+        quantity_success=safe_int(order.get("quantity_success")),
+        refund_amount=refund_amount,
+        unit_price=safe_float(order.get("unit_price")),
+    )
 
 
 def build_supplier_low_balance_alert_text(
@@ -8426,18 +8471,19 @@ async def execute_purchase(
         normalized_source,
         unit_cost=unit_cost,
     )
-    await notify_admin_new_purchase(
-        context,
-        settings.admin_user_ids,
-        user_id,
-        username,
-        display_name,
-        product_label,
-        quantity,
-        total_price,
-        remain,
-        source=normalized_source,
-    )
+    if normalized_source != DAXI_SOURCE:
+        await notify_admin_new_purchase(
+            context,
+            settings.admin_user_ids,
+            user_id,
+            username,
+            display_name,
+            product_label,
+            quantity,
+            total_price,
+            remain,
+            source=normalized_source,
+        )
     schedule_fast_order_probe(context, task_id)
     if data.get("needsReview"):
         for admin_id in settings.admin_user_ids:
@@ -8472,6 +8518,8 @@ async def finalize_failed_remote_order(
         total_price,
         payload,
     )
+    if changed and final_row:
+        await notify_admin_daxi_settlement(context, final_row)
     if changed and notify_user and final_row:
         user_row = await call_blocking(store.get_user, int(final_row["user_id"])) or {}
         notify_lang = normalize_lang_code(str(user_row.get("lang") or DEFAULT_LANG))
@@ -8588,7 +8636,13 @@ async def finalize_remote_order(
                 lang=lang,
             )
         if status in {"completed", "partial"}:
-            refund_amount = safe_float(data.get("amountRefunded"))
+            if normalize_order_source(order.get("source")) == DAXI_SOURCE:
+                delivered_value = data.get("quantityDelivered")
+                if not str(delivered_value).strip().isdecimal() or not 0 <= quantity_success <= quantity:
+                    return "error", ui_text("order_processing", lang)
+                refund_amount = float(Decimal(quantity - quantity_success) * Decimal(str(unit_price)))
+            else:
+                refund_amount = safe_float(data.get("amountRefunded"))
             if refund_amount <= 0 and 0 <= quantity_success < quantity:
                 refund_amount = (quantity - quantity_success) * unit_price
             final_row, changed = await call_blocking(
@@ -8600,6 +8654,8 @@ async def finalize_remote_order(
                 refund_amount,
                 payload,
             )
+            if changed and final_row:
+                await notify_admin_daxi_settlement(context, final_row)
             if changed and notify_user and final_row:
                 user_row = await call_blocking(store.get_user, int(final_row["user_id"])) or {}
                 notify_lang = normalize_lang_code(str(user_row.get("lang") or DEFAULT_LANG))

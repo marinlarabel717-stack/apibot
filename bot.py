@@ -2455,14 +2455,14 @@ def build_admin_new_order_text(
     add_text(f" 购买商品: {product_label}\n")
     if unit_price is not None:
         add_text("🛡", ADMIN_NEW_ORDER_UNIT_PRICE_EMOJI_ID)
-        add_text(f" 商品单价：{format_money(unit_price)} USDT\n")
+        add_text(f" 商品单价：{format_money(unit_price)}\n")
     add_text("📊", ADMIN_NEW_ORDER_QUANTITY_EMOJI_ID)
     add_text(f" 购买数量：{quantity}\n")
     if quantity_success is not None:
         add_text("📝", ADMIN_NEW_ORDER_DELIVERED_EMOJI_ID)
         add_text(f" 实发数量：{quantity_success}\n")
         add_text("🔄", ADMIN_NEW_ORDER_REFUND_EMOJI_ID)
-        add_text(f" 退款余额：{format_money(refund_amount)} USDT\n")
+        add_text(f" 退款余额：{format_money(refund_amount)}\n")
     add_text("🔨", ADMIN_NEW_ORDER_AMOUNT_EMOJI_ID)
     add_text(f" 扣除金额：{format_money(total_price)}\n")
     add_text("🪙", ADMIN_NEW_ORDER_BALANCE_EMOJI_ID)

@@ -47,10 +47,11 @@ class DaxiSettlementNotificationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result[0], "partial")
         message, = self.admin_messages()
         text = message["text"]
-        for expected in ("用户: 猴王 @buyer", "购买来源：账号列表②", "商品单价：1.70 USDT",
-                         "购买数量：6", "实发数量：2", "退款余额：6.80 USDT",
+        for expected in ("用户: 猴王 @buyer", "购买来源：账号列表②", "商品单价：1.70\n",
+                         "购买数量：6", "实发数量：2", "退款余额：6.80\n",
                          "扣除金额：3.40", "剩余余额：21.65"):
             self.assertIn(expected, text)
+        self.assertNotIn("USDT", text)
         self.assertAlmostEqual(self.store.get_user(2)["balance"], 21.65)
         self.assertAlmostEqual(self.store.get_order("order-test")["refund_amount"], 6.8)
         encoded = text.encode("utf-16-le")
@@ -64,7 +65,7 @@ class DaxiSettlementNotificationTests(unittest.IsolatedAsyncioTestCase):
     async def test_one_missing_account_does_not_refund_upstream_cost(self):
         await self.settle(delivered=5)
         message, = self.admin_messages()
-        self.assertIn("退款余额：1.70 USDT", message["text"])
+        self.assertIn("退款余额：1.70\n", message["text"])
         self.assertIn("扣除金额：8.50", message["text"])
         self.assertIn("剩余余额：16.55", message["text"])
 
@@ -72,7 +73,7 @@ class DaxiSettlementNotificationTests(unittest.IsolatedAsyncioTestCase):
         await self.settle(delivered=6, status="completed", upstream_refund="99")
         message, = self.admin_messages()
         self.assertIn("实发数量：6", message["text"])
-        self.assertIn("退款余额：0.00 USDT", message["text"])
+        self.assertIn("退款余额：0.00\n", message["text"])
         self.assertIn("扣除金额：10.20", message["text"])
         self.assertIn("剩余余额：14.85", message["text"])
 
@@ -80,7 +81,7 @@ class DaxiSettlementNotificationTests(unittest.IsolatedAsyncioTestCase):
         await self.settle(delivered=0)
         message, = self.admin_messages()
         self.assertIn("实发数量：0", message["text"])
-        self.assertIn("退款余额：10.20 USDT", message["text"])
+        self.assertIn("退款余额：10.20\n", message["text"])
         self.assertIn("扣除金额：0.00", message["text"])
         self.assertAlmostEqual(self.store.get_user(2)["balance"], 25.05)
 
@@ -89,7 +90,7 @@ class DaxiSettlementNotificationTests(unittest.IsolatedAsyncioTestCase):
         await self.settle(status="failed")
         message, = self.admin_messages()
         self.assertIn("实发数量：0", message["text"])
-        self.assertIn("退款余额：10.20 USDT", message["text"])
+        self.assertIn("退款余额：10.20\n", message["text"])
         self.assertAlmostEqual(self.store.get_user(2)["balance"], 25.05)
 
     async def test_repeat_queries_do_not_refund_or_notify_again(self):

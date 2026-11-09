@@ -340,3 +340,18 @@ without requiring a second click. Each successful product response is published
 immediately instead of waiting for the slowest item in the page. Automatic updates
 stop after navigation to avoid overwriting a different view. Existing lists 1-4
 continue to use their original category/product keyboard renderers.
+
+
+List-5 order recovery (2026-11-09): preserve `upstreamTradeNo` and immediate
+`secret` in the purchase result stored in `orders.raw_payload`. Settlement and TXT
+delivery consume this durable response before querying upstream, including after
+a restart; do not discard the response and depend solely on `/query2`. Pending
+orders query `/query` by the real trade number, with `/query2` as a read-only fallback.
+Never issue another `/trade` while reconciling. This upstream uses `code: 0` for
+business failures; only recognized stock/balance/payment/signature/product
+rejections are refundable before fulfillment. Unknown errors remain unresolved.
+A missing request-number lookup alone does not prove that upstream did not debit.
+Old affected orders without a saved trade number/secret require the operator to
+check upstream purchase history and obtain the actual trade number before recovery
+or refund. New reconciliation logs expose fixed failure classifications only,
+never upstream secrets or raw credential-bearing responses.

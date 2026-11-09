@@ -319,35 +319,89 @@ class ChuhaiSupplierClient(SupplierClient):
         self._request("/shared/commodity/inventoryState", shared_code=row["shared_code"], race=row["race"], num=quantity, card_id=0)
         request_no = hashlib.sha256(str(out_order_id).encode()).hexdigest()[:32]
         task_id = f"ch5-{request_no}-{quantity}"
+        trade = {}
+        uncertain = False
         try:
-            self._request("/shared/commodity/trade", shared_code=row["shared_code"], race=row["race"],
+            trade = self._request("/shared/commodity/trade", shared_code=row["shared_code"], race=row["race"],
                           contact="apibot-" + request_no, num=quantity, card_id=0, request_no=request_no)
         except SupplierApiError as exc:
-            # A business rejection is definitive; transport/malformed responses require query2, never a second purchase/refund.
-            if isinstance(exc.payload, dict) and str(exc.payload.get("code", "")).startswith("4") and len(str(exc.payload.get("code"))) == 3:
-                raise
-        return {"success": True, "data": {"orderId": task_id, "status": "processing"}}
+            # This upstream uses code=0 for business rejections, not HTTP-style 4xx.
+            # Only known pre-fulfillment rejections are safe to refund. Never retry a trade.
+            if self.definitive_trade_rejection(exc):
+                raise SupplierApiError(self.safe_order_error(exc)) from None
+            uncertain = True
+        trade = trade if isinstance(trade, dict) else {}
+        result = self._order_payload(task_id, quantity, trade)
+        result["data"]["submissionUncertain"] = uncertain or not bool(trade)
+        return result
 
-    def query_order(self, task_id):
-        match = re.fullmatch(r"ch5-([a-f0-9]{32})-([1-9][0-9]*)", str(task_id))
-        if not match:
-            raise SupplierApiError("Invalid List 5 order ID")
-        data = self._request("/shared/commodity/query2", requestNo=match[1])
-        if not isinstance(data, dict):
-            raise SupplierApiError("Invalid Shared API order")
+    @staticmethod
+    def safe_order_error(exc):
+        """Log fixed classifications only; upstream errors may contain credentials/card data."""
+        payload = exc.payload if isinstance(exc.payload, dict) else {}
+        message = str(payload.get("msg") or payload.get("message") or "")
+        reasons = (
+            ("订单不存在", "upstream order not found"),
+            ("库存不足", "upstream stock insufficient"),
+            ("余额不足", "upstream balance insufficient"),
+            ("余额支付失败", "upstream balance payment rejected"),
+            ("签名错误", "upstream signature rejected"),
+            ("商品不存在", "upstream product unavailable"),
+            ("商品已停售", "upstream product unavailable"),
+            ("预选卡密不可用", "upstream preselection unavailable"),
+        )
+        return next((reason for text, reason in reasons if text in message),
+                    "upstream response unavailable or unclassified; reconciliation required")
+
+    @classmethod
+    def definitive_trade_rejection(cls, exc):
+        payload = exc.payload if isinstance(exc.payload, dict) else {}
+        # A status code alone cannot prove that no money moved (e.g. rate limiting).
+        return str(payload.get("code")) in {"0", "400"} and cls.safe_order_error(exc) in {
+            "upstream stock insufficient", "upstream balance insufficient",
+            "upstream balance payment rejected", "upstream signature rejected",
+            "upstream product unavailable", "upstream preselection unavailable",
+        }
+
+    @staticmethod
+    def _order_payload(task_id, quantity, data, trade_no=""):
         secret = data.get("secret")
         if secret and not isinstance(secret, str):
             secret = json.dumps(secret, ensure_ascii=False)
-        # Status enum is undocumented. Only actual delivery content proves completion.
         complete = bool(secret and secret.strip())
-        quantity = int(match[2])
         return {"success": True, "data": {"orderId": task_id, "status": "completed" if complete else "processing",
+                "upstreamTradeNo": str(data.get("tradeNo") or trade_no or ""),
                 "quantityRequested": quantity, "quantityDelivered": quantity if complete else 0, "amountRefunded": 0,
                 "secret": secret or "", "files": [{"downloadUrl": "chuhai-order:" + task_id, "fileName": "delivery.txt"}] if complete else []}}
 
-    def download_secret(self, file_url, target):
+    def query_order(self, task_id, saved_payload=None):
+        match = re.fullmatch(r"ch5-([a-f0-9]{32})-([1-9][0-9]*)", str(task_id))
+        if not match:
+            raise SupplierApiError("Invalid List 5 order ID")
+        saved = (saved_payload or {}).get("data") or {}
+        if saved and str(saved.get("orderId")) != str(task_id):
+            raise SupplierApiError("List 5 saved order identity mismatch")
+        trade_no = str(saved.get("upstreamTradeNo") or "")
+        # The purchase response is durable in orders.raw_payload. Immediate delivery
+        # must not depend on query2 being available, including after a process restart.
+        if saved.get("secret"):
+            return self._order_payload(task_id, int(match[2]), saved, trade_no)
+        if trade_no:
+            try:
+                data = self._request("/shared/commodity/query", tradeNo=trade_no)
+            except SupplierApiError:
+                data = self._request("/shared/commodity/query2", requestNo=match[1])
+        else:
+            data = self._request("/shared/commodity/query2", requestNo=match[1])
+        if not isinstance(data, dict):
+            raise SupplierApiError("Invalid Shared API order")
+        # Status enum is undocumented. Only actual delivery content proves completion.
+        return self._order_payload(task_id, int(match[2]), data, trade_no)
+
+    def download_secret(self, file_url, target, saved_payload=None):
         task_id = str(file_url).removeprefix("chuhai-order:")
-        secret = self.query_order(task_id)["data"]["secret"]
+        payload = self.query_order(task_id, saved_payload) if saved_payload is not None else self.query_order(task_id)
+        secret = payload["data"]["secret"]
         if not secret:
             raise SupplierApiError("Delivery content not ready")
         target = Path(target)

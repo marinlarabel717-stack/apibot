@@ -109,9 +109,57 @@ class SharedApiTests(unittest.TestCase):
 
     def test_definitive_rejection_is_refundable(self):
         client = self.client()
-        with patch.object(client, "get_product_detail", return_value={"data": {"shared_code": "code", "race": ""}}), patch.object(client, "_request", side_effect=[{}, SupplierApiError("rejected", {"code": 400})]):
-            with self.assertRaises(SupplierApiError):
-                client.buy_product("p", 2, "local-order")
+        for code in (0, 400):
+            with self.subTest(code=code), patch.object(client, "get_product_detail", return_value={"data": {"shared_code": "code", "race": ""}}), patch.object(client, "_request", side_effect=[{}, SupplierApiError("rejected", {"code": code, "msg": "余额不足"})]):
+                with self.assertRaisesRegex(SupplierApiError, "balance insufficient"):
+                    client.buy_product("p", 2, "local-order")
+
+    def test_immediate_delivery_survives_restart_and_query_outage(self):
+        client = self.client()
+        with patch.object(client, "get_product_detail", return_value={"data": {"shared_code": "code", "race": ""}}), patch.object(client, "_request", side_effect=[{}, {"tradeNo": "real-123", "secret": "account1\naccount2"}]):
+            purchased = client.buy_product("p", 2, "local-order")
+        # Simulate the only persisted state: orders.raw_payload, not process memory.
+        import json
+        saved = json.loads(json.dumps(purchased))
+        restarted = self.client()
+        with patch.object(restarted, "_request", side_effect=AssertionError("must not requery delivered secret")):
+            order = restarted.query_order(saved["data"]["orderId"], saved)
+            self.assertEqual(order["data"]["upstreamTradeNo"], "real-123")
+            with tempfile.TemporaryDirectory() as directory:
+                target = restarted.download_secret(order["data"]["files"][0]["downloadUrl"], Path(directory)/"delivery.txt", order)
+                self.assertEqual(target.read_text(encoding="utf-8"), "account1\naccount2")
+
+    def test_pending_trade_uses_real_order_number(self):
+        client = self.client()
+        task = "ch5-" + "a" * 32 + "-1"
+        saved = {"data": {"orderId": task, "upstreamTradeNo": "real-123"}}
+        with patch.object(client, "_request", return_value={"secret": "account"}) as query:
+            order = client.query_order(task, saved)
+        query.assert_called_once_with("/shared/commodity/query", tradeNo="real-123")
+        self.assertEqual(order["data"]["upstreamTradeNo"], "real-123")
+        self.assertEqual(order["data"]["quantityDelivered"], 1)
+
+    def test_real_order_query_failure_falls_back_without_rebuying(self):
+        client = self.client()
+        task = "ch5-" + "a" * 32 + "-1"
+        saved = {"data": {"orderId": task, "upstreamTradeNo": "real-123"}}
+        with patch.object(client, "_request", side_effect=[SupplierApiError("timeout"), {"secret": "account"}]) as request:
+            self.assertEqual(client.query_order(task, saved)["data"]["status"], "completed")
+        self.assertEqual([call.args[0] for call in request.call_args_list], ["/shared/commodity/query", "/shared/commodity/query2"])
+
+    def test_unknown_trade_error_is_not_refundable_and_does_not_leak(self):
+        client = self.client()
+        error = SupplierApiError("secret-card-data", {"code": 0, "msg": "secret-card-data"})
+        with patch.object(client, "get_product_detail", return_value={"data": {"shared_code": "code", "race": ""}}), patch.object(client, "_request", side_effect=[{}, error]) as request:
+            data = client.buy_product("p", 1, "local-order")["data"]
+        self.assertTrue(data["submissionUncertain"])
+        self.assertEqual(request.call_count, 2)
+        self.assertNotIn("secret-card-data", client.safe_order_error(error))
+
+    def test_saved_secret_cannot_be_used_for_different_order(self):
+        client = self.client()
+        with self.assertRaises(SupplierApiError):
+            client.query_order("ch5-" + "a" * 32 + "-1", {"data": {"orderId": "different", "secret": "account"}})
 
     def test_status_without_secret_cannot_complete(self):
         client = self.client()
@@ -140,6 +188,33 @@ class SharedApiTests(unittest.TestCase):
 
 
 class SharedFlowTests(unittest.IsolatedAsyncioTestCase):
+    async def test_finalize_and_send_saved_secret_with_upstream_down(self):
+        import json
+        from store import Store
+        with tempfile.TemporaryDirectory() as directory:
+            settings = replace(SETTINGS, database_path=Path(directory)/"orders.sqlite")
+            store = Store(settings.database_path)
+            context = make_context(store)
+            context.application.bot_data["settings"] = settings
+            client = ChuhaiSupplierClient(settings)
+            context.application.bot_data["supplier_chuhai"] = client
+            task = "ch5-" + "a" * 32 + "-2"
+            purchased = client._order_payload(task, 2, {"tradeNo": "real-123", "secret": "account1\naccount2"})
+            store.record_order(task, 1, "tester", "p", "FB accounts", 2, 1, 2, purchased, "chuhai")
+            with patch.object(client, "_request", side_effect=AssertionError("upstream unavailable")), patch.object(bot, "DELIVERY_FILES_DIR", Path(directory)/"deliveries"), patch.object(bot, "notify_admin_daxi_settlement", AsyncMock()):
+                result = await bot.finalize_remote_order(context, task, False)
+                self.assertEqual(result[0], "completed")
+                row = store.get_order(task)
+                self.assertEqual(json.loads(row["raw_payload"])["data"]["upstreamTradeNo"], "real-123")
+                self.assertTrue(row["delivery_sent_at"])
+                sent_path = context.bot.send_document.await_args.kwargs["document"].name
+                self.assertEqual(Path(sent_path).read_text(encoding="utf-8"), "account1\naccount2")
+                context.bot.send_document.assert_awaited_once()
+                await bot.finalize_remote_order(context, task, False)
+                context.bot.send_document.assert_awaited_once()
+            import gc
+            gc.collect()  # sqlite connection context managers commit but do not close.
+
     async def test_pending_quantity_generates_fifth_confirmation(self):
         context = make_context()
         context.application.bot_data["settings"] = replace(SETTINGS, chuhai_app_id="123", chuhai_app_key="key", chuhai_price_rate=1)

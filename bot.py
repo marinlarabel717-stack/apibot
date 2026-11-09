@@ -3033,11 +3033,12 @@ def download_delivery_file(
     file_url: str,
     file_name: str = "",
     index: int = 0,
+    order_payload: dict[str, Any] | None = None,
 ) -> Path:
     DELIVERY_FILES_DIR.mkdir(parents=True, exist_ok=True)
     target_path = DELIVERY_FILES_DIR / delivery_storage_filename(task_id, file_url, file_name, index)
     if isinstance(supplier, ChuhaiSupplierClient):
-        return supplier.download_secret(file_url, target_path)
+        return supplier.download_secret(file_url, target_path, order_payload)
     if isinstance(supplier, TgstorexSupplierClient):
         return supplier.download_session_file(file_url, target_path)
     if target_path.exists() and target_path.stat().st_size > 0:
@@ -3294,7 +3295,11 @@ async def refresh_delivery_file_url(
     previous_file_url: str = "",
 ) -> dict[str, Any] | None:
     _, store, _ = get_services(context)
-    payload = await call_blocking(supplier.query_order, task_id)
+    if isinstance(supplier, ChuhaiSupplierClient):
+        saved_order = await call_blocking(store.get_order, task_id) or {}
+        payload = await call_blocking(supplier.query_order, task_id, parse_order_raw_payload(saved_order))
+    else:
+        payload = await call_blocking(supplier.query_order, task_id)
     data = payload.get("data") or {}
     if is_modern_supplier(supplier):
         status = str(data.get("status") or "").strip().lower()
@@ -3347,6 +3352,7 @@ async def download_delivery_files_with_refresh(
                     str(entry.get("download_url") or "").strip(),
                     str(entry.get("file_name") or "").strip(),
                     index,
+                    *([parse_order_raw_payload(current_order)] if isinstance(supplier, ChuhaiSupplierClient) else []),
                 ),
                 "file_name": str(entry.get("file_name") or "").strip(),
                 "file_url": str(entry.get("download_url") or "").strip(),
@@ -3375,6 +3381,7 @@ async def download_delivery_files_with_refresh(
                     str(entry.get("download_url") or "").strip(),
                     str(entry.get("file_name") or "").strip(),
                     index,
+                    *([parse_order_raw_payload(current_order)] if isinstance(supplier, ChuhaiSupplierClient) else []),
                 ),
                 "file_name": str(entry.get("file_name") or "").strip(),
                 "file_url": str(entry.get("download_url") or "").strip(),
@@ -8945,8 +8952,15 @@ async def finalize_remote_order(
     order_age_seconds = get_order_age_seconds(order)
 
     try:
-        payload = await call_blocking(supplier.query_order, task_id)
+        if isinstance(supplier, ChuhaiSupplierClient):
+            payload = await call_blocking(supplier.query_order, task_id, parse_order_raw_payload(order))
+        else:
+            payload = await call_blocking(supplier.query_order, task_id)
     except SupplierApiError as exc:
+        if isinstance(supplier, ChuhaiSupplierClient):
+            logger.warning("List 5 order reconciliation required; no automatic refund: %s reason=%s",
+                           task_id, supplier.safe_order_error(exc))
+            return "error", ui_text("order_needs_review", lang)
         if isinstance(supplier, (TgstorexSupplierClient, ChuhaiSupplierClient)):
             logger.warning("Session order query unavailable; no automatic refund: %s", task_id)
             return "error", ui_text("order_processing", lang)

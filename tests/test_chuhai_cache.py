@@ -4,6 +4,7 @@ import time
 import unittest
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import bot
@@ -114,6 +115,99 @@ class CacheTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(calls), 6)
         self.assertFalse(any(path.endswith('/items') for path,_ in calls))
         self.assertEqual([group['key'] for group in bot.group_chuhai_products(rows, 'zh')], ['fb','ig','gmail','gpt','tk'])
+
+
+class AccountsOnlyTests(unittest.IsolatedAsyncioTestCase):
+    setUp = CacheTests.setUp
+    asyncTearDown = CacheTests.asyncTearDown
+    def test_original_lists_render_inventory_not_product_counts(self):
+        group = {"index":0,"name":"Legacy category","stock_total":73,"product_count":999}
+        for render in (bot.build_daxi_category_keyboard_localized, bot.build_rz_category_keyboard_localized):
+            keyboard=render([group],0,'zh')
+            text=keyboard.inline_keyboard[0][0].text
+            self.assertIn('73',text)
+            self.assertNotIn('999',text)
+            self.assertNotIn('商品',text)
+        keyboard=bot.build_chuhai_category_keyboard_localized([dict(group,stock_unknown=False)],0,'zh')
+        text=keyboard.inline_keyboard[0][0].text
+        self.assertIn('库存',text)
+        self.assertIn('73',text)
+        self.assertNotIn('999',text)
+
+    def test_services_excluded_but_prepaid_and_follower_accounts_kept(self):
+        allowed = [
+            ("Facebook老号", "Facebook满五年老号"),
+            ("TK 满月千粉未开橱窗", "TikTok 千粉账号 带作品"),
+            ("TK满月白号", "德国满月白(outlook注册-带接码链接)"),
+            ("Gmail邮箱", "Gmail老号带2FA"),
+            ("OpenAI/ChatGPT", "GPT plus 成品号 账号已充值好一个月会员"),
+        ]
+        excluded = [
+            ("Facebook 粉丝服务", "Facebook老号"),
+            ("Instagram 流量", "IG account"),
+            ("Facebook", "Facebook刷粉 1000粉丝"),
+            ("Instagram", "Instagram点赞量"),
+            ("TK", "TikTok 播放量服务"),
+            ("OpenAI/ChatGPT", "Codex点数额度充值 Free账号勿下"),
+            ("OpenAI/ChatGPT", "GPT续费月卡卡密"),
+            ("Gmail", "美国长效API接码 绑定谷歌账户"),
+            ("OpenAI/ChatGPT", "Github全新邮箱验证"),
+        ]
+        for category, name in allowed:
+            self.assertTrue(self.client.account_product(category,name), (category,name))
+        for category, name in excluded:
+            self.assertFalse(self.client.account_product(category,name), (category,name))
+
+    def test_old_snapshot_service_rows_are_removed(self):
+        self.client._catalog['service'] = dict(self.row, productId='service', productName='Facebook刷粉服务')
+        self.client._save_snapshot()
+        restored=ChuhaiSupplierClient(self.settings)
+        self.assertIsNone(restored.cached_product('service'))
+        self.assertEqual(len(restored.cached_products()), 1)
+        self.assertEqual(sum(len(group['rows']) for group in bot.group_chuhai_products(list(self.client._catalog.values()),'zh')), 1)
+
+    def test_service_categories_do_not_request_product_endpoints(self):
+        calls=[]
+        def request(path,**params):
+            calls.append((path,params))
+            if path.endswith('/categories'):
+                return [{'id':1,'name':'Facebook老号'},{'id':2,'name':'Facebook粉丝服务'},{'id':3,'name':'TikTok流量'}]
+            self.assertEqual(params['category_id'],1)
+            return {'items':[{'code':'good','name':'Facebook老号','factory_price':8,'delivery_way':0},
+                             {'code':'bad','name':'FB代运营服务','factory_price':8,'delivery_way':0}]}
+        with patch.object(self.client,'_request',side_effect=request):
+            rows=self.client.get_products()['data']
+        self.assertEqual([row['shared_code'] for row in rows],['good'])
+        self.assertEqual(len(calls),2)
+
+    async def test_current_page_updates_stock_without_another_click(self):
+        self.row.update(stockUnknown=True,totalStock=0,source='chuhai')
+        self.client._catalog['test'].update(stockUnknown=True,totalStock=0)
+        message=SimpleNamespace(edit_reply_markup=AsyncMock())
+        update=SimpleNamespace(callback_query=SimpleNamespace(message=message))
+        tasks=[]
+        self.context.application.create_task=lambda coroutine:tasks.append(asyncio.create_task(coroutine))
+        async def tick(delay):
+            self.client._catalog['test'].update(stockUnknown=False,totalStock=99)
+        keyboard=bot.chuhai_keyboard(bot.build_chuhai_product_keyboard_localized(self.settings,[self.row],0,0,'zh'),'zh')
+        with patch.object(bot.asyncio,'sleep',side_effect=tick):
+            bot.watch_chuhai_stock_page(update,self.context,self.settings,[self.row],[self.row],0,0,'zh',keyboard)
+            await tasks[0]
+        message.edit_reply_markup.assert_awaited_once()
+        self.assertIn('99',str(message.edit_reply_markup.await_args.kwargs['reply_markup'].to_dict()))
+
+    async def test_navigating_away_stops_stock_page_edit(self):
+        self.row.update(stockUnknown=True,totalStock=0,source='chuhai')
+        message=SimpleNamespace(edit_reply_markup=AsyncMock())
+        update=SimpleNamespace(callback_query=SimpleNamespace(message=message))
+        tasks=[]
+        self.context.application.create_task=lambda coroutine:tasks.append(asyncio.create_task(coroutine))
+        keyboard=bot.chuhai_keyboard(bot.build_chuhai_product_keyboard_localized(self.settings,[self.row],0,0,'zh'),'zh')
+        with patch.object(bot.asyncio,'sleep',AsyncMock()):
+            bot.watch_chuhai_stock_page(update,self.context,self.settings,[self.row],[self.row],0,0,'zh',keyboard)
+            self.context.user_data['chuhai_view_token']='navigated-away'
+            await tasks[0]
+        message.edit_reply_markup.assert_not_awaited()
 
 
 if __name__ == '__main__': unittest.main()

@@ -39,7 +39,7 @@ from telegram import (
     Update,
 )
 from telegram.constants import KeyboardButtonStyle
-from telegram.error import BadRequest, Forbidden, TimedOut
+from telegram.error import BadRequest, Forbidden, TimedOut, TelegramError
 from telegram.ext import (
     Application,
     ApplicationBuilder,
@@ -4419,7 +4419,7 @@ def build_category_keyboard(rows: list[dict[str, Any]]) -> InlineKeyboardMarkup:
     buttons: list[list[InlineKeyboardButton]] = []
     for row in rows:
         category_id = safe_int(row.get("categoryId"))
-        stock = "?" if row.get("stockUnknown") else safe_int(row.get("totalStock"))
+        stock = safe_int(row.get("totalStock"))
         name = shorten(str(row.get("categoryName") or f"分类 {category_id}"), 26)
         buttons.append(
             [
@@ -4460,7 +4460,7 @@ def build_product_keyboard(
         product_id = safe_int(row.get("productId"))
         product_name = shorten(str(row.get("productName") or f"商品 {product_id}"), 28)
         price = safe_float(row.get("price"))
-        stock = "?" if row.get("stockUnknown") else safe_int(row.get("totalStock"))
+        stock = safe_int(row.get("totalStock"))
         buttons.append(
             [
                 InlineKeyboardButton(
@@ -4609,7 +4609,7 @@ def build_category_keyboard_configured_localized(
     buttons: list[list[InlineKeyboardButton]] = []
     for row in rows:
         category_id = safe_int(row.get("categoryId"))
-        stock = "?" if row.get("stockUnknown") else safe_int(row.get("totalStock"))
+        stock = safe_int(row.get("totalStock"))
         source_name = str(row.get("categoryName") or f"分类 {category_id}")
         display_name = shorten(translate_category_name(source_name, lang), 26)
         buttons.append(
@@ -4631,7 +4631,7 @@ def build_category_keyboard_configured(settings: Settings, rows: list[dict[str, 
     buttons: list[list[InlineKeyboardButton]] = []
     for row in rows:
         category_id = safe_int(row.get("categoryId"))
-        stock = "?" if row.get("stockUnknown") else safe_int(row.get("totalStock"))
+        stock = safe_int(row.get("totalStock"))
         name = shorten(str(row.get("categoryName") or f"分类 {category_id}"), 26)
         buttons.append([catalog_button(settings, f"{name} 库存 [{stock}]", f"cat:{category_id}:0")])
     buttons.append([premium_inline_button(BUTTON_MAIN_MENU, "nav:menu", HOME_EMOJI_ID)])
@@ -4654,7 +4654,7 @@ def build_product_keyboard_configured_localized(
     for row in page_rows:
         product_id = safe_int(row.get("productId"))
         product_name = shorten(translate_product_name(str(row.get("productName") or f"商品 {product_id}"), lang), 28)
-        stock = "?" if row.get("stockUnknown") else safe_int(row.get("totalStock"))
+        stock = safe_int(row.get("totalStock"))
         price = resolve_sell_price(settings, row)
         buttons.append(
             [
@@ -4694,7 +4694,7 @@ def build_product_keyboard_configured(
     for row in page_rows:
         product_id = safe_int(row.get("productId"))
         product_name = shorten(str(row.get("productName") or f"商品 {product_id}"), 28)
-        stock = "?" if row.get("stockUnknown") else safe_int(row.get("totalStock"))
+        stock = safe_int(row.get("totalStock"))
         price = resolve_sell_price(settings, row)
         buttons.append([plain_catalog_button(f"{product_name} 库存 [{stock}] - ${price:.2f}", f"prd:{product_id}:{category_id}:{page}")])
 
@@ -4786,12 +4786,12 @@ def build_daxi_category_keyboard_localized(
     for group in page_groups:
         group_index = safe_int(group.get("index"), 0)
         category_name = shorten(translate_category_name(str(group.get("name") or "未分类"), lang), 26)
-        stock_total = "?" if group.get("stock_unknown") else max(0, safe_int(group.get("stock_total"), 0))
+        stock_total = max(0, safe_int(group.get("stock_total"), 0))
         category_icon = str(group.get("icon") or "📦")
         buttons.append(
             [
                 plain_catalog_button(
-                    (f"{category_icon} {category_name} 商品 [{group['product_count']}]" if "product_count" in group else f"{category_icon} {category_name} 可用 [{stock_total}]"),
+                    f"{category_icon} {category_name} 可用 [{stock_total}]",
                     f"cat2:{group_index}:0",
                 )
             ]
@@ -4822,7 +4822,7 @@ def build_daxi_product_keyboard_localized(
     for row in page_rows:
         product_id = str(row.get("productId") or "").strip()
         product_name = shorten(format_daxi_product_title(row, lang), 28)
-        stock = "?" if row.get("stockUnknown") else safe_int(row.get("totalStock"))
+        stock = safe_int(row.get("totalStock"))
         price = resolve_sell_price(settings, row)
         buttons.append(
             [
@@ -5629,12 +5629,12 @@ def build_rz_category_keyboard_localized(
     for group in page_groups:
         group_index = safe_int(group.get("index"), 0)
         category_name = shorten(str(group.get("name") or "未分类"), 26)
-        stock_total = "?" if group.get("stock_unknown") else max(0, safe_int(group.get("stock_total"), 0))
+        stock_total = max(0, safe_int(group.get("stock_total"), 0))
         category_icon = str(group.get("icon") or "📦")
         buttons.append(
             [
                 plain_catalog_button(
-                    (f"{category_icon} {category_name} 商品 [{group['product_count']}]" if "product_count" in group else f"{category_icon} {category_name} 可用 [{stock_total}]"),
+                    f"{category_icon} {category_name} 可用 [{stock_total}]",
                     f"cat3:{group_index}:0",
                 )
             ]
@@ -5667,12 +5667,12 @@ def build_rz_product_keyboard_localized(
         if not product_id:
             continue
         product_name = shorten(format_rz_product_title(row, lang), 28)
-        stock = "?" if row.get("stockUnknown") else safe_int(row.get("totalStock"))
+        stock = safe_int(row.get("totalStock"))
         price = resolve_sell_price(settings, row)
         buttons.append(
             [
                 plain_catalog_button(
-                    ui_text("product_row_price", lang, name=product_name, stock=stock, price=("待确认" if row.get("priceUnknown") else f"{price:.2f}")),
+                    ui_text("product_row_price", lang, name=product_name, stock=stock, price=f"{price:.2f}"),
                     f"prd3:{product_id}:{category_index}:{page}",
                 )
             ]
@@ -6045,7 +6045,13 @@ async def fetch_chuhai_products(context: ContextTypes.DEFAULT_TYPE, *, refresh: 
                 RZ_PRODUCTS_CACHE[cache_key] = (0, disk_rows)
                 cached = RZ_PRODUCTS_CACHE[cache_key]
         ensure_search_catalog_refresh(context, CHUHAI_SOURCE)
-        return cached[1] if cached is not None else []
+        if cached is None:
+            return []
+        filtered = [row for row in cached[1] if supplier.account_product(row.get("categoryName"), row.get("productName"))]
+        if len(filtered) != len(cached[1]):
+            RZ_PRODUCTS_CACHE[cache_key] = (cached[0], filtered)
+            return filtered
+        return cached[1]
     payload = await call_blocking(supplier.get_products)
     rows = payload.get("data") or []
     RZ_PRODUCTS_CACHE[cache_key] = (time.monotonic(), rows)
@@ -6055,12 +6061,12 @@ async def fetch_chuhai_products(context: ContextTypes.DEFAULT_TYPE, *, refresh: 
 def group_chuhai_products(rows: list[dict[str, Any]], lang: str) -> list[dict[str, Any]]:
     groups = []
     for platform, title in ChuhaiSupplierClient.PLATFORM_NAMES.items():
-        products = [row for row in rows if ChuhaiSupplierClient.platform(row.get("categoryName")) == platform]
+        products = [row for row in rows if ChuhaiSupplierClient.platform(row.get("categoryName")) == platform and ChuhaiSupplierClient.account_product(row.get("categoryName"), row.get("productName"))]
         if not products:
             continue
         products.sort(key=lambda row: (str(row.get("categoryName", "")), str(row.get("productName", "")), str(row["productId"])))
         groups.append({"key": platform, "name": title, "index": len(groups), "rows": products,
-                       "product_count": len(products), "stock_unknown": True, "stock_total": 0})
+                       "product_count": len(products), "stock_unknown": any(row.get("stockUnknown", True) for row in products), "stock_total": sum(safe_int(row.get("totalStock")) for row in products if not row.get("stockUnknown", True))})
     return groups
 
 
@@ -6125,6 +6131,113 @@ async def refresh_chuhai_visible_inventory(context, rows):
     state["chuhai_stock_task"] = asyncio.create_task(refresh_stock(), name="chuhai-stock-refresh")
 
 
+def build_chuhai_category_keyboard_localized(
+    groups: list[dict[str, Any]],
+    page: int,
+    lang: str,
+) -> InlineKeyboardMarkup:
+    total_pages = max(1, (len(groups) + DAXI_CATEGORYS_PER_PAGE - 1) // DAXI_CATEGORYS_PER_PAGE)
+    page = max(0, min(page, total_pages - 1))
+    start = page * DAXI_CATEGORYS_PER_PAGE
+    page_groups = groups[start : start + DAXI_CATEGORYS_PER_PAGE]
+    buttons: list[list[InlineKeyboardButton]] = []
+    for group in page_groups:
+        group_index = safe_int(group.get("index"), 0)
+        category_name = shorten(str(group.get("name") or "未分类"), 26)
+        stock_total = "更新中" if group.get("stock_unknown") else max(0, safe_int(group.get("stock_total"), 0))
+        category_icon = str(group.get("icon") or "📦")
+        buttons.append(
+            [
+                plain_catalog_button(
+                    f"{category_icon} {category_name} 库存 [{stock_total}]",
+                    f"cat3:{group_index}:0",
+                )
+            ]
+        )
+    nav_row: list[InlineKeyboardButton] = []
+    if page > 0:
+        nav_row.append(InlineKeyboardButton(ui_text("previous_page", lang), callback_data=f"cats3:{page - 1}"))
+    nav_row.append(InlineKeyboardButton(f"{page + 1}/{total_pages}", callback_data=f"cats3:{page}"))
+    if page < total_pages - 1:
+        nav_row.append(InlineKeyboardButton(ui_text("next_page", lang), callback_data=f"cats3:{page + 1}"))
+    buttons.append(nav_row)
+    buttons.append([premium_inline_button(ui_text("button_main_menu", lang), "nav:menu", HOME_EMOJI_ID)])
+    return InlineKeyboardMarkup(buttons)
+
+
+def build_chuhai_product_keyboard_localized(
+    settings: Settings,
+    rows: list[dict[str, Any]],
+    category_index: int,
+    page: int,
+    lang: str,
+) -> InlineKeyboardMarkup:
+    total_pages = max(1, (len(rows) + PRODUCTS_PER_PAGE - 1) // PRODUCTS_PER_PAGE)
+    page = max(0, min(page, total_pages - 1))
+    start = page * PRODUCTS_PER_PAGE
+    page_rows = rows[start : start + PRODUCTS_PER_PAGE]
+    buttons: list[list[InlineKeyboardButton]] = []
+    for row in page_rows:
+        product_id = str(row.get("productId") or "").strip()
+        if not product_id:
+            continue
+        product_name = shorten(format_rz_product_title(row, lang), 28)
+        stock = "更新中" if row.get("stockUnknown") else safe_int(row.get("totalStock"))
+        price = resolve_sell_price(settings, row)
+        buttons.append(
+            [
+                plain_catalog_button(
+                    ui_text("product_row_price", lang, name=product_name, stock=stock, price=("待确认" if row.get("priceUnknown") else f"{price:.2f}")),
+                    f"prd3:{product_id}:{category_index}:{page}",
+                )
+            ]
+        )
+    nav_row: list[InlineKeyboardButton] = []
+    if page > 0:
+        nav_row.append(InlineKeyboardButton(ui_text("previous_page", lang), callback_data=f"cat3:{category_index}:{page - 1}"))
+    nav_row.append(InlineKeyboardButton(f"{page + 1}/{total_pages}", callback_data=f"cat3:{category_index}:{page}"))
+    if page < total_pages - 1:
+        nav_row.append(InlineKeyboardButton(ui_text("next_page", lang), callback_data=f"cat3:{category_index}:{page + 1}"))
+    buttons.append(nav_row)
+    buttons.append(
+        [
+            premium_inline_button(ui_text("button_main_menu", lang), "nav:menu", HOME_EMOJI_ID),
+            premium_inline_button(ui_text("back_account_list_3", lang), "cats3:0", BACK_EMOJI_ID),
+        ]
+    )
+    return InlineKeyboardMarkup(buttons)
+
+
+def watch_chuhai_stock_page(update, context, settings, rows, visible, category_index, page, lang, keyboard):
+    query = update.callback_query
+    message = getattr(query, "message", None) if query else None
+    if message is None or not hasattr(message, "edit_reply_markup"):
+        return
+    token = context.user_data.setdefault("chuhai_view_token", uuid4().hex)
+    supplier = get_chuhai_supplier(context)
+    async def update_stock_buttons():
+        previous = keyboard.to_dict()
+        for delay in (1, 1, 2, 2, 4, 8, 8, 8, 8, 8, 8):
+            await asyncio.sleep(delay)
+            if context.user_data.get("chuhai_view_token") != token:
+                return
+            for row in visible:
+                cached = supplier.cached_product(row["productId"])
+                if cached and not cached.get("stockUnknown", True):
+                    row.update(totalStock=cached["totalStock"], stockUnknown=False)
+            current = chuhai_keyboard(build_chuhai_product_keyboard_localized(settings, rows, category_index, page, lang), lang)
+            if current.to_dict() != previous:
+                try:
+                    await message.edit_reply_markup(reply_markup=current)
+                except TelegramError:
+                    return
+                previous = current.to_dict()
+            task = context.application.bot_data.get("chuhai_stock_task")
+            if task is None or task.done():
+                return
+    context.application.create_task(update_stock_buttons())
+
+
 async def show_chuhai_catalog(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
@@ -6150,7 +6263,7 @@ async def show_chuhai_catalog(
         await reply_inline(update, ("商品缓存正在后台加载，请稍后点击刷新。" if lang == "zh" else "Catalog cache is loading in the background. Refresh shortly."), InlineKeyboardMarkup([[InlineKeyboardButton("刷新 / Refresh", callback_data="cats5:0")]]))
         return
     if category_index is None or not 0 <= category_index < len(groups):
-        keyboard = build_rz_category_keyboard_localized(groups, page, lang)
+        keyboard = build_chuhai_category_keyboard_localized(groups, page, lang)
         await reply_inline(update, ui_text("account_list_5_intro", lang), chuhai_keyboard(keyboard, lang))
         return
     group = groups[category_index]
@@ -6159,8 +6272,10 @@ async def show_chuhai_catalog(
     visible = group["rows"][page * PRODUCTS_PER_PAGE:(page + 1) * PRODUCTS_PER_PAGE]
     await refresh_chuhai_visible_inventory(context, visible)
     text, entities = build_rz_products_group_intro_text_localized(group["name"], lang)
-    keyboard = build_rz_product_keyboard_localized(settings, group["rows"], category_index, page, lang)
-    await reply_inline(update, text, chuhai_keyboard(keyboard, lang), entities=entities)
+    keyboard = build_chuhai_product_keyboard_localized(settings, group["rows"], category_index, page, lang)
+    converted = chuhai_keyboard(keyboard, lang)
+    await reply_inline(update, text, converted, entities=entities)
+    watch_chuhai_stock_page(update, context, settings, group["rows"], visible, category_index, page, lang, converted)
 
 
 async def on_chuhai_callback(update: Update, context: ContextTypes.DEFAULT_TYPE, parts: list[str]) -> None:
@@ -8628,7 +8743,7 @@ async def execute_purchase(
         row = await fetch_product_detail_cached(supplier, int(product_id))
     await call_blocking(store.ensure_user, user_id, username, display_name)
     unit_price = resolve_sell_price(settings, row)
-    total_stock = "?" if row.get("stockUnknown") else safe_int(row.get("totalStock"))
+    total_stock = safe_int(row.get("totalStock"))
     product_name = str(row.get("productName") or f"商品 {product_id}")
     category_name = str(row.get("categoryName") or "").strip()
     product_label = f"{category_name} {product_name}".strip() if category_name else product_name
@@ -9553,6 +9668,7 @@ async def search_text_rich(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 
 async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    context.user_data["chuhai_view_token"] = uuid4().hex
     if await should_ignore_for_closed_business(update, context):
         return
     settings, _, supplier = get_services(context)
@@ -10329,7 +10445,7 @@ async def search_text_rich(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     catalogs, unavailable = await get_fast_search_catalogs(context)
     daxi_all_rows = catalogs.get(DAXI_SOURCE, [])
     rz_all_rows = catalogs.get(RZ_SOURCE, [])
-    chuhai_all_rows = catalogs.get(CHUHAI_SOURCE, [])
+    chuhai_all_rows = [row for row in catalogs.get(CHUHAI_SOURCE, []) if ChuhaiSupplierClient.account_product(row.get("categoryName"), row.get("productName"))]
     chuhai_rows = search_rz_products_locally(chuhai_all_rows, keyword)
     if chuhai_rows:
         await refresh_chuhai_visible_inventory(context, chuhai_rows[:SEARCH_RESULTS_LIMIT])

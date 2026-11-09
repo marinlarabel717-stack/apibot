@@ -299,12 +299,20 @@ USDT before displaying them, not merely relabeled.
 List 5 uses independent `chuhai` order sources and `cats5/cat5/prd5/qbuy5/cbuy5`
 callbacks. Main/profile menus and keyword search include it. Categories retain upstream names.
 List 5 only fetches FB/Facebook, IG/Instagram, Gmail, GPT/ChatGPT and TK/TikTok
-category products, including their INI/JSON specifications. Other platform products
+account-category products, including their INI/JSON specifications. Service-only
+categories (fans/traffic/boosting) are excluded before any category product request.
+Mixed-category service products (recharge, SMS verification, API credits, promotion,
+etc.) are excluded before normalization and are also filtered from disk snapshots,
+search and old product callbacks. Accounts sold with existing followers or prepaid
+subscriptions remain account products. Other platform products
 (including Threads) are neither fetched nor displayed. The five platform groups are
 shown in that fixed order, with products sorted by subcategory and title.
 Products requiring unsupported widget input, preselection, manual/plugin fulfillment
 or unconfirmed costs are marked unavailable for automatic purchase rather than hidden.
-Category summaries show product/variant counts, not fictitious aggregate inventory.
+Shared renderers for lists 1-4 retain their original numeric inventory display.
+List 5 has isolated renderers: it displays inventory, never product counts; unknown
+inventory is labeled as updating rather than fabricated zero. Category totals are
+shown numerically only after every included variant has known cached inventory.
 Browsing, pagination, search and product detail use memory/disk snapshots immediately,
 without waiting on upstream. Catalogs refresh in the background every five minutes
 through `/categories` and only whitelisted `/categoryItems`, never `/items`. Repeated
@@ -325,3 +333,10 @@ Query failures never trigger an automatic refund for List 5; ambiguous orders
 require reconciliation with upstream. API credentials are required for live
 catalog-shape, delivery quantity and purchase acceptance verification.
 No credentials are committed. Restart the deployed bot after configuration.
+
+
+List-5 page inventory buttons update automatically when background results arrive,
+without requiring a second click. Each successful product response is published
+immediately instead of waiting for the slowest item in the page. Automatic updates
+stop after navigation to avoid overwriting a different view. Existing lists 1-4
+continue to use their original category/product keyboard renderers.

@@ -37,6 +37,32 @@ class ChuhaiSupplierClient(SupplierClient):
             return "tk"
         return None
 
+    @classmethod
+    def account_category(cls, name):
+        text = str(name or "").casefold()
+        return bool(cls.platform(text)) and not re.search(
+            r"服务|刷粉|涨粉|刷量|流量|推广|引流|followers|traffic|views|likes|boost|marketing|services?|smm|engagement", text)
+
+    @classmethod
+    def account_product(cls, category, name):
+        if not cls.account_category(category):
+            return False
+        text = str(name or "").casefold()
+        # Prepaid account sales are accounts, whereas charging an existing account is a service.
+        text = re.sub(r"已充值(?:好)?|已开通|已订阅|非充值|带接码链接|接码链接|支持接码|可接码|自然流量|带流量|流量号|售后服务", "", text)
+        excluded = (r"刷粉|涨粉|买粉|刷量|粉丝服务|流量|播放量|浏览量|点赞量|转发量|评论量|"
+                    r"充值|代充|直充|续费|代开|代注册|接码|验证码|卡密|月卡|年卡|礼品卡|cdk|"
+                    r"中转|额度|服务|代运营|代养|软件|工具|教程|课程|解封|申诉|广告投放|引流|"
+                    r"公共主页|粉丝页|followers|traffic|views|likes|boost|top.?up|recharge|"
+                    r"api[ _-]?key|access[ _-]?token|activation[ _-]?code|gift[ _-]?card|services?|renewal|sms|credits")
+        if re.search(excluded, text):
+            return False
+        if re.search(r"github|suno|claude", text) and not cls.platform(name):
+            return False
+        if cls.platform(category) == "gmail" and re.search(r"教育|\bedu\b|\beud\b", text) and "gmail" not in text:
+            return False
+        return True
+
     CATALOG_TTL = 300
     INVENTORY_TTL = 120
 
@@ -57,7 +83,7 @@ class ChuhaiSupplierClient(SupplierClient):
             rows = data["rows"]
             if not isinstance(rows, list) or any(not isinstance(row, dict) or not row.get("productId") for row in rows):
                 return
-            rows = [row for row in rows if self.platform(row.get("categoryName"))]
+            rows = [row for row in rows if self.account_product(row.get("categoryName"), row.get("productName"))]
             self._catalog = {row["productId"]: row for row in rows}
         except (OSError, ValueError, TypeError, KeyError):
             pass
@@ -74,11 +100,11 @@ class ChuhaiSupplierClient(SupplierClient):
             pass  # A read-only disk must not prevent browsing or buying.
 
     def cached_products(self):
-        return list(getattr(self, "_catalog", {}).values())
+        return [row for row in getattr(self, "_catalog", {}).values() if self.account_product(row.get("categoryName"), row.get("productName"))]
 
     def cached_product(self, product_id):
         row = getattr(self, "_catalog", {}).get(str(product_id))
-        return dict(row) if row else None
+        return dict(row) if row and self.account_product(row.get("categoryName"), row.get("productName")) else None
 
     @property
     def configured(self):
@@ -87,6 +113,7 @@ class ChuhaiSupplierClient(SupplierClient):
     def _request(self, path, **params):
         if not self.configured:
             raise SupplierApiError("Account List 5: CHUHAI_APP_ID / CHUHAI_APP_KEY not configured")
+        request_timeout = params.pop("_request_timeout", self.settings.chuhai_api_timeout_seconds)
         data = {"app_id": self.settings.chuhai_app_id, **params}
         data = {key: value for key, value in sorted(data.items()) if value != ""}
         # Match PHP md5(urldecode(http_build_query(params) . '&key=' . key)).
@@ -95,7 +122,7 @@ class ChuhaiSupplierClient(SupplierClient):
         try:
             response = self.session.post(
                 self.settings.chuhai_api_base_url + path, data=data,
-                timeout=self.settings.chuhai_api_timeout_seconds, allow_redirects=False,
+                timeout=request_timeout, allow_redirects=False,
             )
             response.raise_for_status()
             result = response.json()
@@ -144,7 +171,7 @@ class ChuhaiSupplierClient(SupplierClient):
         categories = self._request("/shared/commodity/categories")
         if not isinstance(categories, list):
             raise SupplierApiError("Invalid Shared API category array")
-        selected = [category for category in categories if self.platform(category.get("name"))]
+        selected = [category for category in categories if self.account_category(category.get("name"))]
         def fetch_category(category):
             payload = self._request("/shared/commodity/categoryItems", category_id=category["id"])
             if not isinstance(payload, dict) or not isinstance(payload.get("items"), list):
@@ -155,6 +182,8 @@ class ChuhaiSupplierClient(SupplierClient):
         rows = []
         for category in data:
             for item in category.get("children") or []:
+                if not self.account_product(category.get("name"), item.get("name")):
+                    continue
                 code = str(item.get("code") or item.get("shared_code") or "")
                 reason = ""
                 try:
@@ -217,10 +246,14 @@ class ChuhaiSupplierClient(SupplierClient):
             if cached and time.monotonic() - cached[0] < self.INVENTORY_TTL:
                 return cached[1]
             try:
-                data = self._request("/shared/commodity/inventory", sharedCode=row["shared_code"], race=row["race"])
+                data = self._request("/shared/commodity/inventory", sharedCode=row["shared_code"], race=row["race"], _request_timeout=8)
                 row["totalStock"] = max(0, int(data["count"]))
                 row["stockUnknown"] = False
                 cache[product_id] = (time.monotonic(), row)
+                with self._snapshot_lock:
+                    current = self._catalog.get(product_id)
+                    if current is not None:
+                        current.update(totalStock=row["totalStock"], stockUnknown=False)
             except (SupplierApiError, TypeError, ValueError, KeyError):
                 row["stockUnknown"] = True
             return row
@@ -250,6 +283,8 @@ class ChuhaiSupplierClient(SupplierClient):
             row = dict(cached)
             if row["productId"] != str(product_id):
                 continue
+            if not self.account_product(row.get("categoryName"), row.get("productName")):
+                raise SupplierApiError("该商品已隐藏")
             data = self._request("/shared/commodity/inventory", sharedCode=row["shared_code"], race=row["race"])
             if not isinstance(data, dict):
                 raise SupplierApiError("Invalid Shared API inventory")

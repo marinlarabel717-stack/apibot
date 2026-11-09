@@ -13,8 +13,13 @@ from test_account_lists import SETTINGS, make_context, make_update
 
 
 class SharedApiTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.settings = replace(SETTINGS, database_path=Path(temporary.name)/"test.sqlite")
+
     def client(self):
-        return ChuhaiSupplierClient(replace(SETTINGS, chuhai_app_id="123", chuhai_app_key="secret+key", chuhai_cny_per_usdt=0, chuhai_price_rate=0.14))
+        return ChuhaiSupplierClient(replace(self.settings, chuhai_app_id="123", chuhai_app_key="secret+key", chuhai_cny_per_usdt=0, chuhai_price_rate=0.14))
 
     def test_signature_and_parameter_case(self):
         client = self.client()
@@ -29,9 +34,9 @@ class SharedApiTests(unittest.TestCase):
 
     def test_catalog_specs_cost_inventory_and_callback_id(self):
         client = self.client()
-        catalog = [{"name": "Accounts", "children": [{"code": "long:code", "name": "Account", "delivery_way": 0, "config": {"category_factory": {"US:a": "10"}}}]}]
+        catalog = [{"id": 1, "name": "Facebook", "children": [{"code": "long:code", "name": "Account", "delivery_way": 0, "config": {"category_factory": {"US:a": "10"}}}]}]
         inventory = {"count": 3, "delivery_way": 0, "draft_status": 0, "config": {"category_factory": {"US:a": "12"}}}
-        with patch.object(client, "_request", side_effect=[catalog, inventory]):
+        with patch.object(client, "_request", side_effect=[catalog, {"items": catalog[0]["children"]}, inventory]):
             row = client.get_product_detail(hashlib.sha256(b"long:code\0US:a").hexdigest()[:20])["data"]
         self.assertEqual(row["totalStock"], 3)
         self.assertAlmostEqual(row["price"], 1.68)
@@ -39,7 +44,7 @@ class SharedApiTests(unittest.TestCase):
 
     def test_ini_specs_and_full_catalog_without_inventory_fanout(self):
         client = self.client()
-        data = [{"name": "All", "children": [
+        data = [{"id": 1, "name": "Facebook", "children": [
             {"code": "spec", "name": "Variants", "delivery_way": 0, "factory_price": 2,
              "config": "[category_factory]\nUS=14\nuk=21\n"},
             {"code": "manual", "name": "Manual", "delivery_way": 1, "factory_price": 3},
@@ -47,9 +52,9 @@ class SharedApiTests(unittest.TestCase):
              "widget": '[{"name":"url"}]'},
             {"code": "draft", "name": "Preselected", "delivery_way": 0, "factory_price": 5, "draft_status": 1},
         ]}]
-        with patch.object(client, "_request", return_value=data) as request:
+        with patch.object(client, "_request", side_effect=[data, {"items": data[0]["children"]}]) as request:
             rows = client.get_products()["data"]
-        request.assert_called_once_with("/shared/commodity/items")
+        self.assertEqual([call.args[0] for call in request.call_args_list], ["/shared/commodity/categories", "/shared/commodity/categoryItems"])
         self.assertEqual(len(rows), 5)
         self.assertEqual({row["race"] for row in rows if row["shared_code"] == "spec"}, {"US", "uk"})
         self.assertEqual({row["shared_code"] for row in rows}, {"spec", "manual", "widget", "draft"})
@@ -114,12 +119,12 @@ class SharedApiTests(unittest.TestCase):
             self.assertEqual(client.query_order("ch5-" + "a" * 32 + "-1")["data"]["status"], "processing")
 
     def test_category_indices_and_stock(self):
-        groups = bot.group_chuhai_products([{"categoryName": "A", "totalStock": 3}, {"categoryName": "B", "totalStock": 5}], "en")
+        groups = bot.group_chuhai_products([{"productId": "a", "categoryName": "Facebook", "totalStock": 3}, {"productId": "b", "categoryName": "Instagram", "totalStock": 5}], "en")
         keyboard = bot.chuhai_keyboard(bot.build_rz_category_keyboard_localized(groups, 0, "en"), "en")
         callbacks = [button.callback_data for row in keyboard.inline_keyboard for button in row]
         self.assertIn("cat5:0:0", callbacks)
         self.assertIn("cat5:1:0", callbacks)
-        self.assertEqual(groups[1]["stock_total"], 5)
+        self.assertEqual(groups[1]["product_count"], 1)
 
     def test_source_and_keyboard_isolation(self):
         self.assertEqual(bot.normalize_order_source("chuhai"), "chuhai")

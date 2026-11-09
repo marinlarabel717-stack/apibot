@@ -6037,9 +6037,15 @@ async def fetch_chuhai_products(context: ContextTypes.DEFAULT_TYPE, *, refresh: 
     if not supplier.configured:
         return []
     cache_key = (id(supplier), "")
-    cached = RZ_PRODUCTS_CACHE.get(cache_key)
-    if not refresh and cached and time.monotonic() - cached[0] < 60:
-        return cached[1]
+    if not refresh:
+        cached = RZ_PRODUCTS_CACHE.get(cache_key)
+        if cached is None:
+            disk_rows = supplier.cached_products()
+            if disk_rows:
+                RZ_PRODUCTS_CACHE[cache_key] = (0, disk_rows)
+                cached = RZ_PRODUCTS_CACHE[cache_key]
+        ensure_search_catalog_refresh(context, CHUHAI_SOURCE)
+        return cached[1] if cached is not None else []
     payload = await call_blocking(supplier.get_products)
     rows = payload.get("data") or []
     RZ_PRODUCTS_CACHE[cache_key] = (time.monotonic(), rows)
@@ -6047,14 +6053,15 @@ async def fetch_chuhai_products(context: ContextTypes.DEFAULT_TYPE, *, refresh: 
 
 
 def group_chuhai_products(rows: list[dict[str, Any]], lang: str) -> list[dict[str, Any]]:
-    grouped: dict[str, list[dict[str, Any]]] = {}
-    for row in rows:
-        grouped.setdefault(str(row.get("categoryName") or "Other"), []).append(row)
-    return [
-        {"key": name, "name": name, "index": index, "rows": products,
-         "product_count": len(products), "stock_unknown": any(row.get("stockUnknown") for row in products), "stock_total": sum(safe_int(row.get("totalStock")) for row in products)}
-        for index, (name, products) in enumerate(grouped.items())
-    ]
+    groups = []
+    for platform, title in ChuhaiSupplierClient.PLATFORM_NAMES.items():
+        products = [row for row in rows if ChuhaiSupplierClient.platform(row.get("categoryName")) == platform]
+        if not products:
+            continue
+        products.sort(key=lambda row: (str(row.get("categoryName", "")), str(row.get("productName", "")), str(row["productId"])))
+        groups.append({"key": platform, "name": title, "index": len(groups), "rows": products,
+                       "product_count": len(products), "stock_unknown": True, "stock_total": 0})
+    return groups
 
 
 def chuhai_keyboard(keyboard: InlineKeyboardMarkup, lang: str) -> InlineKeyboardMarkup:
@@ -6075,15 +6082,47 @@ def chuhai_keyboard(keyboard: InlineKeyboardMarkup, lang: str) -> InlineKeyboard
 
 
 async def refresh_chuhai_visible_inventory(context, rows):
-    supplier = get_chuhai_supplier(context)
-    try:
-        updated = await call_blocking(supplier.refresh_inventory, [str(row["productId"]) for row in rows])
-    except SupplierApiError:
+    """Schedule merged inventory I/O; never await upstream on the render path."""
+    if not rows:
         return
-    mapping = {row["productId"]: row for row in updated}
+    supplier = get_chuhai_supplier(context)
+    state = context.application.bot_data
+    pending = state.setdefault("chuhai_stock_pending", {})
+    checked = state.setdefault("chuhai_stock_checked", {})
+    now = time.monotonic()
     for row in rows:
-        if row["productId"] in mapping:
-            row.update(mapping[row["productId"]])
+        product_id = str(row["productId"])
+        cached = supplier.cached_product(product_id)
+        if cached and not cached.get("stockUnknown", True):
+            row.update(totalStock=cached["totalStock"], stockUnknown=False)
+        if now - checked.get(product_id, float("-inf")) >= supplier.INVENTORY_TTL:
+            pending.setdefault(product_id, row)
+    running = state.get("chuhai_stock_task")
+    if running is not None and not running.done():
+        return
+    if not pending:
+        return
+
+    async def refresh_stock():
+        try:
+            while pending:
+                ids = list(pending)[:30]
+                targets = {key: pending.pop(key) for key in ids}
+                # Mark in-flight entries now so repeated page clicks cannot requeue them.
+                checked.update({key: time.monotonic() for key in ids})
+                try:
+                    updated = await call_blocking(supplier.refresh_inventory, ids)
+                    mapping = {row["productId"]: row for row in updated}
+                    for key, row in targets.items():
+                        current = mapping.get(key)
+                        if current and not current.get("stockUnknown", True):
+                            row.update(totalStock=current["totalStock"], stockUnknown=False)
+                except Exception:
+                    logger.warning("List 5 inventory refresh failed; retaining cached stock")
+        finally:
+            state.pop("chuhai_stock_task", None)
+
+    state["chuhai_stock_task"] = asyncio.create_task(refresh_stock(), name="chuhai-stock-refresh")
 
 
 async def show_chuhai_catalog(
@@ -6108,7 +6147,7 @@ async def show_chuhai_catalog(
         return
     groups = group_chuhai_products(rows, lang)
     if not groups:
-        await reply_inline(update, ui_text("no_products_in_account_list_5", lang))
+        await reply_inline(update, ("商品缓存正在后台加载，请稍后点击刷新。" if lang == "zh" else "Catalog cache is loading in the background. Refresh shortly."), InlineKeyboardMarkup([[InlineKeyboardButton("刷新 / Refresh", callback_data="cats5:0")]]))
         return
     if category_index is None or not 0 <= category_index < len(groups):
         keyboard = build_rz_category_keyboard_localized(groups, page, lang)
@@ -6152,11 +6191,17 @@ async def on_chuhai_callback(update: Update, context: ContextTypes.DEFAULT_TYPE,
             return
         clear_pending_purchase(context)
         try:
-            row = (await call_blocking(get_chuhai_supplier(context).get_product_detail, product_id))["data"]
+            row = get_chuhai_supplier(context).cached_product(product_id)
+            if row is None:
+                raise SupplierApiError("商品缓存正在加载，请稍后刷新")
+            await refresh_chuhai_visible_inventory(context, [row])
         except SupplierApiError as exc:
             await reply_inline(update, ui_text("fetch_product_detail_failed", lang, error=exc))
             return
         text, entities, keyboard = render_rz_product_detail_view_localized(settings, row, category_index, page, lang)
+        if row.get("stockUnknown"):
+            text = f"{row['productName']}\n价格：{resolve_sell_price(settings, row):.2f} USDT\n库存正在后台更新，请稍后刷新。"
+            entities = None
         if row.get("priceUnknown"):
             text = f"{row['productName']}\n库存：{row['totalStock']}\n价格待确认"
             entities = None
@@ -6458,7 +6503,7 @@ def ensure_search_catalog_refresh(context: ContextTypes.DEFAULT_TYPE, source: st
     cached = cache.get(key)
     now = time.monotonic()
     incomplete = source == LEGACY_SOURCE and key in CATALOG_SEARCH_INCOMPLETE
-    if cached is not None and not incomplete and now - cached[0] < CATALOG_REFRESH_SECONDS:
+    if cached is not None and not incomplete and now - cached[0] < (ChuhaiSupplierClient.CATALOG_TTL if source == CHUHAI_SOURCE else CATALOG_REFRESH_SECONDS):
         return None
     failures = state.setdefault("search_catalog_failures", {})
     if source in failures and now - failures[source] < CATALOG_RETRY_SECONDS:
@@ -6545,6 +6590,10 @@ async def warm_daxi_catalog(context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def warm_rz_catalog(context: ContextTypes.DEFAULT_TYPE) -> None:
     await warm_catalog_source(context, RZ_SOURCE)
+
+
+async def warm_chuhai_catalog(context: ContextTypes.DEFAULT_TYPE) -> None:
+    await warm_catalog_source(context, CHUHAI_SOURCE)
 
 
 async def warm_tgstorex_catalog(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -10808,6 +10857,9 @@ def build_application(settings: Settings) -> Application:
     application.bot_data["supplier_daxi"] = supplier_daxi
     application.bot_data["supplier_rz"] = supplier_rz
     application.bot_data["supplier_chuhai"] = supplier_chuhai
+    cached_chuhai_rows = supplier_chuhai.cached_products()
+    if cached_chuhai_rows:
+        RZ_PRODUCTS_CACHE[(id(supplier_chuhai), "")] = (0, cached_chuhai_rows)
     application.bot_data["supplier_tgstorex"] = supplier_tgstorex
     application.bot_data["runtime_config"] = store.get_runtime_settings()
     apply_runtime_sell_price_settings(settings, application.bot_data["runtime_config"])
@@ -10869,6 +10921,7 @@ def build_application(settings: Settings) -> Application:
             first=CATALOG_REFRESH_SECONDS + 4,
             name="warm_rz_catalog",
         )
+        application.job_queue.run_repeating(warm_chuhai_catalog, interval=ChuhaiSupplierClient.CATALOG_TTL, first=6, name="warm_chuhai_catalog")
         application.job_queue.run_once(warm_tgstorex_catalog, when=4, name="warm_tgstorex_catalog_initial")
         application.job_queue.run_repeating(
             warm_tgstorex_catalog,

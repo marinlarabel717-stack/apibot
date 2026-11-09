@@ -6,6 +6,7 @@ import json
 import math
 import re
 import time
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from urllib.parse import urlencode, unquote_plus
@@ -16,6 +17,68 @@ from supplier_client import SupplierApiError, SupplierClient
 
 class ChuhaiSupplierClient(SupplierClient):
     """Shared API adapter. Local order IDs retain request_no + quantity for recovery."""
+
+    PLATFORM_NAMES = {"fb": "FB · Facebook", "ig": "IG · Instagram", "gmail": "Gmail", "gpt": "GPT · ChatGPT", "tk": "TK · TikTok"}
+
+    @classmethod
+    def platform(cls, name):
+        name = str(name or "").casefold()
+        if "threads" in name:
+            return None
+        if "facebook" in name or "脸书" in name or re.search(r"\bfb\b", name):
+            return "fb"
+        if "instagram" in name or re.search(r"\b(ig|ins)\b", name):
+            return "ig"
+        if "gmail" in name:
+            return "gmail"
+        if "chatgpt" in name or "openai" in name or re.search(r"\bgpt\b", name):
+            return "gpt"
+        if "tiktok" in name or re.match(r"^tk(?:\b|[^a-z])", name):
+            return "tk"
+        return None
+
+    CATALOG_TTL = 300
+    INVENTORY_TTL = 120
+
+    def __post_init__(self):
+        super().__post_init__()
+        self._snapshot_lock = threading.RLock()
+        self._inventory_cache = {}
+        self._load_snapshot()
+
+    def _snapshot_path(self):
+        identity = f"platform-cache-v2|{self.settings.chuhai_api_base_url}|{self.settings.chuhai_app_id}|{self.settings.chuhai_app_key}|{getattr(self.settings, 'chuhai_cny_per_usdt', 0)}|{self.settings.chuhai_price_rate}"
+        key = hashlib.sha256(identity.encode()).hexdigest()[:20]
+        return self.settings.database_path.parent / ("chuhai-cache-" + key + ".json")
+
+    def _load_snapshot(self):
+        try:
+            data = json.loads(self._snapshot_path().read_text(encoding="utf-8"))
+            rows = data["rows"]
+            if not isinstance(rows, list) or any(not isinstance(row, dict) or not row.get("productId") for row in rows):
+                return
+            rows = [row for row in rows if self.platform(row.get("categoryName"))]
+            self._catalog = {row["productId"]: row for row in rows}
+        except (OSError, ValueError, TypeError, KeyError):
+            pass
+
+    def _save_snapshot(self):
+        try:
+            with self._snapshot_lock:
+                target = self._snapshot_path()
+                target.parent.mkdir(parents=True, exist_ok=True)
+                temp = target.with_suffix(".tmp")
+                temp.write_text(json.dumps({"rows": list(self._catalog.values())}, ensure_ascii=False), encoding="utf-8")
+                temp.replace(target)
+        except OSError:
+            pass  # A read-only disk must not prevent browsing or buying.
+
+    def cached_products(self):
+        return list(getattr(self, "_catalog", {}).values())
+
+    def cached_product(self, product_id):
+        row = getattr(self, "_catalog", {}).get(str(product_id))
+        return dict(row) if row else None
 
     @property
     def configured(self):
@@ -78,9 +141,17 @@ class ChuhaiSupplierClient(SupplierClient):
 
     def _get_products(self, query=""):
         rate = self._rate()
-        data = self._request("/shared/commodity/items")
-        if not isinstance(data, list):
+        categories = self._request("/shared/commodity/categories")
+        if not isinstance(categories, list):
             raise SupplierApiError("Invalid Shared API category array")
+        selected = [category for category in categories if self.platform(category.get("name"))]
+        def fetch_category(category):
+            payload = self._request("/shared/commodity/categoryItems", category_id=category["id"])
+            if not isinstance(payload, dict) or not isinstance(payload.get("items"), list):
+                raise SupplierApiError("Invalid Shared API category products")
+            return {**category, "children": payload["items"]}
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            data = list(executor.map(fetch_category, selected))
         rows = []
         for category in data:
             for item in category.get("children") or []:
@@ -119,12 +190,20 @@ class ChuhaiSupplierClient(SupplierClient):
                     identity = code or "item-" + str(item.get("id"))
                     product_id = hashlib.sha256((identity + "\0" + str(race)).encode()).hexdigest()[:20]
                     rows.append({"productId": product_id, "productName": str(item.get("name") or identity) + (" / " + str(race) if race else ""),
-                                 "categoryName": category.get("name", ""), "section": category.get("name", ""),
+                                 "categoryName": category.get("name", ""), "section": category.get("name", ""), "platform": self.platform(category.get("name")),
                                  "kind": "other", "price": cost * rate, "totalStock": 0,
                                  "source": "chuhai", "stockUnknown": True, "purchaseBlocked": blocked,
                                  "priceUnknown": not bool(cost), "minimum": item.get("minimum"), "maximum": item.get("maximum"),
                                  "shared_code": code, "race": str(race)})
-        self._catalog = {row["productId"]: row for row in rows}
+        with self._snapshot_lock:
+            previous = getattr(self, "_catalog", {})
+            for row in rows:
+                old = previous.get(row["productId"], {})
+                if not old.get("stockUnknown", True):
+                    row["totalStock"] = old["totalStock"]
+                    row["stockUnknown"] = False
+            self._catalog = {row["productId"]: row for row in rows}
+            self._save_snapshot()
         return {"success": True, "data": rows}
 
     def refresh_inventory(self, product_ids):
@@ -135,7 +214,7 @@ class ChuhaiSupplierClient(SupplierClient):
         def fetch(product_id):
             row = dict(self._catalog[product_id])
             cached = cache.get(product_id)
-            if cached and time.monotonic() - cached[0] < 30:
+            if cached and time.monotonic() - cached[0] < self.INVENTORY_TTL:
                 return cached[1]
             try:
                 data = self._request("/shared/commodity/inventory", sharedCode=row["shared_code"], race=row["race"])
@@ -147,7 +226,14 @@ class ChuhaiSupplierClient(SupplierClient):
             return row
         ids = list(dict.fromkeys(product_ids))[:30]
         with ThreadPoolExecutor(max_workers=6) as executor:
-            return list(executor.map(fetch, ids))
+            updated = list(executor.map(fetch, ids))
+        with self._snapshot_lock:
+            for row in updated:
+                current = self._catalog.get(row["productId"])
+                if current is not None and not row.get("stockUnknown", True):
+                    current.update(totalStock=row["totalStock"], stockUnknown=False)
+            self._save_snapshot()
+        return updated
 
     def get_product_detail(self, product_id):
         try:

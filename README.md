@@ -298,14 +298,23 @@ USDT before displaying them, not merely relabeled.
 
 List 5 uses independent `chuhai` order sources and `cats5/cat5/prd5/qbuy5/cbuy5`
 callbacks. Main/profile menus and keyword search include it. Categories retain upstream names.
-All API products remain visible, including INI/JSON-priced specifications.
+List 5 only fetches FB/Facebook, IG/Instagram, Gmail, GPT/ChatGPT and TK/TikTok
+category products, including their INI/JSON specifications. Other platform products
+(including Threads) are neither fetched nor displayed. The five platform groups are
+shown in that fixed order, with products sorted by subcategory and title.
 Products requiring unsupported widget input, preselection, manual/plugin fulfillment
 or unconfirmed costs are marked unavailable for automatic purchase rather than hidden.
 Category summaries show product/variant counts, not fictitious aggregate inventory.
-Visible product pages and list-5 search candidates load actual inventory with bounded
-concurrency (six workers, at most thirty products, thirty-second cache). Failures
-remain unknown, never fabricated zero. Detail and purchase still check live stock.
-The full catalog uses a 60-second request timeout and background cache warmup.
+Browsing, pagination, search and product detail use memory/disk snapshots immediately,
+without waiting on upstream. Catalogs refresh in the background every five minutes
+through `/categories` and only whitelisted `/categoryItems`, never `/items`. Repeated
+clicks share one refresh. Visible inventory refreshes in a deduplicated background
+queue (six workers, at most thirty products per job, two-minute cache). API failures
+retain the previous snapshot. The latest inventory snapshot is saved with the catalog,
+scoped by upstream account and exchange-rate settings, and loaded at restart. On the
+first ever cold start, the menu shows a loading/refresh notice rather than blocking.
+Quantity confirmation and purchase still check the selected product live; the retail
+quote is revalidated before debit. Caching does not apply to purchase or order writes.
 
 Purchases use `request_no`; local IDs retain that request ID and quantity, so
 transport timeouts can be reconciled via `query2` after a restart without buying twice.

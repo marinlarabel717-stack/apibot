@@ -14,7 +14,7 @@ from test_account_lists import SETTINGS, make_context, make_update
 
 class SharedApiTests(unittest.TestCase):
     def client(self):
-        return ChuhaiSupplierClient(replace(SETTINGS, chuhai_app_id="123", chuhai_app_key="secret+key", chuhai_price_rate=0.14))
+        return ChuhaiSupplierClient(replace(SETTINGS, chuhai_app_id="123", chuhai_app_key="secret+key", chuhai_cny_per_usdt=0, chuhai_price_rate=0.14))
 
     def test_signature_and_parameter_case(self):
         client = self.client()
@@ -69,19 +69,19 @@ class SharedApiTests(unittest.TestCase):
         self.assertTrue(row["stockUnknown"])
 
     def test_rmb_cost_is_divided_before_markup(self):
-        settings = replace(SETTINGS, chuhai_cny_per_usdt=7, chuhai_price_rate=0, sell_price_mode="fixed_add", sell_price_value=0.5)
+        settings = replace(SETTINGS, chuhai_cny_per_usdt=8, chuhai_price_rate=0, sell_price_mode="fixed_add", sell_price_value=0.5)
         client = ChuhaiSupplierClient(settings)
-        self.assertAlmostEqual(14 * client._rate(), 2)
-        self.assertAlmostEqual(bot.resolve_sell_price(settings, {"price": 14 * client._rate()}), 2.5)
-        with patch.object(client, "_request", return_value={"balance": 70}):
+        self.assertAlmostEqual(16 * client._rate(), 2)
+        self.assertAlmostEqual(bot.resolve_sell_price(settings, {"price": 16 * client._rate()}), 2.5)
+        with patch.object(client, "_request", return_value={"balance": 80}):
             data = client.query_balance()["data"]
         self.assertAlmostEqual(data["accountBalance"], 10)
         self.assertEqual(data["currency"], "USDT")
-        self.assertEqual(data["sourceBalance"], 70)
+        self.assertEqual(data["sourceBalance"], 80)
         self.assertEqual(data["sourceCurrency"], "CNY")
 
     def test_invalid_currency_rate_blocks_sale(self):
-        client = ChuhaiSupplierClient(replace(SETTINGS, chuhai_price_rate=0))
+        client = ChuhaiSupplierClient(replace(SETTINGS, chuhai_cny_per_usdt=0, chuhai_price_rate=0))
         with self.assertRaises(SupplierApiError):
             client.get_products()
 

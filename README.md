@@ -290,8 +290,8 @@ Token 需要 `prices:read`、`orders:write`、`orders:read` 权限，密钥不�
 Configure `CHUHAI_API_BASE_URL`, `CHUHAI_APP_ID`, `CHUHAI_APP_KEY` in `.env`.
 Upstream prices are CNY; the local wallet and displayed retail prices are USDT.
 Set `CHUHAI_CNY_PER_USDT` to the agreed CNY per 1 USDT. Cost is divided by that
-rate, then the existing retail markup is applied. The default zero rate blocks
-sale until configured. The optional legacy `CHUHAI_PRICE_RATE` multiplier is used
+rate, then the existing retail markup is applied. The user-confirmed default is **1 USDT = 8 CNY** (2026-11-09).
+Explicitly setting both conversion settings to zero blocks sale. The optional legacy `CHUHAI_PRICE_RATE` multiplier is used
 only when no positive divisor is configured. Upstream balances are converted to
 USDT before displaying them, not merely relabeled.
 

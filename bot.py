@@ -6054,6 +6054,10 @@ async def fetch_chuhai_products(context: ContextTypes.DEFAULT_TYPE, *, refresh: 
         ensure_search_catalog_refresh(context, CHUHAI_SOURCE)
         if cached is None:
             return []
+        for row in cached[1]:
+            snapshot = supplier.cached_product(row["productId"])
+            if snapshot and not snapshot.get("stockUnknown", True):
+                row.update(snapshot)
         filtered = [row for row in cached[1] if supplier.account_product(row.get("categoryName"), row.get("productName"))]
         if len(filtered) != len(cached[1]):
             RZ_PRODUCTS_CACHE[cache_key] = (cached[0], filtered)
@@ -6158,7 +6162,7 @@ def build_chuhai_category_keyboard_localized(
         group_index = safe_int(group.get("index"), 0)
         category_name = shorten(str(group.get("name") or "未分类"), 26)
         known_stock = max(0, safe_int(group.get("stock_total"), 0))
-        stock_total = ((f"至少 {known_stock}" if known_stock else "待查询")
+        stock_total = ((f"至少 {known_stock}" if known_stock else "暂无快照")
                        if group.get("stock_unknown") else known_stock)
         category_icon = str(group.get("icon") or "📦")
         buttons.append(
@@ -6198,7 +6202,7 @@ def build_chuhai_product_keyboard_localized(
         if not product_id:
             continue
         product_name = shorten(format_rz_product_title(row, lang), 28)
-        stock = "更新中" if row.get("stockUnknown") else safe_int(row.get("totalStock"))
+        stock = "暂无快照" if row.get("stockUnknown") else safe_int(row.get("totalStock"))
         price = resolve_sell_price(settings, row)
         buttons.append(
             [
@@ -6282,29 +6286,17 @@ async def show_chuhai_catalog(
         await reply_inline(update, ("商品缓存正在后台加载，请稍后点击刷新。" if lang == "zh" else "Catalog cache is loading in the background. Refresh shortly."), InlineKeyboardMarkup([[InlineKeyboardButton("刷新 / Refresh", callback_data="cats5:0")]]))
         return
     if category_index is None or not 0 <= category_index < len(groups):
-        # A bounded, fair sample per platform; do not fan out over the full catalog.
-        checked = context.application.bot_data.get("chuhai_stock_checked", {})
-        visible = []
-        for group in groups:
-            candidates = sorted(group["stock_rows"], key=lambda row: checked.get(str(row["productId"]), float("-inf")))
-            visible.extend(candidates[:6])
-        await refresh_chuhai_visible_inventory(context, visible)
-        groups = group_chuhai_products(rows, lang)
         keyboard = build_chuhai_category_keyboard_localized(groups, page, lang)
         converted = chuhai_keyboard(keyboard, lang)
         await reply_inline(update, ui_text("account_list_5_intro", lang), converted)
-        watch_chuhai_stock_page(update, context, settings, rows, visible, None, page, lang, converted)
         return
     group = groups[category_index]
     last_page = max(0, (len(group["rows"]) - 1) // PRODUCTS_PER_PAGE)
     page = max(0, min(page, last_page))
-    visible = group["rows"][page * PRODUCTS_PER_PAGE:(page + 1) * PRODUCTS_PER_PAGE]
-    await refresh_chuhai_visible_inventory(context, visible)
     text, entities = build_rz_products_group_intro_text_localized(group["name"], lang)
     keyboard = build_chuhai_product_keyboard_localized(settings, group["rows"], category_index, page, lang)
     converted = chuhai_keyboard(keyboard, lang)
     await reply_inline(update, text, converted, entities=entities)
-    watch_chuhai_stock_page(update, context, settings, group["rows"], visible, category_index, page, lang, converted)
 
 
 async def on_chuhai_callback(update: Update, context: ContextTypes.DEFAULT_TYPE, parts: list[str]) -> None:
@@ -6335,10 +6327,7 @@ async def on_chuhai_callback(update: Update, context: ContextTypes.DEFAULT_TYPE,
             return
         clear_pending_purchase(context)
         try:
-            row = get_chuhai_supplier(context).cached_product(product_id)
-            if row is None:
-                raise SupplierApiError("商品缓存正在加载，请稍后刷新")
-            await refresh_chuhai_visible_inventory(context, [row])
+            row = (await call_blocking(get_chuhai_supplier(context).get_product_detail, product_id))["data"]
         except SupplierApiError as exc:
             await reply_inline(update, ui_text("fetch_product_detail_failed", lang, error=exc))
             return
@@ -10483,8 +10472,6 @@ async def search_text_rich(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     rz_all_rows = catalogs.get(RZ_SOURCE, [])
     chuhai_all_rows = [row for row in catalogs.get(CHUHAI_SOURCE, []) if ChuhaiSupplierClient.account_product(row.get("categoryName"), row.get("productName"))]
     chuhai_rows = search_rz_products_locally([row for row in chuhai_all_rows if chuhai_in_stock(row)], keyword)
-    if chuhai_rows:
-        await refresh_chuhai_visible_inventory(context, chuhai_rows[:SEARCH_RESULTS_LIMIT])
     chuhai_index_map = {str(row["productId"]): index for index, group in enumerate(group_chuhai_products(chuhai_all_rows, lang)) for row in group["rows"]}
     tgstorex_all_rows = catalogs.get(TGSTOREX_SOURCE, [])
     loading_notice = ui_text(

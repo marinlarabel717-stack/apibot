@@ -316,11 +316,13 @@ shown numerically only after every included variant has known cached inventory.
 Browsing, pagination, search and product detail use memory/disk snapshots immediately,
 without waiting on upstream. Catalogs refresh in the background every five minutes
 through `/categories` and only whitelisted `/categoryItems`, never `/items`. Repeated
-clicks share one refresh. Visible inventory refreshes in a deduplicated background
-queue (six workers, at most thirty products per job, two-minute cache). API failures
-retain the previous snapshot. The latest inventory snapshot is saved with the catalog,
-scoped by upstream account and exchange-rate settings, and loaded at restart. On the
-first ever cold start, the menu shows a loading/refresh notice rather than blocking.
+clicks share one catalog refresh. Browsing categories, product pages, pagination,
+and search never trigger inventory requests or stock watchers. Inventory snapshots
+are kept on disk without an inventory expiry; unknown inventory says no snapshot,
+not an active update. Purchase detail and entered-quantity confirmation fetch the
+selected product live and persist the new stock/price for future browsing. The
+existing final purchase validation remains enabled. Catalog refreshes retain old
+inventory snapshots rather than querying every item.
 Quantity confirmation and purchase still check the selected product live; the retail
 quote is revalidated before debit. Caching does not apply to purchase or order writes.
 
@@ -333,13 +335,6 @@ Query failures never trigger an automatic refund for List 5; ambiguous orders
 require reconciliation with upstream. API credentials are required for live
 catalog-shape, delivery quantity and purchase acceptance verification.
 No credentials are committed. Restart the deployed bot after configuration.
-
-
-List-5 page inventory buttons update automatically when background results arrive,
-without requiring a second click. Each successful product response is published
-immediately instead of waiting for the slowest item in the page. Automatic updates
-stop after navigation to avoid overwriting a different view. Existing lists 1-4
-continue to use their original category/product keyboard renderers.
 
 
 List-5 order recovery (2026-11-09): preserve `upstreamTradeNo` and immediate
@@ -361,9 +356,7 @@ List-5 stock visibility: confirmed-zero items are omitted from product pages and
 search, and confirmed-empty platform buttons are hidden. Their catalog/cache
 records remain available for restock checks. Unknown/failed stock is not zero.
 Partial category aggregates show a labeled lower bound (at least N), while entirely
-unknown categories say pending query, not an indefinitely running update. Opening
-the category page schedules at most six inventory checks per allowed platform
-(thirty total), including hidden zero-stock entries for restock detection, ordered
-by least-recently checked. It never waits for these calls or scans the full catalog.
-The current category keyboard updates as results arrive; product/category callback
-indices do not shift just because a platform is hidden. Lists 1-4 are unchanged.
+unknown categories say no snapshot. No background stock sampling, page-triggered
+stock refresh, or continuous stock polling is scheduled. Known-zero catalog records
+remain on disk; automatic restock discovery is not provided by snapshot-only mode.
+An explicit purchase-detail request still rechecks live stock. Lists 1-4 are unchanged.

@@ -120,6 +120,27 @@ class CacheTests(unittest.IsolatedAsyncioTestCase):
 class AccountsOnlyTests(unittest.IsolatedAsyncioTestCase):
     setUp = CacheTests.setUp
     asyncTearDown = CacheTests.asyncTearDown
+    async def test_browsing_all_pages_never_schedules_stock_queries(self):
+        update = SimpleNamespace(effective_user=SimpleNamespace(id=1), callback_query=None)
+        rows = [dict(self.row, productId=str(index)) for index in range(60)]
+        with patch.object(bot, 'ensure_user_with_lang', AsyncMock(return_value='zh')), patch.object(bot, 'answer_callback_query_safely', AsyncMock()), patch.object(bot, 'fetch_chuhai_products', AsyncMock(return_value=rows)), patch.object(bot, 'reply_inline', AsyncMock()), patch.object(bot, 'effective_account_list_enabled', return_value=True), patch.object(bot, 'refresh_chuhai_visible_inventory', AsyncMock(side_effect=AssertionError('Browsing must not query stock'))) as refresh, patch.object(bot, 'watch_chuhai_stock_page', side_effect=AssertionError('No stock watcher')):
+            await bot.show_chuhai_catalog(update, self.context)
+            await bot.show_chuhai_catalog(update, self.context, 0, 0)
+            await bot.show_chuhai_catalog(update, self.context, 0, 1)
+        refresh.assert_not_awaited()
+
+    async def test_live_purchase_stock_persists_and_updates_browsing_snapshot(self):
+        bot.RZ_PRODUCTS_CACHE[self.slot] = (time.monotonic(), [self.row])
+        with patch.object(self.client, '_request', return_value={'count':0, 'factory_price':8, 'delivery_way':0}):
+            result = self.client.get_product_detail('test')['data']
+        self.assertEqual(result['totalStock'], 0)
+        restored = ChuhaiSupplierClient(self.settings)
+        self.assertEqual(restored.cached_product('test')['totalStock'], 0)
+        with patch.object(bot, 'ensure_search_catalog_refresh'), patch.object(self.client, '_request', side_effect=AssertionError('must retain snapshot')):
+            rows = await bot.fetch_chuhai_products(self.context)
+        self.assertEqual(rows[0]['totalStock'], 0)
+        self.assertEqual(bot.group_chuhai_products(rows,'zh')[0]['rows'], [])
+
     def test_zero_stock_hidden_but_unknown_retained_and_callbacks_stable(self):
         rows = [dict(self.row, productId='fbzero', totalStock=0),
                 dict(self.row, productId='igstock', categoryName='Instagram', totalStock=73),

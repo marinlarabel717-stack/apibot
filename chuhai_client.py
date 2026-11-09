@@ -290,7 +290,7 @@ class ChuhaiSupplierClient(SupplierClient):
                 raise SupplierApiError("Invalid Shared API inventory")
             if str(data.get("delivery_way", "")) != "0" or data.get("draft_status") in (1, "1"):
                 row["purchaseBlocked"] = row.get("purchaseBlocked") or "该商品暂不支持自动下单"
-            row["totalStock"] = max(0, int(data.get("count") or 0))
+            row["totalStock"] = max(0, int(data["count"]))
             row["stockUnknown"] = False
             config = self.parse_config(data.get("config"))
             price = (config.get("category_factory") or {}).get(row["race"]) if row["race"] else data.get("factory_price")
@@ -303,6 +303,9 @@ class ChuhaiSupplierClient(SupplierClient):
                 row["purchaseBlocked"] = "该商品成本价待确认，暂不可购买"
             row["priceUnknown"] = not bool(cost)
             row["price"] = cost * self._rate()
+            with self._snapshot_lock:
+                self._catalog[row["productId"]].update(row)
+                self._save_snapshot()
             return {"success": True, "data": row}
         raise SupplierApiError("Shared API product unavailable")
 

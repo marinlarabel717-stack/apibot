@@ -10617,7 +10617,7 @@ async def show_admin_supplier_balances(update: Update, context: ContextTypes.DEF
     notes = (("列表①", "旧接口"), ("列表②", "DAXI"),
              ("列表③", "RZ / DariMarket"), ("列表④", "Tgstorex · 会话包"))
     if settings.chuhai_app_id and settings.chuhai_app_key:
-        notes += (("列表⑤", "Shared API (upstream currency)"),)
+        notes += (("列表⑤", "Shared API (USDT)"),)
 
     async def query_one(name: str, note: str) -> str:
         lines = [f"账号{name}", f"备注：{note}"]
@@ -10650,7 +10650,7 @@ async def show_admin_supplier_balances(update: Update, context: ContextTypes.DEF
             amount = Decimal(str(value))
             if isinstance(value, bool) or not amount.is_finite():
                 raise ValueError("Invalid balance amount")
-            unit = "upstream currency" if name == "列表⑤" else ("USD" if name == "列表④" else "U")
+            unit = "USDT"
             lines.append(f"可用余额：{format_money(amount)} {unit}")
             user_id, user_name = data.get("userId"), data.get("userName")
             if user_id is not None and str(user_id).strip():

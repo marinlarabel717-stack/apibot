@@ -288,9 +288,9 @@ Token 需要 `prices:read`、`orders:write`、`orders:read` 权限，密钥不�
 ## Account List 5 - Shared API
 
 Configure `CHUHAI_API_BASE_URL`, `CHUHAI_APP_ID`, `CHUHAI_APP_KEY` in `.env`.
-Set `CHUHAI_PRICE_RATE` to local wallet units per upstream currency unit after
-confirming the upstream currency. Default `0` blocks sale; use `1` only for matching currencies.
-Existing retail markups apply to the converted cost.
+Upstream costs and the local wallet use USDT (confirmed 2026-11-09).
+`CHUHAI_PRICE_RATE=1` is the default: costs are read 1:1 with no exchange conversion.
+Existing retail markup rules still apply; matching currencies does not remove the markup.
 
 List 5 uses independent `chuhai` order sources and `cats5/cat5/prd5/qbuy5/cbuy5`
 callbacks. Main/profile menus and keyword search include it. Categories retain upstream names.
@@ -306,5 +306,5 @@ The upstream status enumeration is undocumented: an order completes only when
 (including any download links, not automatically downloaded account archives).
 Query failures never trigger an automatic refund for List 5; ambiguous orders
 require reconciliation with upstream. API credentials are required for live
-catalog-shape, currency, delivery quantity and purchase acceptance verification.
+catalog-shape, delivery quantity and purchase acceptance verification.
 No credentials are committed. Restart the deployed bot after configuration.

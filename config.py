@@ -140,7 +140,7 @@ class Settings:
     chuhai_api_base_url: str = "https://chuhaitg.com"
     chuhai_app_id: str = ""
     chuhai_app_key: str = ""
-    chuhai_price_rate: float = 0.0
+    chuhai_price_rate: float = 1.0
     chuhai_api_timeout_seconds: int = 60
     tgstorex_api_base_url: str = "https://tgstorex.com/api/v1"
     tgstorex_api_key: str = ""
@@ -229,7 +229,7 @@ def load_settings() -> Settings:
         chuhai_api_base_url=os.getenv("CHUHAI_API_BASE_URL", "https://chuhaitg.com").strip().rstrip("/"),
         chuhai_app_id=os.getenv("CHUHAI_APP_ID", "").strip(),
         chuhai_app_key=os.getenv("CHUHAI_APP_KEY", "").strip(),
-        chuhai_price_rate=_parse_float(os.getenv("CHUHAI_PRICE_RATE", "0"), "CHUHAI_PRICE_RATE", 0.0),
+        chuhai_price_rate=_parse_float(os.getenv("CHUHAI_PRICE_RATE", "1"), "CHUHAI_PRICE_RATE", 1.0),
         chuhai_api_timeout_seconds=max(5, int(os.getenv("CHUHAI_API_TIMEOUT_SECONDS", "60"))),
         tgstorex_api_base_url=os.getenv("TGSTOREX_API_BASE_URL", "https://tgstorex.com/api/v1").strip().rstrip("/"),
         tgstorex_api_key=os.getenv("TGSTOREX_API_KEY", "").strip(),

@@ -41,7 +41,7 @@ class ChuhaiSupplierClient(SupplierClient):
 
     def query_balance(self):
         data = self._request("/shared/authentication/connect")
-        return {"success": True, "data": {"accountBalance": data["balance"], "currency": "upstream", "userName": data.get("shopName", "")}}
+        return {"success": True, "data": {"accountBalance": data["balance"], "currency": "USDT", "userName": data.get("shopName", "")}}
 
     def _rate(self):
         value = self.settings.chuhai_price_rate

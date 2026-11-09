@@ -62,7 +62,7 @@ class SupplierBalanceTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("账号列表" + number, text)
             self.assertIn("备注：" + note, text)
         self.assertIn("0.00 U", text)
-        self.assertIn("3.00 USD", text)
+        self.assertIn("3.00 USDT", text)
         self.assertIn("上游账号：upstream-user", text)
         self.assertEqual(reply.await_count, 2)
 

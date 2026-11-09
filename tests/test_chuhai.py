@@ -37,8 +37,8 @@ class SharedApiTests(unittest.TestCase):
         self.assertAlmostEqual(row["price"], 1.68)
         self.assertNotIn(":", row["productId"])
 
-    def test_currency_required(self):
-        client = ChuhaiSupplierClient(SETTINGS)
+    def test_invalid_currency_rate_blocks_sale(self):
+        client = ChuhaiSupplierClient(replace(SETTINGS, chuhai_price_rate=0))
         with self.assertRaises(SupplierApiError):
             client.get_products()
 

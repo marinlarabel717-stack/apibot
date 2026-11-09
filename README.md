@@ -283,3 +283,28 @@ Token 需要 `prices:read`、`orders:write`、`orders:read` 权限，密钥不�
 商品单价、实发数量和退款余额分别使用会员表情 `5926783847453692661`、`5960551395730919906`、`5845943483382110702`。
 未发数量按本地订单零售单价自动退款，不将上游成本退款金额直接当成用户应退金额。
 全部失败退回全款；重复查单不会重复退款或再次触发结算通知，列表①③④通知保持原样。
+
+
+## Account List 5 - Shared API
+
+Configure `CHUHAI_API_BASE_URL`, `CHUHAI_APP_ID`, `CHUHAI_APP_KEY` in `.env`.
+Set `CHUHAI_PRICE_RATE` to local wallet units per upstream currency unit after
+confirming the upstream currency. Default `0` blocks sale; use `1` only for matching currencies.
+Existing retail markups apply to the converted cost.
+
+List 5 uses independent `chuhai` order sources and `cats5/cat5/prd5/qbuy5/cbuy5`
+callbacks. Main/profile menus and keyword search include it. Categories retain upstream names.
+Only automatic, non-preselected products without extra widgets are supported.
+Catalog stock displays `?` until product detail is opened. Fresh inventory is read
+per selected product, not thousands of variants on every catalog refresh.
+The full catalog uses a 60-second request timeout and background cache warmup.
+
+Purchases use `request_no`; local IDs retain that request ID and quantity, so
+transport timeouts can be reconciled via `query2` after a restart without buying twice.
+The upstream status enumeration is undocumented: an order completes only when
+`secret` is present. The original secret is delivered as UTF-8 `delivery.txt`
+(including any download links, not automatically downloaded account archives).
+Query failures never trigger an automatic refund for List 5; ambiguous orders
+require reconciliation with upstream. API credentials are required for live
+catalog-shape, currency, delivery quantity and purchase acceptance verification.
+No credentials are committed. Restart the deployed bot after configuration.

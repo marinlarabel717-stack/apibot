@@ -144,8 +144,8 @@ class AccountListTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(store.record_order.call_args.kwargs["unit_cost"], row["price"])
 
     def test_all_menu_combinations(self):
-        for enabled in itertools.product((False, True), repeat=4):
-            expected = [cb for flag, cb in zip(enabled, ("nav:cats", "nav:cats2", "nav:cats3", "nav:cats4")) if flag]
+        for enabled in itertools.product((False, True), repeat=5):
+            expected = [cb for flag, cb in zip(enabled, ("nav:cats", "nav:cats2", "nav:cats3", "nav:cats4", "nav:cats5")) if flag]
             for lang in ("zh", "en"):
                 menus = (
                     bot.build_runtime_main_menu_inline_localized(SETTINGS, lang, *enabled),

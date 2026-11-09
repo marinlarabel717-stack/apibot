@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from chuhai_client import ChuhaiSupplierClient
+
 import asyncio
 import copy
 import hashlib
@@ -199,8 +201,9 @@ NON_SEARCH_BUTTON_TEXTS = MENU_BUTTON_TEXTS | LEGACY_MENU_BUTTON_TEXTS | {
 LEGACY_SOURCE = "legacy"
 DAXI_SOURCE = "daxi"
 RZ_SOURCE = "rz"
+CHUHAI_SOURCE = "chuhai"
 TGSTOREX_SOURCE = "tgstorex"
-MODERN_SOURCE_SET = {DAXI_SOURCE, RZ_SOURCE, TGSTOREX_SOURCE}
+MODERN_SOURCE_SET = {DAXI_SOURCE, RZ_SOURCE, TGSTOREX_SOURCE, CHUHAI_SOURCE}
 DEFAULT_LANG = "zh"
 SUPPORTED_LANGS = {"zh", "en"}
 UI_TEXTS: dict[str, dict[str, str]] = {
@@ -211,6 +214,13 @@ UI_TEXTS: dict[str, dict[str, str]] = {
     "fetch_account_list_4_failed": {"zh": "获取账号列表④失败: {error}", "en": "Failed to load Account List 4: {error}"},
     "no_products_in_account_list_4": {"zh": "账号列表④当前没有可用会话包。", "en": "No session packages available in Account List 4."},
     "account_list_4_unconfigured": {"zh": "账号列表④尚未配置，请联系管理员。", "en": "Account List 4 is not configured. Please contact support."},
+    "button_account_list_5": {"zh": "账号列表⑤", "en": "Account List 5"},
+    "search_source_account_list_5": {"zh": "列表⑤", "en": "List 5"},
+    "back_account_list_5": {"zh": "返回账号列表⑤", "en": "Back to Account List 5"},
+    "account_list_5_intro": {"zh": "账号列表⑤ · 商品，请选择分类", "en": "Account List 5 - Products: select a category"},
+    "fetch_account_list_5_failed": {"zh": "获取账号列表⑤失败: {error}", "en": "Failed to load Account List 5: {error}"},
+    "no_products_in_account_list_5": {"zh": "账号列表⑤当前没有可用商品。", "en": "No products available in Account List 5."},
+    "account_list_5_unconfigured": {"zh": "账号列表⑤尚未配置，请联系管理员。", "en": "Account List 5 is not configured. Please contact support."},
     "order_needs_review": {"zh": "订单结果待核查，请勿重复购买，客服会核对上游订单。", "en": "Order outcome under review. Do not purchase again; contact support."},
     "button_products": {"zh": BUTTON_PRODUCTS, "en": BUTTON_PRODUCTS_EN},
     "button_main_menu": {"zh": BUTTON_MAIN_MENU, "en": BUTTON_MAIN_MENU_EN},
@@ -1047,6 +1057,7 @@ def account_list_runtime_key(source: str) -> str | None:
         LEGACY_SOURCE: RUNTIME_KEY_LEGACY_SUPPLIER_ENABLED,
         DAXI_SOURCE: RUNTIME_KEY_DAXI_SUPPLIER_ENABLED,
         RZ_SOURCE: RUNTIME_KEY_RZ_SUPPLIER_ENABLED,
+        CHUHAI_SOURCE: "chuhai_supplier_enabled",
         TGSTOREX_SOURCE: RUNTIME_KEY_TGSTOREX_SUPPLIER_ENABLED,
     }.get(source)
 
@@ -1057,8 +1068,8 @@ def effective_account_list_enabled(context: ContextTypes.DEFAULT_TYPE, source: s
 
 
 def account_list_number(source: str, lang: str = DEFAULT_LANG) -> str:
-    index = {LEGACY_SOURCE: 1, DAXI_SOURCE: 2, RZ_SOURCE: 3, TGSTOREX_SOURCE: 4}[source]
-    return "①②③④"[index - 1] if lang == "zh" else str(index)
+    index = {LEGACY_SOURCE: 1, DAXI_SOURCE: 2, RZ_SOURCE: 3, TGSTOREX_SOURCE: 4, CHUHAI_SOURCE: 5}[source]
+    return "①②③④⑤"[index - 1] if lang == "zh" else str(index)
 
 
 def account_list_disabled_notice(source: str, lang: str) -> str:
@@ -2564,6 +2575,8 @@ def get_supplier_balance_targets(
         targets.append(("列表②", get_daxi_supplier(context)))
     if str(settings.rz_api_base_url or "").strip() and str(settings.rz_api_key or "").strip():
         targets.append(("列表③", get_rz_supplier(context)))
+    if settings.chuhai_app_id and settings.chuhai_app_key:
+        targets.append(("列表⑤", get_chuhai_supplier(context)))
     return targets
 
 
@@ -3023,6 +3036,8 @@ def download_delivery_file(
 ) -> Path:
     DELIVERY_FILES_DIR.mkdir(parents=True, exist_ok=True)
     target_path = DELIVERY_FILES_DIR / delivery_storage_filename(task_id, file_url, file_name, index)
+    if isinstance(supplier, ChuhaiSupplierClient):
+        return supplier.download_secret(file_url, target_path)
     if isinstance(supplier, TgstorexSupplierClient):
         return supplier.download_session_file(file_url, target_path)
     if target_path.exists() and target_path.stat().st_size > 0:
@@ -4196,6 +4211,8 @@ def get_rz_supplier(context: ContextTypes.DEFAULT_TYPE) -> RzSupplierClient:
 
 def normalize_order_source(value: Any) -> str:
     normalized = str(value or "").strip().lower()
+    if normalized == CHUHAI_SOURCE:
+        return CHUHAI_SOURCE
     if normalized == TGSTOREX_SOURCE:
         return TGSTOREX_SOURCE
     if normalized == DAXI_SOURCE:
@@ -4210,6 +4227,8 @@ def get_supplier_for_source(
     source: str,
 ) -> SupplierClient | DaxiSupplierClient | RzSupplierClient:
     normalized = normalize_order_source(source)
+    if normalized == CHUHAI_SOURCE:
+        return get_chuhai_supplier(context)
     if normalized == TGSTOREX_SOURCE:
         return get_tgstorex_supplier(context)
     if normalized == DAXI_SOURCE:
@@ -4220,7 +4239,7 @@ def get_supplier_for_source(
 
 
 def is_modern_supplier(supplier: SupplierClient | DaxiSupplierClient | RzSupplierClient) -> bool:
-    return isinstance(supplier, (DaxiSupplierClient, RzSupplierClient, TgstorexSupplierClient))
+    return isinstance(supplier, (DaxiSupplierClient, RzSupplierClient, TgstorexSupplierClient, ChuhaiSupplierClient))
 
 
 def supplier_request_timeout_seconds(supplier: SupplierClient | DaxiSupplierClient | RzSupplierClient) -> int:
@@ -4289,12 +4308,12 @@ async def handle_admin_legacy_supplier_toggle(update: Update, context: ContextTy
     normalized = normalize_search_keyword(text)
     if user is None or not is_admin(settings, user.id):
         return False
-    command = re.sub(r"\s+", "", normalized).translate(str.maketrans("①②③④", "1234"))
+    command = re.sub(r"\s+", "", normalized).translate(str.maketrans("①②③④⑤", "12345"))
     command = command.replace("旧接口", "账号列表1")
-    match = re.fullmatch(r"(开启|关闭)账号列表([1234])", command)
+    match = re.fullmatch(r"(开启|关闭)账号列表([12345])", command)
     if match is None:
         return False
-    source = {"1": LEGACY_SOURCE, "2": DAXI_SOURCE, "3": RZ_SOURCE, "4": TGSTOREX_SOURCE}[match.group(2)]
+    source = {"1": LEGACY_SOURCE, "2": DAXI_SOURCE, "3": RZ_SOURCE, "4": TGSTOREX_SOURCE, "5": CHUHAI_SOURCE}[match.group(2)]
     key = account_list_runtime_key(source)
     value = "1" if match.group(1) == "开启" else "0"
     runtime_config = get_runtime_config(context)
@@ -4371,6 +4390,7 @@ def build_runtime_main_menu_inline_localized(
     show_daxi_supplier: bool = True,
     show_rz_supplier: bool = True,
     show_tgstorex_supplier: bool = True,
+    show_chuhai_supplier: bool = True,
 ) -> InlineKeyboardMarkup:
     catalog_buttons = [
         build_main_menu_button(settings, ui_text(label, lang), callback, MAIN_MENU_EMOJI_ACCOUNT_LIST_ID, icon)
@@ -4379,6 +4399,7 @@ def build_runtime_main_menu_inline_localized(
             (show_daxi_supplier, "button_account_list_2", "nav:cats2", "🧩"),
             (show_rz_supplier, "button_account_list_3", "nav:cats3", "🧪"),
             (show_tgstorex_supplier, "button_account_list_4", "nav:cats4", "📦"),
+            (show_chuhai_supplier, "button_account_list_5", "nav:cats5", "📦"),
         )
         if enabled
     ]
@@ -4398,7 +4419,7 @@ def build_category_keyboard(rows: list[dict[str, Any]]) -> InlineKeyboardMarkup:
     buttons: list[list[InlineKeyboardButton]] = []
     for row in rows:
         category_id = safe_int(row.get("categoryId"))
-        stock = safe_int(row.get("totalStock"))
+        stock = "?" if row.get("stockUnknown") else safe_int(row.get("totalStock"))
         name = shorten(str(row.get("categoryName") or f"分类 {category_id}"), 26)
         buttons.append(
             [
@@ -4439,7 +4460,7 @@ def build_product_keyboard(
         product_id = safe_int(row.get("productId"))
         product_name = shorten(str(row.get("productName") or f"商品 {product_id}"), 28)
         price = safe_float(row.get("price"))
-        stock = safe_int(row.get("totalStock"))
+        stock = "?" if row.get("stockUnknown") else safe_int(row.get("totalStock"))
         buttons.append(
             [
                 InlineKeyboardButton(
@@ -4588,7 +4609,7 @@ def build_category_keyboard_configured_localized(
     buttons: list[list[InlineKeyboardButton]] = []
     for row in rows:
         category_id = safe_int(row.get("categoryId"))
-        stock = safe_int(row.get("totalStock"))
+        stock = "?" if row.get("stockUnknown") else safe_int(row.get("totalStock"))
         source_name = str(row.get("categoryName") or f"分类 {category_id}")
         display_name = shorten(translate_category_name(source_name, lang), 26)
         buttons.append(
@@ -4610,7 +4631,7 @@ def build_category_keyboard_configured(settings: Settings, rows: list[dict[str, 
     buttons: list[list[InlineKeyboardButton]] = []
     for row in rows:
         category_id = safe_int(row.get("categoryId"))
-        stock = safe_int(row.get("totalStock"))
+        stock = "?" if row.get("stockUnknown") else safe_int(row.get("totalStock"))
         name = shorten(str(row.get("categoryName") or f"分类 {category_id}"), 26)
         buttons.append([catalog_button(settings, f"{name} 库存 [{stock}]", f"cat:{category_id}:0")])
     buttons.append([premium_inline_button(BUTTON_MAIN_MENU, "nav:menu", HOME_EMOJI_ID)])
@@ -4633,7 +4654,7 @@ def build_product_keyboard_configured_localized(
     for row in page_rows:
         product_id = safe_int(row.get("productId"))
         product_name = shorten(translate_product_name(str(row.get("productName") or f"商品 {product_id}"), lang), 28)
-        stock = safe_int(row.get("totalStock"))
+        stock = "?" if row.get("stockUnknown") else safe_int(row.get("totalStock"))
         price = resolve_sell_price(settings, row)
         buttons.append(
             [
@@ -4673,7 +4694,7 @@ def build_product_keyboard_configured(
     for row in page_rows:
         product_id = safe_int(row.get("productId"))
         product_name = shorten(str(row.get("productName") or f"商品 {product_id}"), 28)
-        stock = safe_int(row.get("totalStock"))
+        stock = "?" if row.get("stockUnknown") else safe_int(row.get("totalStock"))
         price = resolve_sell_price(settings, row)
         buttons.append([plain_catalog_button(f"{product_name} 库存 [{stock}] - ${price:.2f}", f"prd:{product_id}:{category_id}:{page}")])
 
@@ -4765,7 +4786,7 @@ def build_daxi_category_keyboard_localized(
     for group in page_groups:
         group_index = safe_int(group.get("index"), 0)
         category_name = shorten(translate_category_name(str(group.get("name") or "未分类"), lang), 26)
-        stock_total = max(0, safe_int(group.get("stock_total"), 0))
+        stock_total = "?" if group.get("stock_unknown") else max(0, safe_int(group.get("stock_total"), 0))
         category_icon = str(group.get("icon") or "📦")
         buttons.append(
             [
@@ -4801,7 +4822,7 @@ def build_daxi_product_keyboard_localized(
     for row in page_rows:
         product_id = str(row.get("productId") or "").strip()
         product_name = shorten(format_daxi_product_title(row, lang), 28)
-        stock = safe_int(row.get("totalStock"))
+        stock = "?" if row.get("stockUnknown") else safe_int(row.get("totalStock"))
         price = resolve_sell_price(settings, row)
         buttons.append(
             [
@@ -5515,6 +5536,8 @@ def build_rz_category_icon(row: dict[str, Any]) -> str:
 
 
 def format_rz_product_title(row: dict[str, Any], lang: str) -> str:
+    if row.get("source") == CHUHAI_SOURCE:
+        return str(row.get("productName") or row.get("productId"))
     if row.get("source") == TGSTOREX_SOURCE:
         code = str(row.get("productId") or "").upper()
         flag = "".join(chr(127397 + ord(letter)) for letter in code) if len(code) == 2 else ""
@@ -5606,7 +5629,7 @@ def build_rz_category_keyboard_localized(
     for group in page_groups:
         group_index = safe_int(group.get("index"), 0)
         category_name = shorten(str(group.get("name") or "未分类"), 26)
-        stock_total = max(0, safe_int(group.get("stock_total"), 0))
+        stock_total = "?" if group.get("stock_unknown") else max(0, safe_int(group.get("stock_total"), 0))
         category_icon = str(group.get("icon") or "📦")
         buttons.append(
             [
@@ -5644,7 +5667,7 @@ def build_rz_product_keyboard_localized(
         if not product_id:
             continue
         product_name = shorten(format_rz_product_title(row, lang), 28)
-        stock = safe_int(row.get("totalStock"))
+        stock = "?" if row.get("stockUnknown") else safe_int(row.get("totalStock"))
         price = resolve_sell_price(settings, row)
         buttons.append(
             [
@@ -6005,6 +6028,157 @@ async def on_tgstorex_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     await reply_inline(update, ui_text("unsupported_button", lang))
 
 
+def get_chuhai_supplier(context: ContextTypes.DEFAULT_TYPE) -> ChuhaiSupplierClient:
+    return context.application.bot_data["supplier_chuhai"]
+
+
+async def fetch_chuhai_products(context: ContextTypes.DEFAULT_TYPE, *, refresh: bool = False) -> list[dict[str, Any]]:
+    supplier = get_chuhai_supplier(context)
+    if not supplier.configured:
+        return []
+    cache_key = (id(supplier), "")
+    cached = RZ_PRODUCTS_CACHE.get(cache_key)
+    if not refresh and cached and time.monotonic() - cached[0] < 60:
+        return cached[1]
+    payload = await call_blocking(supplier.get_products)
+    rows = payload.get("data") or []
+    RZ_PRODUCTS_CACHE[cache_key] = (time.monotonic(), rows)
+    return rows
+
+
+def group_chuhai_products(rows: list[dict[str, Any]], lang: str) -> list[dict[str, Any]]:
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        grouped.setdefault(str(row.get("categoryName") or "Other"), []).append(row)
+    return [
+        {"key": name, "name": name, "index": index, "rows": products,
+         "stock_unknown": True, "stock_total": sum(safe_int(row.get("totalStock")) for row in products)}
+        for index, (name, products) in enumerate(grouped.items())
+    ]
+
+
+def chuhai_keyboard(keyboard: InlineKeyboardMarkup, lang: str) -> InlineKeyboardMarkup:
+    rows = []
+    for buttons in keyboard.inline_keyboard:
+        converted = []
+        for button in buttons:
+            payload = button.to_dict()
+            callback = str(payload.get("callback_data") or "")
+            prefix, separator, tail = callback.partition(":")
+            if prefix in {"cats3", "cat3", "prd3", "qbuy3", "cbuy3"}:
+                payload["callback_data"] = f"{prefix[:-1]}5{separator}{tail}"
+            if payload.get("text") == ui_text("back_account_list_3", lang):
+                payload["text"] = ui_text("back_account_list_5", lang)
+            converted.append(InlineKeyboardButton.de_json(payload, None))
+        rows.append(converted)
+    return InlineKeyboardMarkup(rows)
+
+
+async def show_chuhai_catalog(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    category_index: int | None = None,
+    page: int = 0,
+) -> None:
+    settings, _, _ = get_services(context)
+    lang = await ensure_user_with_lang(context, update.effective_user)
+    await answer_callback_query_safely(update.callback_query)
+    if not effective_account_list_enabled(context, CHUHAI_SOURCE):
+        await reply_account_list_disabled(update, context, CHUHAI_SOURCE)
+        return
+    if not (settings.chuhai_app_id and settings.chuhai_app_key):
+        await reply_inline(update, ui_text("account_list_5_unconfigured", lang))
+        return
+    try:
+        rows = await fetch_chuhai_products(context)
+    except SupplierApiError as exc:
+        await reply_inline(update, ui_text("fetch_account_list_5_failed", lang, error=exc))
+        return
+    groups = group_chuhai_products(rows, lang)
+    if not groups:
+        await reply_inline(update, ui_text("no_products_in_account_list_5", lang))
+        return
+    if category_index is None or not 0 <= category_index < len(groups):
+        keyboard = build_rz_category_keyboard_localized(groups, page, lang)
+        await reply_inline(update, ui_text("account_list_5_intro", lang), chuhai_keyboard(keyboard, lang))
+        return
+    group = groups[category_index]
+    text, entities = build_rz_products_group_intro_text_localized(group["name"], lang)
+    keyboard = build_rz_product_keyboard_localized(settings, group["rows"], category_index, page, lang)
+    await reply_inline(update, text, chuhai_keyboard(keyboard, lang), entities=entities)
+
+
+async def on_chuhai_callback(update: Update, context: ContextTypes.DEFAULT_TYPE, parts: list[str]) -> None:
+    if not effective_account_list_enabled(context, CHUHAI_SOURCE):
+        await reply_account_list_disabled(update, context, CHUHAI_SOURCE)
+        return
+    settings, _, _ = get_services(context)
+    user = update.effective_user
+    query = update.callback_query
+    lang = await ensure_user_with_lang(context, user)
+    if not (settings.chuhai_app_id and settings.chuhai_app_key):
+        await reply_inline(update, ui_text("account_list_5_unconfigured", lang))
+        return
+    action = parts[0]
+    if action == "cats5" and len(parts) == 2:
+        clear_pending_purchase(context)
+        await show_chuhai_catalog(update, context, page=safe_int(parts[1]))
+        return
+    if action == "cat5" and len(parts) == 3:
+        clear_pending_purchase(context)
+        await show_chuhai_catalog(update, context, safe_int(parts[1], -1), safe_int(parts[2]))
+        return
+    if action in {"prd5", "qbuy5"} and len(parts) == 4:
+        product_id, category_index, page = parts[1], safe_int(parts[2], -1), safe_int(parts[3])
+        if action == "qbuy5":
+            set_pending_purchase(context, product_id, category_index, page, source=CHUHAI_SOURCE)
+            await reply_inline(update, ui_text("quick_buy_prompt", lang))
+            return
+        clear_pending_purchase(context)
+        try:
+            row = (await call_blocking(get_chuhai_supplier(context).get_product_detail, product_id))["data"]
+        except SupplierApiError as exc:
+            await reply_inline(update, ui_text("fetch_product_detail_failed", lang, error=exc))
+            return
+        text, entities, keyboard = render_rz_product_detail_view_localized(settings, row, category_index, page, lang)
+        await reply_inline(update, text, chuhai_keyboard(keyboard, lang), entities=entities)
+        return
+    if action == "cbuy5" and len(parts) == 5 and user is not None and query is not None:
+        clear_pending_purchase(context)
+        quantity = safe_int(parts[2])
+        if quantity <= 0:
+            await reply_inline(update, ui_text("quick_buy_param_invalid", lang))
+            return
+        confirmation = context.user_data.get("chuhai_confirmation")
+        if confirmation != query.data:
+            await answer_callback_query_safely(query, ui_text("unsupported_button", lang))
+            return
+        context.user_data.pop("chuhai_confirmation", None)
+        await answer_callback_query_safely(query, ui_text("creating_order", lang))
+        if query.message is not None:
+            try:
+                await query.edit_message_reply_markup(reply_markup=None)
+            except BadRequest:
+                pass
+        try:
+            result = await execute_purchase(
+                context, user.id, user.username or "", user.full_name or "", parts[1], quantity, lang,
+                source=CHUHAI_SOURCE,
+                expected_unit_price=context.user_data.pop("chuhai_quoted_price", None),
+            )
+        except SupplierApiError as exc:
+            await reply_inline(update, ui_text("fetch_product_detail_failed", lang, error=exc))
+            return
+        if query.message is not None:
+            if result:
+                text, entities, markup = result
+                await query.message.reply_text(text, entities=entities, reply_markup=markup or build_menu_keyboard(lang))
+            else:
+                await query.message.reply_text(order_created_caption_localized(lang), reply_markup=build_menu_keyboard(lang), parse_mode="HTML")
+        return
+    await reply_inline(update, ui_text("unsupported_button", lang))
+
+
 async def build_catalog_search_rows(supplier: SupplierClient, *, refresh: bool = False) -> list[dict[str, Any]]:
     cache_key = id(supplier)
     now = time.monotonic()
@@ -6251,7 +6425,7 @@ def search_catalog_slot(context: ContextTypes.DEFAULT_TYPE, source: str) -> tupl
 
 def ensure_search_catalog_refresh(context: ContextTypes.DEFAULT_TYPE, source: str) -> asyncio.Task | None:
     settings, _, _ = get_services(context)
-    if not effective_account_list_enabled(context, source) or (source == TGSTOREX_SOURCE and not settings.tgstorex_api_key):
+    if not effective_account_list_enabled(context, source) or (source == TGSTOREX_SOURCE and not settings.tgstorex_api_key) or (source == CHUHAI_SOURCE and not bool(settings.chuhai_app_id and settings.chuhai_app_key)):
         return None
     state = context.application.bot_data
     tasks = state.setdefault("search_catalog_refresh_tasks", {})
@@ -6277,6 +6451,8 @@ def ensure_search_catalog_refresh(context: ContextTypes.DEFAULT_TYPE, source: st
                 rows = await fetch_daxi_products(supplier, refresh=True)
             elif source == RZ_SOURCE:
                 rows = await fetch_rz_products(supplier, refresh=True)
+            elif source == CHUHAI_SOURCE:
+                rows = await fetch_chuhai_products(context, refresh=True)
             else:
                 rows = await fetch_tgstorex_products(context, refresh=True)
             # Publish a complete snapshot; readers keep the old one during I/O.
@@ -6295,8 +6471,8 @@ def ensure_search_catalog_refresh(context: ContextTypes.DEFAULT_TYPE, source: st
 
 async def get_fast_search_catalogs(context: ContextTypes.DEFAULT_TYPE) -> tuple[dict[str, list[dict[str, Any]]], list[str]]:
     settings, _, _ = get_services(context)
-    sources = [source for source in (LEGACY_SOURCE, DAXI_SOURCE, RZ_SOURCE, TGSTOREX_SOURCE)
-               if effective_account_list_enabled(context, source) and (source != TGSTOREX_SOURCE or settings.tgstorex_api_key)]
+    sources = [source for source in (LEGACY_SOURCE, DAXI_SOURCE, RZ_SOURCE, TGSTOREX_SOURCE, CHUHAI_SOURCE)
+               if effective_account_list_enabled(context, source) and (source != TGSTOREX_SOURCE or settings.tgstorex_api_key) and (source != CHUHAI_SOURCE or bool(settings.chuhai_app_id and settings.chuhai_app_key))]
     slots = {source: search_catalog_slot(context, source) for source in sources}
     has_snapshot = any(key in cache for cache, key in slots.values())
     tasks = [task for source in sources if (task := ensure_search_catalog_refresh(context, source)) is not None]
@@ -6354,7 +6530,7 @@ async def warm_tgstorex_catalog(context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 def ensure_modern_catalog_warmup(context: ContextTypes.DEFAULT_TYPE) -> None:
-    for source in (LEGACY_SOURCE, DAXI_SOURCE, RZ_SOURCE, TGSTOREX_SOURCE):
+    for source in (LEGACY_SOURCE, DAXI_SOURCE, RZ_SOURCE, TGSTOREX_SOURCE, CHUHAI_SOURCE):
         ensure_search_catalog_refresh(context, source)
 
 
@@ -6383,6 +6559,7 @@ async def build_main_menu_message(
         effective_account_list_enabled(context, DAXI_SOURCE),
         effective_account_list_enabled(context, RZ_SOURCE),
         effective_account_list_enabled(context, TGSTOREX_SOURCE),
+        effective_account_list_enabled(context, CHUHAI_SOURCE),
     )
     return text, entities, main_menu_inline
 
@@ -6733,6 +6910,7 @@ def build_runtime_profile_keyboard_localized(
     show_daxi_supplier: bool = True,
     show_rz_supplier: bool = True,
     show_tgstorex_supplier: bool = True,
+    show_chuhai_supplier: bool = True,
 ) -> InlineKeyboardMarkup:
     catalog_buttons = [
         InlineKeyboardButton(ui_text(label, lang), callback_data=callback)
@@ -6741,6 +6919,7 @@ def build_runtime_profile_keyboard_localized(
             (show_daxi_supplier, "button_account_list_2", "nav:cats2"),
             (show_rz_supplier, "button_account_list_3", "nav:cats3"),
             (show_tgstorex_supplier, "button_account_list_4", "nav:cats4"),
+            (show_chuhai_supplier, "button_account_list_5", "nav:cats5"),
         )
         if enabled
     ]
@@ -6784,6 +6963,7 @@ async def show_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             effective_account_list_enabled(context, DAXI_SOURCE),
             effective_account_list_enabled(context, RZ_SOURCE),
             effective_account_list_enabled(context, TGSTOREX_SOURCE),
+            effective_account_list_enabled(context, CHUHAI_SOURCE),
         ),
     )
     return
@@ -7608,7 +7788,7 @@ async def show_admin_home(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         f"{text}\n"
         + "".join(
             f"账号列表{account_list_number(source)}：{'已开启' if effective_account_list_enabled(context, source) else '已关闭'}\n"
-            for source in (LEGACY_SOURCE, DAXI_SOURCE, RZ_SOURCE, TGSTOREX_SOURCE)
+            for source in (LEGACY_SOURCE, DAXI_SOURCE, RZ_SOURCE, TGSTOREX_SOURCE, CHUHAI_SOURCE)
         )
         + "开关指令：开启账号列表1 / 关闭账号列表1（2、3、4同理）\n"
         + f"售价模式：{sell_price_mode_label(str(sell_price_config.get('mode') or 'fixed_add'))}\n"
@@ -8357,8 +8537,8 @@ async def execute_purchase(
     normalized_source = normalize_order_source(source)
     if not effective_account_list_enabled(context, normalized_source):
         return account_list_disabled_notice(normalized_source, lang), None, None
-    if normalized_source == TGSTOREX_SOURCE:
-        supplier = get_tgstorex_supplier(context)
+    if normalized_source in {TGSTOREX_SOURCE, CHUHAI_SOURCE}:
+        supplier = get_supplier_for_source(context, normalized_source)
         row = (await call_blocking(supplier.get_product_detail, str(product_id)))["data"]
         if quantity <= 0 or safe_float(row.get("price")) <= 0:
             raise SupplierApiError("Invalid session purchase quantity or price")
@@ -8375,7 +8555,7 @@ async def execute_purchase(
         row = await fetch_product_detail_cached(supplier, int(product_id))
     await call_blocking(store.ensure_user, user_id, username, display_name)
     unit_price = resolve_sell_price(settings, row)
-    total_stock = safe_int(row.get("totalStock"))
+    total_stock = "?" if row.get("stockUnknown") else safe_int(row.get("totalStock"))
     product_name = str(row.get("productName") or f"商品 {product_id}")
     category_name = str(row.get("categoryName") or "").strip()
     product_label = f"{category_name} {product_name}".strip() if category_name else product_name
@@ -8579,7 +8759,7 @@ async def finalize_remote_order(
     try:
         payload = await call_blocking(supplier.query_order, task_id)
     except SupplierApiError as exc:
-        if isinstance(supplier, TgstorexSupplierClient):
+        if isinstance(supplier, (TgstorexSupplierClient, ChuhaiSupplierClient)):
             logger.warning("Session order query unavailable; no automatic refund: %s", task_id)
             return "error", ui_text("order_processing", lang)
         if is_missing_remote_order_error(exc) or order_age_seconds >= settings.order_stuck_timeout_seconds:
@@ -9324,6 +9504,13 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if catalog_source is not None and not effective_account_list_enabled(context, catalog_source):
         await reply_account_list_disabled(update, context, catalog_source)
         return
+    if action in {"cats5", "cat5", "prd5", "qbuy5", "cbuy5"}:
+        clear_pending_recharge(context)
+        await on_chuhai_callback(update, context, parts)
+        return
+    if action == "nav" and len(parts) > 1 and parts[1] == "cats5":
+        await show_chuhai_catalog(update, context)
+        return
     if action in {"cats4", "cat4", "prd4", "qbuy4", "cbuy4"}:
         clear_pending_recharge(context)
         await on_tgstorex_callback(update, context, parts)
@@ -9859,6 +10046,10 @@ async def route_menu_text(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if update.message is None or not update.message.text:
         return
     text = update.message.text.strip()
+    if button_matches(text, "button_account_list_5"):
+        clear_pending_purchase(context)
+        await show_chuhai_catalog(update, context)
+        return
     if button_matches(text, "button_account_list_4"):
         clear_pending_purchase(context)
         clear_pending_recharge(context)
@@ -10002,7 +10193,10 @@ async def search_text_rich(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         category_id = safe_int(pending_purchase.get("category_id"), 0)
         page = safe_int(pending_purchase.get("page"), 0)
         try:
-            if source == TGSTOREX_SOURCE:
+            if source == CHUHAI_SOURCE:
+                product_id = str(raw_product_id or "").strip()
+                row = (await call_blocking(get_chuhai_supplier(context).get_product_detail, product_id))["data"]
+            elif source == TGSTOREX_SOURCE:
                 product_id = str(raw_product_id or "").strip()
                 row = (await call_blocking(get_tgstorex_supplier(context).get_product_detail, product_id))["data"]
             elif source == DAXI_SOURCE:
@@ -10019,7 +10213,7 @@ async def search_text_rich(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             return
         if source == DAXI_SOURCE:
             product_name = format_daxi_product_title(row, lang) or str(row.get("productName") or f"商品 {product_id}")
-        elif source in {RZ_SOURCE, TGSTOREX_SOURCE}:
+        elif source in {RZ_SOURCE, TGSTOREX_SOURCE, CHUHAI_SOURCE}:
             product_name = format_rz_product_title(row, lang) or str(row.get("productName") or f"商品 {product_id}")
         else:
             product_name = str(row.get("productName") or f"商品 {product_id}")
@@ -10027,6 +10221,13 @@ async def search_text_rich(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         caption, caption_entities = build_purchase_confirm_text_localized(product_name, unit_price, quantity, lang)
         if source == DAXI_SOURCE:
             keyboard = build_daxi_purchase_confirm_keyboard_localized(str(product_id), quantity, category_id, page, lang)
+        elif source == CHUHAI_SOURCE:
+            if quantity > safe_int(row.get("totalStock")):
+                await update.message.reply_text(ui_text("stock_not_enough", lang, stock=safe_int(row.get("totalStock")), quantity=quantity))
+                return
+            keyboard = chuhai_keyboard(build_rz_purchase_confirm_keyboard_localized(str(product_id), quantity, category_id, page, lang), lang)
+            context.user_data["chuhai_confirmation"] = f"cbuy5:{product_id}:{quantity}:{category_id}:{page}"
+            context.user_data["chuhai_quoted_price"] = unit_price
         elif source == TGSTOREX_SOURCE:
             if quantity > safe_int(row.get("totalStock")):
                 await update.message.reply_text(ui_text("stock_not_enough", lang, stock=safe_int(row.get("totalStock")), quantity=quantity))
@@ -10055,6 +10256,9 @@ async def search_text_rich(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     catalogs, unavailable = await get_fast_search_catalogs(context)
     daxi_all_rows = catalogs.get(DAXI_SOURCE, [])
     rz_all_rows = catalogs.get(RZ_SOURCE, [])
+    chuhai_all_rows = catalogs.get(CHUHAI_SOURCE, [])
+    chuhai_rows = search_rz_products_locally(chuhai_all_rows, keyword)
+    chuhai_index_map = {str(row["productId"]): index for index, group in enumerate(group_chuhai_products(chuhai_all_rows, lang)) for row in group["rows"]}
     tgstorex_all_rows = catalogs.get(TGSTOREX_SOURCE, [])
     loading_notice = ui_text(
         "search_catalog_loading", lang,
@@ -10081,6 +10285,8 @@ async def search_text_rich(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         source_buckets.append(("daxi", daxi_rows))
     if rz_rows:
         source_buckets.append(("rz", rz_rows))
+    if chuhai_rows:
+        source_buckets.append((CHUHAI_SOURCE, chuhai_rows))
     if tgstorex_rows:
         source_buckets.append((TGSTOREX_SOURCE, tgstorex_rows))
     if source_buckets:
@@ -10112,6 +10318,13 @@ async def search_text_rich(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             display_name = shorten(format_daxi_product_title(row, lang), 28)
             source_label = ui_text("search_source_account_list_2", lang)
             callback_data = f"prd2:{product_id}:{category_index}:0"
+        elif source_name == CHUHAI_SOURCE:
+            product_id = str(row["productId"])
+            category_index = chuhai_index_map.get(product_id, 0)
+            sell_price = resolve_sell_price(settings, row)
+            display_name = shorten(format_rz_product_title(row, lang), 28)
+            source_label = ui_text("search_source_account_list_5", lang)
+            callback_data = f"prd5:{product_id}:{category_index}:0"
         elif source_name == TGSTOREX_SOURCE:
             product_id = str(row["productId"])
             category_index = tgstorex_index_map.get(product_id, 0)
@@ -10143,7 +10356,7 @@ async def search_text_rich(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                         "product_row_price",
                         lang,
                         name=f"[{source_label}] {display_name}",
-                        stock=safe_int(row.get("totalStock")),
+                        stock="?" if row.get("stockUnknown") else safe_int(row.get("totalStock")),
                         price=f"{sell_price:.2f}",
                     ),
                     callback_data,
@@ -10384,6 +10597,8 @@ def get_supplier_balance_targets(
         targets.append(("列表③", get_rz_supplier(context)))
     if str(settings.tgstorex_api_base_url or "").strip() and str(settings.tgstorex_api_key or "").strip():
         targets.append(("列表④", get_tgstorex_supplier(context)))
+    if settings.chuhai_app_id and settings.chuhai_app_key:
+        targets.append(("列表⑤", get_chuhai_supplier(context)))
     return targets
 
 
@@ -10401,10 +10616,12 @@ async def show_admin_supplier_balances(update: Update, context: ContextTypes.DEF
     targets = dict(get_supplier_balance_targets(context))
     notes = (("列表①", "旧接口"), ("列表②", "DAXI"),
              ("列表③", "RZ / DariMarket"), ("列表④", "Tgstorex · 会话包"))
+    if settings.chuhai_app_id and settings.chuhai_app_key:
+        notes += (("列表⑤", "Shared API (upstream currency)"),)
 
     async def query_one(name: str, note: str) -> str:
         lines = [f"账号{name}", f"备注：{note}"]
-        source = {"列表①": LEGACY_SOURCE, "列表②": DAXI_SOURCE, "列表③": RZ_SOURCE, "列表④": TGSTOREX_SOURCE}[name]
+        source = {"列表①": LEGACY_SOURCE, "列表②": DAXI_SOURCE, "列表③": RZ_SOURCE, "列表④": TGSTOREX_SOURCE, "列表⑤": CHUHAI_SOURCE}[name]
         stats_lines = []
         if sales_stats is None:
             stats_lines.append("销售统计：暂不可用")
@@ -10433,7 +10650,7 @@ async def show_admin_supplier_balances(update: Update, context: ContextTypes.DEF
             amount = Decimal(str(value))
             if isinstance(value, bool) or not amount.is_finite():
                 raise ValueError("Invalid balance amount")
-            unit = "USD" if name == "列表④" else "U"
+            unit = "upstream currency" if name == "列表⑤" else ("USD" if name == "列表④" else "U")
             lines.append(f"可用余额：{format_money(amount)} {unit}")
             user_id, user_name = data.get("userId"), data.get("userName")
             if user_id is not None and str(user_id).strip():
@@ -10539,6 +10756,7 @@ def build_application(settings: Settings) -> Application:
     supplier = SupplierClient(settings)
     supplier_daxi = DaxiSupplierClient(settings)
     supplier_rz = RzSupplierClient(settings)
+    supplier_chuhai = ChuhaiSupplierClient(settings)
     supplier_tgstorex = TgstorexSupplierClient(settings)
     application = (
         ApplicationBuilder()
@@ -10561,6 +10779,7 @@ def build_application(settings: Settings) -> Application:
     application.bot_data["supplier"] = supplier
     application.bot_data["supplier_daxi"] = supplier_daxi
     application.bot_data["supplier_rz"] = supplier_rz
+    application.bot_data["supplier_chuhai"] = supplier_chuhai
     application.bot_data["supplier_tgstorex"] = supplier_tgstorex
     application.bot_data["runtime_config"] = store.get_runtime_settings()
     apply_runtime_sell_price_settings(settings, application.bot_data["runtime_config"])

@@ -288,15 +288,23 @@ Token 需要 `prices:read`、`orders:write`、`orders:read` 权限，密钥不�
 ## Account List 5 - Shared API
 
 Configure `CHUHAI_API_BASE_URL`, `CHUHAI_APP_ID`, `CHUHAI_APP_KEY` in `.env`.
-Upstream costs and the local wallet use USDT (confirmed 2026-11-09).
-`CHUHAI_PRICE_RATE=1` is the default: costs are read 1:1 with no exchange conversion.
-Existing retail markup rules still apply; matching currencies does not remove the markup.
+Upstream prices are CNY; the local wallet and displayed retail prices are USDT.
+Set `CHUHAI_CNY_PER_USDT` to the agreed CNY per 1 USDT. Cost is divided by that
+rate, then the existing retail markup is applied. The default zero rate blocks
+sale until configured. The optional legacy `CHUHAI_PRICE_RATE` multiplier is used
+only when no positive divisor is configured. Upstream balances are converted to
+USDT before displaying them, not merely relabeled.
+
 
 List 5 uses independent `chuhai` order sources and `cats5/cat5/prd5/qbuy5/cbuy5`
 callbacks. Main/profile menus and keyword search include it. Categories retain upstream names.
-Only automatic, non-preselected products without extra widgets are supported.
-Catalog stock displays `?` until product detail is opened. Fresh inventory is read
-per selected product, not thousands of variants on every catalog refresh.
+All API products remain visible, including INI/JSON-priced specifications.
+Products requiring unsupported widget input, preselection, manual/plugin fulfillment
+or unconfirmed costs are marked unavailable for automatic purchase rather than hidden.
+Category summaries show product/variant counts, not fictitious aggregate inventory.
+Visible product pages and list-5 search candidates load actual inventory with bounded
+concurrency (six workers, at most thirty products, thirty-second cache). Failures
+remain unknown, never fabricated zero. Detail and purchase still check live stock.
 The full catalog uses a 60-second request timeout and background cache warmup.
 
 Purchases use `request_no`; local IDs retain that request ID and quantity, so

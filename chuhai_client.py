@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import hashlib
+import configparser
 import json
 import math
 import re
+import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from urllib.parse import urlencode, unquote_plus
 
@@ -41,10 +44,11 @@ class ChuhaiSupplierClient(SupplierClient):
 
     def query_balance(self):
         data = self._request("/shared/authentication/connect")
-        return {"success": True, "data": {"accountBalance": data["balance"], "currency": "USDT", "userName": data.get("shopName", "")}}
+        return {"success": True, "data": {"accountBalance": float(data["balance"]) * self._rate(), "currency": "USDT", "sourceBalance": data["balance"], "sourceCurrency": "CNY", "userName": data.get("shopName", "")}}
 
     def _rate(self):
-        value = self.settings.chuhai_price_rate
+        cny_per_usdt = getattr(self.settings, "chuhai_cny_per_usdt", 0)
+        value = 1.0 / cny_per_usdt if cny_per_usdt > 0 else self.settings.chuhai_price_rate
         if not math.isfinite(value) or value <= 0:
             raise SupplierApiError("Account List 5: configure CHUHAI_PRICE_RATE (upstream currency to local currency)")
         return value
@@ -52,8 +56,25 @@ class ChuhaiSupplierClient(SupplierClient):
     def get_products(self, query=""):
         try:
             return self._get_products(query)
-        except (TypeError, ValueError, KeyError, AttributeError, OverflowError):
+        except (TypeError, ValueError, KeyError, AttributeError, OverflowError, configparser.Error):
             raise SupplierApiError("Invalid Shared API product data") from None
+
+    @staticmethod
+    def parse_config(value):
+        if not value:
+            return {}
+        if isinstance(value, dict):
+            return value
+        try:
+            parsed = json.loads(value)
+            if isinstance(parsed, dict):
+                return parsed
+        except (ValueError, TypeError):
+            pass
+        parser = configparser.RawConfigParser(strict=False, delimiters=("=",))
+        parser.optionxform = str
+        parser.read_string(str(value))
+        return {section: dict(parser.items(section)) for section in parser.sections()}
 
     def _get_products(self, query=""):
         rate = self._rate()
@@ -64,49 +85,74 @@ class ChuhaiSupplierClient(SupplierClient):
         for category in data:
             for item in category.get("children") or []:
                 code = str(item.get("code") or item.get("shared_code") or "")
-                # API widgets / preselected cards require additional user input; don't sell them silently.
-                config = item.get("config") or {}
-                if isinstance(config, str):
-                    try:
-                        config = json.loads(config)
-                    except ValueError:
-                        continue
+                reason = ""
+                try:
+                    config = self.parse_config(item.get("config"))
+                except (ValueError, configparser.Error):
+                    config, reason = {}, "商品配置暂无法解析"
                 widget = item.get("widget") or []
                 if isinstance(widget, str):
                     try:
                         widget = json.loads(widget)
                     except ValueError:
-                        continue
-                if not isinstance(config, dict) or widget or config.get("widget") or item.get("draft_status") in (1, "1"):
-                    continue
+                        pass
+                if widget or config.get("widget"):
+                    reason = "该商品需要额外填写资料，暂不支持自动下单"
+                if item.get("draft_status") in (1, "1"):
+                    reason = "该商品需要预选卡密，暂不支持自动下单"
                 if str(item.get("delivery_way", "")) != "0":
-                    continue
+                    reason = "该商品为人工或插件发货，暂不支持自动下单"
                 if not code:
-                    continue
+                    reason = "该商品未提供API商品代码"
                 specs = config.get("category_factory") or {}
-                if specs and not isinstance(specs, dict):
-                    continue
+                if not isinstance(specs, dict):
+                    specs, reason = {}, "该商品规格配置暂无法解析"
                 prices = specs.items() if specs else [("", item.get("factory_price"))]
                 for race, price in prices:
+                    blocked = reason
                     try:
                         cost = float(price)
                     except (ValueError, TypeError):
-                        continue
+                        cost = 0
                     if not math.isfinite(cost) or cost <= 0:
-                        continue
-                    # Deterministic short callback ID; product codes/specs may contain colons or exceed Telegram's limit.
-                    product_id = hashlib.sha256((code + "\0" + str(race)).encode()).hexdigest()[:20]
-                    rows.append({"productId": product_id, "productName": str(item.get("name") or code) + (" / " + str(race) if race else ""),
+                        cost, blocked = 0, "该商品成本价待确认，暂不可购买"
+                    identity = code or "item-" + str(item.get("id"))
+                    product_id = hashlib.sha256((identity + "\0" + str(race)).encode()).hexdigest()[:20]
+                    rows.append({"productId": product_id, "productName": str(item.get("name") or identity) + (" / " + str(race) if race else ""),
                                  "categoryName": category.get("name", ""), "section": category.get("name", ""),
-                                 "kind": "other", "price": cost * rate, "totalStock": max(0, int(item.get("inventory") or item.get("stock") or 0)),
-                                 "source": "chuhai", "stockUnknown": True, "minimum": item.get("minimum"), "maximum": item.get("maximum"), "shared_code": code, "race": str(race)})
+                                 "kind": "other", "price": cost * rate, "totalStock": 0,
+                                 "source": "chuhai", "stockUnknown": True, "purchaseBlocked": blocked,
+                                 "priceUnknown": not bool(cost), "minimum": item.get("minimum"), "maximum": item.get("maximum"),
+                                 "shared_code": code, "race": str(race)})
         self._catalog = {row["productId"]: row for row in rows}
         return {"success": True, "data": rows}
+
+    def refresh_inventory(self, product_ids):
+        """Bounded on-demand inventory for one visible page, never the full catalog."""
+        cache = getattr(self, "_inventory_cache", None)
+        if cache is None:
+            self._inventory_cache = cache = {}
+        def fetch(product_id):
+            row = dict(self._catalog[product_id])
+            cached = cache.get(product_id)
+            if cached and time.monotonic() - cached[0] < 30:
+                return cached[1]
+            try:
+                data = self._request("/shared/commodity/inventory", sharedCode=row["shared_code"], race=row["race"])
+                row["totalStock"] = max(0, int(data["count"]))
+                row["stockUnknown"] = False
+                cache[product_id] = (time.monotonic(), row)
+            except (SupplierApiError, TypeError, ValueError, KeyError):
+                row["stockUnknown"] = True
+            return row
+        ids = list(dict.fromkeys(product_ids))[:30]
+        with ThreadPoolExecutor(max_workers=6) as executor:
+            return list(executor.map(fetch, ids))
 
     def get_product_detail(self, product_id):
         try:
             return self._get_product_detail(product_id)
-        except (TypeError, ValueError, KeyError, AttributeError, OverflowError):
+        except (TypeError, ValueError, KeyError, AttributeError, OverflowError, configparser.Error):
             raise SupplierApiError("Invalid Shared API inventory data") from None
 
     def _get_product_detail(self, product_id):
@@ -122,16 +168,19 @@ class ChuhaiSupplierClient(SupplierClient):
             if not isinstance(data, dict):
                 raise SupplierApiError("Invalid Shared API inventory")
             if str(data.get("delivery_way", "")) != "0" or data.get("draft_status") in (1, "1"):
-                raise SupplierApiError("Only automatic, non-preselected products are supported in List 5")
+                row["purchaseBlocked"] = row.get("purchaseBlocked") or "该商品暂不支持自动下单"
             row["totalStock"] = max(0, int(data.get("count") or 0))
             row["stockUnknown"] = False
-            config = data.get("config") or {}
-            if isinstance(config, str):
-                config = json.loads(config)
+            config = self.parse_config(data.get("config"))
             price = (config.get("category_factory") or {}).get(row["race"]) if row["race"] else data.get("factory_price")
-            cost = float(price)
+            try:
+                cost = float(price)
+            except (ValueError, TypeError):
+                cost = 0
             if not math.isfinite(cost) or cost <= 0:
-                raise SupplierApiError("Invalid Shared API cost")
+                cost = 0
+                row["purchaseBlocked"] = "该商品成本价待确认，暂不可购买"
+            row["priceUnknown"] = not bool(cost)
             row["price"] = cost * self._rate()
             return {"success": True, "data": row}
         raise SupplierApiError("Shared API product unavailable")
@@ -140,6 +189,8 @@ class ChuhaiSupplierClient(SupplierClient):
         if quantity <= 0:
             raise SupplierApiError("Invalid quantity")
         row = self.get_product_detail(product_id)["data"]
+        if row.get("purchaseBlocked"):
+            raise SupplierApiError(row["purchaseBlocked"])
         minimum = max(1, int(row.get("minimum") or 1))
         maximum = max(0, int(row.get("maximum") or 0))
         if quantity < minimum or (maximum and quantity > maximum):

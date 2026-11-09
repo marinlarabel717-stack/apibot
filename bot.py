@@ -4791,7 +4791,7 @@ def build_daxi_category_keyboard_localized(
         buttons.append(
             [
                 plain_catalog_button(
-                    f"{category_icon} {category_name} 可用 [{stock_total}]",
+                    (f"{category_icon} {category_name} 商品 [{group['product_count']}]" if "product_count" in group else f"{category_icon} {category_name} 可用 [{stock_total}]"),
                     f"cat2:{group_index}:0",
                 )
             ]
@@ -5634,7 +5634,7 @@ def build_rz_category_keyboard_localized(
         buttons.append(
             [
                 plain_catalog_button(
-                    f"{category_icon} {category_name} 可用 [{stock_total}]",
+                    (f"{category_icon} {category_name} 商品 [{group['product_count']}]" if "product_count" in group else f"{category_icon} {category_name} 可用 [{stock_total}]"),
                     f"cat3:{group_index}:0",
                 )
             ]
@@ -5672,7 +5672,7 @@ def build_rz_product_keyboard_localized(
         buttons.append(
             [
                 plain_catalog_button(
-                    ui_text("product_row_price", lang, name=product_name, stock=stock, price=f"{price:.2f}"),
+                    ui_text("product_row_price", lang, name=product_name, stock=stock, price=("待确认" if row.get("priceUnknown") else f"{price:.2f}")),
                     f"prd3:{product_id}:{category_index}:{page}",
                 )
             ]
@@ -6052,7 +6052,7 @@ def group_chuhai_products(rows: list[dict[str, Any]], lang: str) -> list[dict[st
         grouped.setdefault(str(row.get("categoryName") or "Other"), []).append(row)
     return [
         {"key": name, "name": name, "index": index, "rows": products,
-         "stock_unknown": True, "stock_total": sum(safe_int(row.get("totalStock")) for row in products)}
+         "product_count": len(products), "stock_unknown": any(row.get("stockUnknown") for row in products), "stock_total": sum(safe_int(row.get("totalStock")) for row in products)}
         for index, (name, products) in enumerate(grouped.items())
     ]
 
@@ -6072,6 +6072,18 @@ def chuhai_keyboard(keyboard: InlineKeyboardMarkup, lang: str) -> InlineKeyboard
             converted.append(InlineKeyboardButton.de_json(payload, None))
         rows.append(converted)
     return InlineKeyboardMarkup(rows)
+
+
+async def refresh_chuhai_visible_inventory(context, rows):
+    supplier = get_chuhai_supplier(context)
+    try:
+        updated = await call_blocking(supplier.refresh_inventory, [str(row["productId"]) for row in rows])
+    except SupplierApiError:
+        return
+    mapping = {row["productId"]: row for row in updated}
+    for row in rows:
+        if row["productId"] in mapping:
+            row.update(mapping[row["productId"]])
 
 
 async def show_chuhai_catalog(
@@ -6103,6 +6115,10 @@ async def show_chuhai_catalog(
         await reply_inline(update, ui_text("account_list_5_intro", lang), chuhai_keyboard(keyboard, lang))
         return
     group = groups[category_index]
+    last_page = max(0, (len(group["rows"]) - 1) // PRODUCTS_PER_PAGE)
+    page = max(0, min(page, last_page))
+    visible = group["rows"][page * PRODUCTS_PER_PAGE:(page + 1) * PRODUCTS_PER_PAGE]
+    await refresh_chuhai_visible_inventory(context, visible)
     text, entities = build_rz_products_group_intro_text_localized(group["name"], lang)
     keyboard = build_rz_product_keyboard_localized(settings, group["rows"], category_index, page, lang)
     await reply_inline(update, text, chuhai_keyboard(keyboard, lang), entities=entities)
@@ -6141,6 +6157,12 @@ async def on_chuhai_callback(update: Update, context: ContextTypes.DEFAULT_TYPE,
             await reply_inline(update, ui_text("fetch_product_detail_failed", lang, error=exc))
             return
         text, entities, keyboard = render_rz_product_detail_view_localized(settings, row, category_index, page, lang)
+        if row.get("priceUnknown"):
+            text = f"{row['productName']}\n库存：{row['totalStock']}\n价格待确认"
+            entities = None
+        if row.get("purchaseBlocked"):
+            text += "\n\n" + str(row["purchaseBlocked"])
+            keyboard = InlineKeyboardMarkup(keyboard.inline_keyboard[1:])
         await reply_inline(update, text, chuhai_keyboard(keyboard, lang), entities=entities)
         return
     if action == "cbuy5" and len(parts) == 5 and user is not None and query is not None:
@@ -8540,6 +8562,8 @@ async def execute_purchase(
     if normalized_source in {TGSTOREX_SOURCE, CHUHAI_SOURCE}:
         supplier = get_supplier_for_source(context, normalized_source)
         row = (await call_blocking(supplier.get_product_detail, str(product_id)))["data"]
+        if row.get("purchaseBlocked"):
+            return str(row["purchaseBlocked"]), None, None
         if quantity <= 0 or safe_float(row.get("price")) <= 0:
             raise SupplierApiError("Invalid session purchase quantity or price")
         if expected_unit_price is not None and abs(resolve_sell_price(settings, row) - expected_unit_price) > 0.000001:
@@ -10258,6 +10282,8 @@ async def search_text_rich(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     rz_all_rows = catalogs.get(RZ_SOURCE, [])
     chuhai_all_rows = catalogs.get(CHUHAI_SOURCE, [])
     chuhai_rows = search_rz_products_locally(chuhai_all_rows, keyword)
+    if chuhai_rows:
+        await refresh_chuhai_visible_inventory(context, chuhai_rows[:SEARCH_RESULTS_LIMIT])
     chuhai_index_map = {str(row["productId"]): index for index, group in enumerate(group_chuhai_products(chuhai_all_rows, lang)) for row in group["rows"]}
     tgstorex_all_rows = catalogs.get(TGSTOREX_SOURCE, [])
     loading_notice = ui_text(
@@ -10652,6 +10678,8 @@ async def show_admin_supplier_balances(update: Update, context: ContextTypes.DEF
                 raise ValueError("Invalid balance amount")
             unit = "USDT"
             lines.append(f"可用余额：{format_money(amount)} {unit}")
+            if data.get("sourceCurrency") == "CNY":
+                lines.append(f"上游原币余额：{format_money(data['sourceBalance'])} CNY")
             user_id, user_name = data.get("userId"), data.get("userName")
             if user_id is not None and str(user_id).strip():
                 lines.append(f"上游账号ID：{str(user_id).strip()[:80]}")

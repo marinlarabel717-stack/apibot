@@ -37,6 +37,49 @@ class SharedApiTests(unittest.TestCase):
         self.assertAlmostEqual(row["price"], 1.68)
         self.assertNotIn(":", row["productId"])
 
+    def test_ini_specs_and_full_catalog_without_inventory_fanout(self):
+        client = self.client()
+        data = [{"name": "All", "children": [
+            {"code": "spec", "name": "Variants", "delivery_way": 0, "factory_price": 2,
+             "config": "[category_factory]\nUS=14\nuk=21\n"},
+            {"code": "manual", "name": "Manual", "delivery_way": 1, "factory_price": 3},
+            {"code": "widget", "name": "Custom", "delivery_way": 0, "factory_price": 4,
+             "widget": '[{"name":"url"}]'},
+            {"code": "draft", "name": "Preselected", "delivery_way": 0, "factory_price": 5, "draft_status": 1},
+        ]}]
+        with patch.object(client, "_request", return_value=data) as request:
+            rows = client.get_products()["data"]
+        request.assert_called_once_with("/shared/commodity/items")
+        self.assertEqual(len(rows), 5)
+        self.assertEqual({row["race"] for row in rows if row["shared_code"] == "spec"}, {"US", "uk"})
+        self.assertEqual({row["shared_code"] for row in rows}, {"spec", "manual", "widget", "draft"})
+        self.assertTrue(all(row["purchaseBlocked"] for row in rows if row["shared_code"] != "spec"))
+
+    def test_visible_inventory_is_bounded_cached_and_failure_is_unknown(self):
+        client = self.client()
+        client._catalog = {str(index): {"productId": str(index), "shared_code": str(index), "race": "", "stockUnknown": True} for index in range(200)}
+        with patch.object(client, "_request", return_value={"count": 42}) as request:
+            rows = client.refresh_inventory(list(client._catalog))
+            self.assertEqual(request.call_count, 30)
+            self.assertTrue(all(row["totalStock"] == 42 and not row["stockUnknown"] for row in rows))
+            client.refresh_inventory(["0", "1"])
+            self.assertEqual(request.call_count, 30)
+        with patch.object(client, "_request", side_effect=SupplierApiError("unavailable")):
+            row = client.refresh_inventory(["100"])[0]
+        self.assertTrue(row["stockUnknown"])
+
+    def test_rmb_cost_is_divided_before_markup(self):
+        settings = replace(SETTINGS, chuhai_cny_per_usdt=7, chuhai_price_rate=0, sell_price_mode="fixed_add", sell_price_value=0.5)
+        client = ChuhaiSupplierClient(settings)
+        self.assertAlmostEqual(14 * client._rate(), 2)
+        self.assertAlmostEqual(bot.resolve_sell_price(settings, {"price": 14 * client._rate()}), 2.5)
+        with patch.object(client, "_request", return_value={"balance": 70}):
+            data = client.query_balance()["data"]
+        self.assertAlmostEqual(data["accountBalance"], 10)
+        self.assertEqual(data["currency"], "USDT")
+        self.assertEqual(data["sourceBalance"], 70)
+        self.assertEqual(data["sourceCurrency"], "CNY")
+
     def test_invalid_currency_rate_blocks_sale(self):
         client = ChuhaiSupplierClient(replace(SETTINGS, chuhai_price_rate=0))
         with self.assertRaises(SupplierApiError):

@@ -120,6 +120,41 @@ class CacheTests(unittest.IsolatedAsyncioTestCase):
 class AccountsOnlyTests(unittest.IsolatedAsyncioTestCase):
     setUp = CacheTests.setUp
     asyncTearDown = CacheTests.asyncTearDown
+    def test_zero_stock_hidden_but_unknown_retained_and_callbacks_stable(self):
+        rows = [dict(self.row, productId='fbzero', totalStock=0),
+                dict(self.row, productId='igstock', categoryName='Instagram', totalStock=73),
+                dict(self.row, productId='igzero', categoryName='Instagram', totalStock=0),
+                dict(self.row, productId='igunknown', categoryName='Instagram', totalStock=0, stockUnknown=True)]
+        groups = bot.group_chuhai_products(rows, 'zh')
+        self.assertEqual([row['productId'] for row in groups[1]['rows']], ['igstock', 'igunknown'])
+        self.assertEqual(groups[0]['stock_rows'][0]['productId'], 'fbzero')  # retained for restock checks
+        keyboard = bot.chuhai_keyboard(bot.build_chuhai_category_keyboard_localized(groups, 0, 'zh'), 'zh')
+        labels = {button.callback_data:button.text for line in keyboard.inline_keyboard for button in line}
+        self.assertNotIn('cat5:0:0', labels)
+        self.assertIn('cat5:1:0', labels)
+        self.assertIn('至少 73', labels['cat5:1:0'])
+        self.assertNotIn('更新中', labels['cat5:1:0'])
+        keyboard = bot.build_chuhai_product_keyboard_localized(self.settings, rows, 0, 0, 'zh')
+        callbacks = [b.callback_data for line in keyboard.inline_keyboard for b in line]
+        self.assertFalse(any('fbzero' in c or 'igzero' in c for c in callbacks))
+        self.assertTrue(any('igunknown' in c for c in callbacks))
+
+    async def test_category_page_updates_partial_inventory_and_hides_empty_group(self):
+        self.row.update(stockUnknown=True, totalStock=0)
+        self.client._catalog['test'].update(stockUnknown=True, totalStock=0)
+        message=SimpleNamespace(edit_reply_markup=AsyncMock())
+        update=SimpleNamespace(callback_query=SimpleNamespace(message=message))
+        tasks=[]
+        self.context.application.create_task=lambda coroutine:tasks.append(asyncio.create_task(coroutine))
+        async def tick(delay):
+            self.client._catalog['test'].update(stockUnknown=False, totalStock=0)
+        keyboard=bot.chuhai_keyboard(bot.build_chuhai_category_keyboard_localized(bot.group_chuhai_products([self.row],'zh'),0,'zh'),'zh')
+        with patch.object(bot.asyncio,'sleep',side_effect=tick):
+            bot.watch_chuhai_stock_page(update,self.context,self.settings,[self.row],[self.row],None,0,'zh',keyboard)
+            await tasks[0]
+        updated=message.edit_reply_markup.await_args.kwargs['reply_markup']
+        self.assertFalse(any(b.callback_data == 'cat5:0:0' for line in updated.inline_keyboard for b in line))
+
     def test_original_lists_render_inventory_not_product_counts(self):
         group = {"index":0,"name":"Legacy category","stock_total":73,"product_count":999}
         for render in (bot.build_daxi_category_keyboard_localized, bot.build_rz_category_keyboard_localized):

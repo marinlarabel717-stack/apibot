@@ -355,3 +355,15 @@ Old affected orders without a saved trade number/secret require the operator to
 check upstream purchase history and obtain the actual trade number before recovery
 or refund. New reconciliation logs expose fixed failure classifications only,
 never upstream secrets or raw credential-bearing responses.
+
+
+List-5 stock visibility: confirmed-zero items are omitted from product pages and
+search, and confirmed-empty platform buttons are hidden. Their catalog/cache
+records remain available for restock checks. Unknown/failed stock is not zero.
+Partial category aggregates show a labeled lower bound (at least N), while entirely
+unknown categories say pending query, not an indefinitely running update. Opening
+the category page schedules at most six inventory checks per allowed platform
+(thirty total), including hidden zero-stock entries for restock detection, ordered
+by least-recently checked. It never waits for these calls or scans the full catalog.
+The current category keyboard updates as results arrive; product/category callback
+indices do not shift just because a platform is hidden. Lists 1-4 are unchanged.

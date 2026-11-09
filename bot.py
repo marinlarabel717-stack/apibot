@@ -6065,6 +6065,10 @@ async def fetch_chuhai_products(context: ContextTypes.DEFAULT_TYPE, *, refresh: 
     return rows
 
 
+def chuhai_in_stock(row):
+    return row.get("stockUnknown", True) or safe_int(row.get("totalStock")) > 0
+
+
 def group_chuhai_products(rows: list[dict[str, Any]], lang: str) -> list[dict[str, Any]]:
     groups = []
     for platform, title in ChuhaiSupplierClient.PLATFORM_NAMES.items():
@@ -6072,7 +6076,7 @@ def group_chuhai_products(rows: list[dict[str, Any]], lang: str) -> list[dict[st
         if not products:
             continue
         products.sort(key=lambda row: (str(row.get("categoryName", "")), str(row.get("productName", "")), str(row["productId"])))
-        groups.append({"key": platform, "name": title, "index": len(groups), "rows": products,
+        groups.append({"key": platform, "name": title, "index": len(groups), "rows": [row for row in products if chuhai_in_stock(row)], "stock_rows": products,
                        "product_count": len(products), "stock_unknown": any(row.get("stockUnknown", True) for row in products), "stock_total": sum(safe_int(row.get("totalStock")) for row in products if not row.get("stockUnknown", True))})
     return groups
 
@@ -6143,6 +6147,8 @@ def build_chuhai_category_keyboard_localized(
     page: int,
     lang: str,
 ) -> InlineKeyboardMarkup:
+    # Keep the original group indices in callbacks even when an empty group disappears.
+    groups = [group for group in groups if group.get("stock_unknown") or safe_int(group.get("stock_total")) > 0]
     total_pages = max(1, (len(groups) + DAXI_CATEGORYS_PER_PAGE - 1) // DAXI_CATEGORYS_PER_PAGE)
     page = max(0, min(page, total_pages - 1))
     start = page * DAXI_CATEGORYS_PER_PAGE
@@ -6151,7 +6157,9 @@ def build_chuhai_category_keyboard_localized(
     for group in page_groups:
         group_index = safe_int(group.get("index"), 0)
         category_name = shorten(str(group.get("name") or "未分类"), 26)
-        stock_total = "更新中" if group.get("stock_unknown") else max(0, safe_int(group.get("stock_total"), 0))
+        known_stock = max(0, safe_int(group.get("stock_total"), 0))
+        stock_total = ((f"至少 {known_stock}" if known_stock else "待查询")
+                       if group.get("stock_unknown") else known_stock)
         category_icon = str(group.get("icon") or "📦")
         buttons.append(
             [
@@ -6179,6 +6187,7 @@ def build_chuhai_product_keyboard_localized(
     page: int,
     lang: str,
 ) -> InlineKeyboardMarkup:
+    rows = [row for row in rows if chuhai_in_stock(row)]
     total_pages = max(1, (len(rows) + PRODUCTS_PER_PAGE - 1) // PRODUCTS_PER_PAGE)
     page = max(0, min(page, total_pages - 1))
     start = page * PRODUCTS_PER_PAGE
@@ -6232,7 +6241,10 @@ def watch_chuhai_stock_page(update, context, settings, rows, visible, category_i
                 cached = supplier.cached_product(row["productId"])
                 if cached and not cached.get("stockUnknown", True):
                     row.update(totalStock=cached["totalStock"], stockUnknown=False)
-            current = chuhai_keyboard(build_chuhai_product_keyboard_localized(settings, rows, category_index, page, lang), lang)
+            if category_index is None:
+                current = chuhai_keyboard(build_chuhai_category_keyboard_localized(group_chuhai_products(rows, lang), page, lang), lang)
+            else:
+                current = chuhai_keyboard(build_chuhai_product_keyboard_localized(settings, rows, category_index, page, lang), lang)
             if current.to_dict() != previous:
                 try:
                     await message.edit_reply_markup(reply_markup=current)
@@ -6270,8 +6282,18 @@ async def show_chuhai_catalog(
         await reply_inline(update, ("商品缓存正在后台加载，请稍后点击刷新。" if lang == "zh" else "Catalog cache is loading in the background. Refresh shortly."), InlineKeyboardMarkup([[InlineKeyboardButton("刷新 / Refresh", callback_data="cats5:0")]]))
         return
     if category_index is None or not 0 <= category_index < len(groups):
+        # A bounded, fair sample per platform; do not fan out over the full catalog.
+        checked = context.application.bot_data.get("chuhai_stock_checked", {})
+        visible = []
+        for group in groups:
+            candidates = sorted(group["stock_rows"], key=lambda row: checked.get(str(row["productId"]), float("-inf")))
+            visible.extend(candidates[:6])
+        await refresh_chuhai_visible_inventory(context, visible)
+        groups = group_chuhai_products(rows, lang)
         keyboard = build_chuhai_category_keyboard_localized(groups, page, lang)
-        await reply_inline(update, ui_text("account_list_5_intro", lang), chuhai_keyboard(keyboard, lang))
+        converted = chuhai_keyboard(keyboard, lang)
+        await reply_inline(update, ui_text("account_list_5_intro", lang), converted)
+        watch_chuhai_stock_page(update, context, settings, rows, visible, None, page, lang, converted)
         return
     group = groups[category_index]
     last_page = max(0, (len(group["rows"]) - 1) // PRODUCTS_PER_PAGE)
@@ -10460,7 +10482,7 @@ async def search_text_rich(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     daxi_all_rows = catalogs.get(DAXI_SOURCE, [])
     rz_all_rows = catalogs.get(RZ_SOURCE, [])
     chuhai_all_rows = [row for row in catalogs.get(CHUHAI_SOURCE, []) if ChuhaiSupplierClient.account_product(row.get("categoryName"), row.get("productName"))]
-    chuhai_rows = search_rz_products_locally(chuhai_all_rows, keyword)
+    chuhai_rows = search_rz_products_locally([row for row in chuhai_all_rows if chuhai_in_stock(row)], keyword)
     if chuhai_rows:
         await refresh_chuhai_visible_inventory(context, chuhai_rows[:SEARCH_RESULTS_LIMIT])
     chuhai_index_map = {str(row["productId"]): index for index, group in enumerate(group_chuhai_products(chuhai_all_rows, lang)) for row in group["rows"]}
